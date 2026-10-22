@@ -104,3 +104,17 @@
   обработка quota/storage ошибок, доступность и CSP требуют дальнейшей работы.
 - target API33 сохранен для совместимости с исходниками; для магазина требуется
   отдельное обновление target и тестирование на актуальном Android.
+
+### Первый запуск GitHub Actions
+
+- Ветка отправлена на origin, commit `bd58713`.
+- Run https://github.com/zigorminsk-debug/jiraHelp/actions/runs/39751162504:
+  Node checks успешны, сбой на `android-actions/setup-android@v3` до сборки.
+  Скачать подробные логи в sandbox не удалось: results-receiver.actions.githubusercontent.com
+  недоступен по сетевым ограничениям. Точную причину этого шага не утверждаем.
+- Для повторной проверки закреплен runner `ubuntu-24.04`, используется его штатный
+  Android SDK и sdkmanager вместо стороннего setup-android. Actions обновлены до
+  опубликованных версий и закреплены полными SHA (checkout7.0.1, setup-node7.1.0,
+  setup-java6.1.0, upload-artifact7.0.2); устраняется предупреждение Node20.
+- Дополнительно WebView блокирует сетевые загрузки (в том числе remote iframes):
+  все ресурсы локальные, реализация REST в будущем должна быть нативной.

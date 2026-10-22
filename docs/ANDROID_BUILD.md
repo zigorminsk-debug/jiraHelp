@@ -55,5 +55,6 @@ Artifacts → `CSL-HelpDesk-debug-<run>-<attempt>`. Скачать ZIP, извл
 в GitHub Secrets, не коммитить ключ в репозиторий. Release-публикация не настроена.
 AGP lint/Gradle unit tests не запускаются: в проекте нет Gradle. Есть Node regression
 checks, компиляция Java/ресурсов и проверка APK; это не заменяет Android UI-тесты.
-Внешние Actions закреплены major-тегами, не immutable SHA — остаётся задача усиления
-supply-chain защиты. GitHub-hosted runner нужен с доступом к загрузкам Google SDK.
+Внешние Actions закреплены immutable SHA проверенных release-тегов; при обновлении
+проверять исходники и менять SHA осознанно. Runner закреплен `ubuntu-24.04`, SDK manager
+берется из предустановленного Android SDK runner. GitHub-hosted runner нужен с доступом к загрузкам Google SDK.
