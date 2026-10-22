@@ -856,6 +856,16 @@ function doLogin() {
 function doLogout() {
     state.isLoggedIn = false;
     state.password = '';
+    state.currentTicketId = null;
+    state.previousPage = 'dashboard';
+    ['dt-title','dt-id','dt-desc','dt-info','dt-status','dt-share','dt-comments'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.textContent = '';
+    });
+    ['set-password','set-login','set-server','cm-input','tk-subject','tk-desc','tk-phone'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.value = '';
+    });
+    hideSettings();
+    closeProjectsModal();
     state.server = '';
     state.username = '';
     localStorage.removeItem('csl_hd_tickets');
@@ -900,6 +910,7 @@ function enterApp() {
 
     loadCashSound();
     renderAll();
+    showPage('dashboard');
 }
 
 // ===== SETTINGS =====

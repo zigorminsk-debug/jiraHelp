@@ -95,3 +95,11 @@ test('different local account does not inherit previous account tickets',()=>{
   element('login-server').value='jira.example.com';element('login-username').value='new-user';
   run('doLogin()');assert.equal(run('state.tickets.length'),0);assert.equal(run('state.notifications.length'),0);
 });
+test('logout clears hidden detail view, credentials and comment draft',()=>{
+  const {run,element}=app();
+  element('dt-desc').textContent='private description';element('set-password').value='secret';
+  element('cm-input').value='private draft';
+  run("state.currentTicketId='HD-1';doLogout()");
+  assert.equal(element('dt-desc').textContent,'');assert.equal(element('set-password').value,'');
+  assert.equal(element('cm-input').value,'');assert.equal(run('state.currentTicketId'),null);
+});

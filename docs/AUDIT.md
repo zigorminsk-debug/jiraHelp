@@ -131,3 +131,19 @@
 - Cache prefix service worker получил разделитель scope, чтобы кэш родительского
   deployment не совпадал с вложенным scope. Исторический HTML только whitespace-
   нормализован, функционально не изменялся.
+
+### Подтвержденная сборка и внешний блокер артефактов
+
+Run https://github.com/zigorminsk-debug/jiraHelp/actions/runs/39751498573
+(commit `bce87d4`): source checks, SDK, **компиляция/сборка/подпись/verify APK успешны**.
+Завершающий upload-artifact упал с точной ошибкой:
+`Failed to CreateArtifact: Artifact storage quota has been hit. Unable to upload any new artifacts.`
+Это квота аккаунта GitHub, не ошибка исходников/сборки. Не скрываем ошибку через
+continue-on-error: без скачиваемого APK workflow не должен притворяться успешным.
+Нужны действия владельца: освободить Actions storage/увеличить лимит, дождаться
+пересчета квоты и повторить запуск. Существующие артефакты не удалялись.
+
+После этого добавлена очистка скрытой detail view, drafts и settings/password при
+logout и возврат на dashboard при входе (не показывать данные предыдущей сессии).
+Локально 11/11 Node tests успешны, bash syntax, XML и YAML parse успешны.
+Установка на Android-устройство не проверялась.
