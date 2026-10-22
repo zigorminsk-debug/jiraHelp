@@ -1,0 +1,2023 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kerio SSL & Let's Encrypt Manager — Выпуск сертификатов для Kerio Mail</title>
+<link rel="icon" href="/favicon.ico" type="image/x-icon">
+<style>
+  :root {
+    --bg-app: #0b1120;
+    --bg-surface: #11192c;
+    --bg-card: #162036;
+    --bg-elevated: #1d2a47;
+    --bg-input: #0e1628;
+    --bg-code: #090e1a;
+    --border: #263554;
+    --border-hover: #384e7a;
+    --text-main: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --accent: #10b981;
+    --accent-hover: #059669;
+    --accent-soft: rgba(16, 185, 129, 0.14);
+    --kerio-orange: #f59e0b;
+    --kerio-soft: rgba(245, 158, 11, 0.14);
+    --blue: #3b82f6;
+    --blue-soft: rgba(59, 130, 246, 0.14);
+    --danger: #ef4444;
+    --danger-soft: rgba(239, 68, 68, 0.14);
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.28);
+    --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.42);
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+
+  html[data-theme="light"] {
+    --bg-app: #f1f5f9;
+    --bg-surface: #ffffff;
+    --bg-card: #ffffff;
+    --bg-elevated: #f8fafc;
+    --bg-input: #f8fafc;
+    --bg-code: #0f172a;
+    --border: #dbe3ef;
+    --border-hover: #cbd5e1;
+    --text-main: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #64748b;
+    --accent: #059669;
+    --accent-hover: #047857;
+    --accent-soft: rgba(5, 150, 105, 0.11);
+    --kerio-orange: #d97706;
+    --kerio-soft: rgba(217, 119, 6, 0.11);
+    --blue: #2563eb;
+    --blue-soft: rgba(37, 99, 235, 0.1);
+    --danger: #dc2626;
+    --danger-soft: rgba(220, 38, 38, 0.1);
+    --shadow-sm: 0 1px 4px rgba(15, 23, 42, 0.06);
+    --shadow-md: 0 10px 26px rgba(15, 23, 42, 0.09);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg-app);
+    color: var(--text-main);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Header Bar */
+  .topbar {
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    box-shadow: var(--shadow-sm);
+    flex-wrap: wrap;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+  }
+  .brand-logo {
+    width: 40px;
+    height: 40px;
+    border-radius: 11px;
+    background: linear-gradient(135deg, #10b981, #0d9488);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+    flex-shrink: 0;
+  }
+  .brand-title {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .brand-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 99px;
+    background: var(--kerio-soft);
+    color: var(--kerio-orange);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+  }
+  .brand-sub {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+  }
+  .status-pill.ok {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: rgba(16, 185, 129, 0.35);
+  }
+  .status-pill.warn {
+    background: var(--kerio-soft);
+    color: var(--kerio-orange);
+    border-color: rgba(245, 158, 11, 0.38);
+    cursor: pointer;
+  }
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  /* Navigation Tabs */
+  .nav-tabs {
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+  }
+  .nav-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 12px 16px;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2.5px solid transparent;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+  }
+  .nav-tab:hover { color: var(--text-main); }
+  .nav-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .tab-count {
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 99px;
+    background: var(--bg-elevated);
+    color: var(--text-main);
+  }
+
+  /* Layout Container */
+  .container {
+    width: 100%;
+    max-width: 1380px;
+    margin: 0 auto;
+    padding: 20px 24px 40px;
+    flex: 1;
+  }
+
+  .tab-page { display: none; }
+  .tab-page.active { display: block; }
+
+  .workspace-grid {
+    display: grid;
+    grid-template-columns: minmax(430px, 1.05fr) minmax(420px, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 980px) {
+    .workspace-grid { grid-template-columns: 1fr; }
+    .topbar, .nav-tabs, .container { padding-left: 14px; padding-right: 14px; }
+  }
+
+  /* Cards */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 18px;
+  }
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 15px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .step-num {
+    width: 23px;
+    height: 23px;
+    border-radius: 7px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .card-subtitle {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    margin-top: 3px;
+  }
+
+  /* Form Elements */
+  .field { margin-bottom: 15px; }
+  .field:last-child { margin-bottom: 0; }
+  .field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 600px) {
+    .field-row { grid-template-columns: 1fr; }
+  }
+  label.field-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 6px;
+  }
+  .label-hint {
+    font-weight: 500;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+  }
+  input[type="text"],
+  input[type="password"],
+  input[type="email"],
+  input[type="number"],
+  select,
+  textarea {
+    width: 100%;
+    background: var(--bg-input);
+    color: var(--text-main);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 9.5px 12px;
+    font-size: 13.5px;
+    font-family: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .input-with-btn {
+    display: flex;
+    gap: 8px;
+  }
+  .input-with-btn input { flex: 1; }
+
+  .hint-text {
+    font-size: 11.8px;
+    color: var(--text-secondary);
+    margin-top: 6px;
+    line-height: 1.45;
+  }
+
+  /* Quick SAN / IP Chips */
+  .chips-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 7px;
+  }
+  .chip {
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3.5px 9px;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.14s;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .chip.active-san {
+    background: var(--blue-soft);
+    border-color: rgba(59, 130, 246, 0.4);
+    color: var(--blue);
+  }
+
+  /* Mode Radio Cards */
+  .mode-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 9px;
+  }
+  @media (max-width: 640px) {
+    .mode-grid { grid-template-columns: 1fr; }
+  }
+  .mode-card {
+    background: var(--bg-input);
+    border: 1.5px solid var(--border);
+    border-radius: 9px;
+    padding: 11px 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+  }
+  .mode-card:hover { border-color: var(--border-hover); }
+  .mode-card.selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .mode-card-title {
+    font-size: 12.8px;
+    font-weight: 700;
+    margin-bottom: 3px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .mode-card-desc {
+    font-size: 11.3px;
+    color: var(--text-secondary);
+    line-height: 1.35;
+  }
+
+  /* Checkboxes */
+  .check-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+    margin-top: 9px;
+  }
+  .check-box input[type="checkbox"] {
+    margin-top: 2px;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+  .check-box-title {
+    font-size: 12.8px;
+    font-weight: 600;
+    color: var(--text-main);
+  }
+  .check-box-sub {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 9.5px 15px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+    color: #ffffff;
+    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3);
+  }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.07); transform: translateY(-1px); }
+  .btn-kerio {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(245, 158, 11, 0.28);
+  }
+  .btn-kerio:hover:not(:disabled) { filter: brightness(1.06); }
+  .btn-blue {
+    background: var(--blue);
+    color: #fff;
+  }
+  .btn-blue:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn-outline {
+    background: var(--bg-elevated);
+    color: var(--text-main);
+    border-color: var(--border);
+  }
+  .btn-outline:hover:not(:disabled) { border-color: var(--border-hover); background: var(--bg-surface); }
+  .btn-danger {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border-color: rgba(239, 68, 68, 0.3);
+  }
+  .btn-sm { padding: 6px 11px; font-size: 12px; }
+  .btn-lg { padding: 12px 20px; font-size: 14px; font-weight: 700; }
+
+  .actions-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+  }
+  .actions-row .btn-primary { flex: 1; min-width: 240px; }
+
+  /* Alerts & Preflight */
+  .alert {
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 12.8px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+  }
+  .alert-ok { background: var(--accent-soft); border-color: rgba(16, 185, 129, 0.35); color: var(--accent); }
+  .alert-warn { background: var(--kerio-soft); border-color: rgba(245, 158, 11, 0.35); color: var(--kerio-orange); }
+  .alert-err { background: var(--danger-soft); border-color: rgba(239, 68, 68, 0.35); color: var(--danger); }
+  .alert-info { background: var(--blue-soft); border-color: rgba(59, 130, 246, 0.35); color: var(--blue); }
+
+  /* Certificate Result Panel */
+  .cert-banner {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.16), rgba(59, 130, 246, 0.1));
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    border-radius: 10px;
+    padding: 15px 16px;
+    margin-bottom: 16px;
+  }
+  .cert-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  @media (max-width: 600px) { .cert-meta-grid { grid-template-columns: 1fr; } }
+  .meta-item {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+  }
+  .meta-k {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    font-weight: 700;
+  }
+  .meta-v {
+    font-size: 12.8px;
+    font-weight: 600;
+    color: var(--text-main);
+    word-break: break-all;
+    margin-top: 2px;
+  }
+
+  .download-primary-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 9px;
+    margin-bottom: 9px;
+  }
+  @media (max-width: 600px) { .download-primary-grid { grid-template-columns: 1fr; } }
+
+  /* PEM Viewer & Tabs */
+  .subtabs {
+    display: flex;
+    gap: 5px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+  .subtab {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 7px 11px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+  .subtab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .pem-box {
+    background: var(--bg-code);
+    color: #e2e8f0;
+    font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+    font-size: 11.8px;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    max-height: 230px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  /* Live Console Log */
+  .console-box {
+    background: #070b14;
+    color: #cbd5e1;
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: 12px;
+    padding: 13px;
+    border-radius: 9px;
+    border: 1px solid #1e293b;
+    height: 235px;
+    overflow-y: auto;
+    line-height: 1.55;
+  }
+  .log-line { margin-bottom: 3px; word-break: break-word; }
+  .log-ts { color: #64748b; margin-right: 7px; }
+  .log-info { color: #93c5fd; }
+  .log-success { color: #34d399; font-weight: 600; }
+  .log-warning { color: #fbbf24; }
+  .log-error { color: #f87171; font-weight: 600; }
+
+  /* Tables */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .data-table th {
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+  }
+  .data-table td {
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .data-table tr:last-child td { border-bottom: none; }
+
+  .spinner {
+    width: 15px;
+    height: 15px;
+    border: 2.2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .toast {
+    position: fixed;
+    right: 22px;
+    bottom: 22px;
+    background: var(--bg-surface);
+    color: var(--text-main);
+    border: 1px solid var(--accent);
+    box-shadow: var(--shadow-md);
+    padding: 12px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    z-index: 200;
+    display: none;
+    max-width: 440px;
+  }
+  .steps-list {
+    padding-left: 18px;
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+  .steps-list li { margin-bottom: 7px; }
+  .steps-list strong { color: var(--text-main); }
+  code.inline {
+    background: var(--bg-elevated);
+    padding: 2px 6px;
+    border-radius: 5px;
+    font-family: Consolas, monospace;
+    font-size: 12px;
+    color: var(--accent);
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-logo" aria-hidden="true">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        <rect x="9" y="11" width="6" height="5" rx="1"/>
+        <path d="M10 11V9a2 2 0 1 1 4 0v2"/>
+      </svg>
+    </div>
+    <div>
+      <div class="brand-title">
+        Kerio SSL &amp; Let's Encrypt Manager
+        <span class="brand-badge">Windows GUI + Kerio Connect</span>
+      </div>
+      <div class="brand-sub">Генерация приватного ключа (.key) и выпуск SSL-сертификатов (.crt / .pfx) по IP и домену для Kerio MailServer</div>
+    </div>
+  </div>
+
+  <div class="topbar-right">
+    <!-- Shown when Windows .exe is available to download directly from UI -->
+    <a id="downloadWinExeBtn" href="/api/download-windows-exe" class="btn btn-blue btn-sm" style="display:none;" title="Скачать автономный исполняемый файл для Windows x64 (без установки Python/OpenSSL)">
+      ⬇ Скачать программу для Windows (.exe)
+    </a>
+    <a id="downloadWinZipBtn" href="/api/download-windows-zip" class="btn btn-outline btn-sm" style="display:none;" title="Скачать ZIP-архив с KerioCertManager.exe и инструкцией">
+      📦 ZIP для Windows
+    </a>
+
+    <div id="adminBadge" class="status-pill" title="Статус привилегий системы">
+      <span class="status-dot"></span>
+      <span id="adminBadgeText">Проверка системы...</span>
+    </div>
+
+    <button type="button" class="btn btn-outline btn-sm" id="themeToggleBtn" title="Переключить тёмную / светлую тему">
+      ☀ Тема
+    </button>
+  </div>
+</header>
+
+<!-- Navigation Tabs -->
+<nav class="nav-tabs">
+  <button type="button" class="nav-tab active" data-tab="issue">
+    🔐 Выпуск сертификата (IP + Домен)
+  </button>
+  <button type="button" class="nav-tab" data-tab="kerio">
+    📬 Установка в Kerio Connect
+  </button>
+  <button type="button" class="nav-tab" data-tab="vault">
+    📂 Выпущенные сертификаты и Автопродление
+    <span class="tab-count" id="certCountBadge">0</span>
+  </button>
+</nav>
+
+<!-- Main Container -->
+<main class="container">
+
+  <!-- TAB 1: ISSUE CERTIFICATE -->
+  <section id="tab-issue" class="tab-page active">
+    <div class="workspace-grid">
+
+      <!-- LEFT COLUMN: INPUT FORM -->
+      <div>
+        <!-- Step 1: Domain + IP -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">
+                <span class="step-num">1</span>
+                Доменное имя и IP-адрес почтового сервера
+              </div>
+              <div class="card-subtitle">Укажите почтовый домен и IP-адрес сервера Kerio Connect</div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="domainInput">
+              <span>Доменное имя сервера (CN / DNS) *</span>
+              <span class="label-hint" id="punycodePreview">Поддержка .by, .бел, .com, .ru</span>
+            </label>
+            <input type="text" id="domainInput" placeholder="mail.company.by" autocomplete="off" spellcheck="false">
+            <div class="chips-bar" id="sanQuickChips">
+              <span style="font-size:11.5px;color:var(--text-muted);align-self:center;">Быстро добавить поддомены Kerio:</span>
+              <button type="button" class="chip" data-prefix="webmail">+ webmail</button>
+              <button type="button" class="chip" data-prefix="autodiscover">+ autodiscover</button>
+              <button type="button" class="chip" data-prefix="smtp">+ smtp</button>
+              <button type="button" class="chip" data-prefix="imap">+ imap</button>
+              <button type="button" class="chip" data-prefix="pop3">+ pop3</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="extraDomainsInput">
+              <span>Дополнительные домены (SAN — через запятую, по желанию)</span>
+            </label>
+            <input type="text" id="extraDomainsInput" placeholder="webmail.company.by, autodiscover.company.by" autocomplete="off" spellcheck="false">
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="ipInput">
+                <span>IP-адрес сервера *</span>
+                <span class="label-hint" id="ipClassBadge">IPv4 / IPv6</span>
+              </label>
+              <div class="input-with-btn">
+                <input type="text" id="ipInput" placeholder="93.125.10.25" autocomplete="off" spellcheck="false">
+                <button type="button" class="btn btn-outline btn-sm" id="detectWanBtn" title="Определить внешний белый IP сервера">
+                  🌐 Внешний IP
+                </button>
+              </div>
+              <div class="chips-bar" id="localIpChips"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="emailInput">
+                <span>Email администратора</span>
+                <span class="label-hint">Уведомления LE</span>
+              </label>
+              <input type="email" id="emailInput" placeholder="postmaster@company.by">
+            </div>
+          </div>
+
+          <label class="check-box" for="includeIpSanCheck">
+            <input type="checkbox" id="includeIpSanCheck">
+            <div>
+              <div class="check-box-title">Включить публичный IP-адрес в SAN самого сертификата Let's Encrypt (профиль <code>shortlived</code>)</div>
+              <div class="check-box-sub">
+                По умолчанию выпускается стандартный <strong>90-дневный</strong> сертификат Let's Encrypt на домен с проверкой привязки к указанному IP. При включении этой опции Let's Encrypt добавит и домен, и сам публичный IP в поле SAN сертификата (срок 160 ч + автопродление каждые 3 дня). В режиме «Самоподписанный для Kerio» IP и домен включаются в SAN всегда!
+              </div>
+            </div>
+          </label>
+        </div>
+
+        <!-- Step 2: Issuance Mode & ACME Validation -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">
+                <span class="step-num">2</span>
+                Режим выпуска и способ подтверждения Let's Encrypt
+              </div>
+              <div class="card-subtitle">Выберите боевой контур Let's Encrypt, тестовый Staging или мгновенный локальный выпуск</div>
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="mode-grid" id="modeCards">
+              <div class="mode-card selected" data-mode="letsencrypt">
+                <div class="mode-card-title">🟢 Let's Encrypt</div>
+                <div class="mode-card-desc">Боевой доверенный SSL-сертификат для почтовых клиентов и браузеров</div>
+              </div>
+              <div class="mode-card" data-mode="staging">
+                <div class="mode-card-title">🧪 LE Staging</div>
+                <div class="mode-card-desc">Безопасная проверка прохождения DNS/порта 80 без лимитов Let's Encrypt</div>
+              </div>
+              <div class="mode-card" data-mode="selfsigned">
+                <div class="mode-card-title">⚡ Локальный (Kerio)</div>
+                <div class="mode-card-desc">Мгновенная генерация .key + .crt (DNS + IP SAN) без интернета / для теста</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ACME Challenge Settings (for Let's Encrypt Prod & Staging) -->
+          <div id="acmeSettingsBlock">
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label" for="challengeSelect">Метод подтверждения (ACME Challenge)</label>
+                <select id="challengeSelect">
+                  <option value="http-01">HTTP-01 — Встроенный сервер (TCP порт 80)</option>
+                  <option value="tls-alpn-01">TLS-ALPN-01 — Встроенный сервер (TCP порт 443)</option>
+                  <option value="http-01-webroot">HTTP-01 Webroot — Папка запущенного IIS / веб-сервера</option>
+                  <option value="dns-01">DNS-01 — TXT-запись _acme-challenge (без портов 80/443)</option>
+                </select>
+              </div>
+              <div class="field" id="portFieldWrap">
+                <label class="field-label" for="listenPortInput">Локальный порт приёма проверки</label>
+                <input type="number" id="listenPortInput" value="80" min="1" max="65535">
+              </div>
+            </div>
+
+            <div class="field" id="webrootFieldWrap" style="display:none;">
+              <label class="field-label" for="webrootInput">Путь к корневой папке веб-сайта (Webroot)</label>
+              <div class="input-with-btn">
+                <input type="text" id="webrootInput" placeholder="C:\inetpub\wwwroot">
+                <button type="button" class="btn btn-outline btn-sm" onclick="browseWindowsFolder('webrootInput', 'Выберите корневую папку веб-сервера')">Обзор...</button>
+              </div>
+            </div>
+
+            <label class="check-box" id="stopKerioTempWrap" for="stopKerioTempCheck">
+              <input type="checkbox" id="stopKerioTempCheck">
+              <div>
+                <div class="check-box-title">Временно остановить службу <code>KerioMailServer</code> на время проверки порта (5–15 сек)</div>
+                <div class="check-box-sub">Включите, если Kerio Connect сам занимает порт 80/443 на сервере Windows. Служба автоматически запустится обратно сразу после ответа Let's Encrypt!</div>
+              </div>
+            </label>
+          </div>
+
+          <!-- Self-Signed Validity Setting -->
+          <div id="selfSignedSettingsBlock" style="display:none;margin-top:12px;">
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label" for="validityDaysInput">Срок действия сертификата (дней)</label>
+                <input type="number" id="validityDaysInput" value="365" min="1" max="3650">
+              </div>
+              <div class="field" style="display:flex;align-items:flex-end;">
+                <div class="hint-text">В сертификат будут сразу включены и доменное имя, и введённый IP-адрес (любой внешний или локальный <code>192.168.x.x</code>).</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3: Key Parameters & Automatic Kerio Installation -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">
+                <span class="step-num">3</span>
+                Параметры ключа (.key) и установка в Kerio Connect
+              </div>
+              <div class="card-subtitle">Формат ключа адаптирован специально под требования Kerio MailServer</div>
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="keyTypeSelect">Алгоритм и формат приватного ключа</label>
+              <select id="keyTypeSelect">
+                <option value="rsa2048" selected>RSA 2048 бит — Traditional PKCS#1 (Рекомендуется для Kerio)</option>
+                <option value="rsa4096">RSA 4096 бит — Traditional PKCS#1 (Повышенная стойкость)</option>
+                <option value="ecdsa256">ECDSA P-256 — Эллиптическая кривая</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="field-label" for="pfxPasswordInput">
+                <span>Пароль для PFX-архива</span>
+                <span class="label-hint">.key для Kerio без пароля</span>
+              </label>
+              <input type="password" id="pfxPasswordInput" placeholder="Необязательно (можно пустой)">
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="outputDirInput">Папка сохранения сгенерированных ключей и сертификатов</label>
+            <div class="input-with-btn">
+              <input type="text" id="outputDirInput" placeholder="./certs">
+              <button type="button" class="btn btn-outline btn-sm" onclick="browseWindowsFolder('outputDirInput', 'Папка сохранения сертификатов')">Обзор...</button>
+            </div>
+          </div>
+
+          <label class="check-box" for="autoInstallKerioCheck">
+            <input type="checkbox" id="autoInstallKerioCheck">
+            <div>
+              <div class="check-box-title">Сразу установить ключ и сертификат в Kerio Connect после выпуска</div>
+              <div class="check-box-sub">Создаст резервную копию старых сертификатов в <code>sslcert\backup_*</code>, обновит <code>server.crt</code> и <code>server.key</code> (и активный профиль из <code>mailserver.cfg</code>) и перезапустит <code>KerioMailServer</code>.</div>
+            </div>
+          </label>
+
+          <div id="inlineKerioPathWrap" style="display:none;margin-top:10px;">
+            <label class="field-label" for="inlineKerioPathInput">Путь к папке <code>sslcert</code> Kerio Connect</label>
+            <div class="input-with-btn">
+              <input type="text" id="inlineKerioPathInput" value="C:\Program Files\Kerio\MailServer\sslcert">
+              <button type="button" class="btn btn-outline btn-sm" onclick="browseWindowsFolder('inlineKerioPathInput', 'Папка sslcert в Kerio Connect')">Обзор...</button>
+            </div>
+          </div>
+
+          <div class="actions-row">
+            <button type="button" class="btn btn-outline btn-lg" id="preflightBtn">
+              🔍 Проверить DNS, IP и порт
+            </button>
+            <button type="button" class="btn btn-primary btn-lg" id="issueBtn">
+              🔐 Сгенерировать ключ и выпустить сертификат
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN: DIAGNOSTICS + ISSUED CERT + LOGS -->
+      <div>
+
+        <!-- Interactive DNS-01 Pending Wizard -->
+        <div class="card" id="dns01WizardCard" style="display:none;border-color:var(--kerio-orange);">
+          <div class="card-header">
+            <div>
+              <div class="card-title" style="color:var(--kerio-orange);">📝 Подтверждение домена через DNS TXT-запись (DNS-01)</div>
+              <div class="card-subtitle">Добавьте эти TXT-записи в панели управления вашим доменом, проверьте их обновление и нажмите �am Files\Kerio\MailServer\sslcert">
+              <button type="button" class="btn btn-outline btn-sm" onclick="browseWindowsFolder('inlineKerioPathInput', 'Папка sslcert в Kerio Connect')">Обзор...</button>
+            </div>
+          </div>
+
+          <div class="actions-row">
+            <button type="button" class="btn btn-outline btn-lg" id="preflightBtn">
+              🔍 Проверить DNS, IP и порт
+            </button>
+            <button type="button" class="btn btn-primary btn-lg" id="issueBtn">
+              🔐 Сгенерировать ключ и выпустить сертификат
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN: DIAGNOSTICS + ISSUED CERT + LOGS -->
+      <div>
+
+        <!-- Interactive DNS-01 Pending Wizard -->
+        <div class="card" id="dns01WizardCard" style="display:none;border-color:var(--kerio-orange);">
+          <div class="card-header">
+            <div>
+              <div class="card-title" style="color:var(--kerio-orange);">📝 Подтверждение домена через DNS TXT-запись (DNS-01)</div>
+              <div class="card-subtitle">Добавьте эти TXT-записи в панели управления вашим доменом, проверьте их обновление и нажмите кнопку выпуска</div>
+            </div>
+          </div>
+          <div id="dns01RecordsContainer"></div>
+          <div class="actions-row">
+            <button type="button" class="btn btn-primary" id="completeDns01Btn">
+              ✅ Подтвердить TXT-записи и выпустить сертификат
+            </button>
+          </div>
+        </div>
+
+        <!-- Pre-flight Diagnostics Result Card -->
+        <div class="card" id="preflightCard" style="display:none;">
+          <div class="card-header">
+            <div>
+              <div class="card-title">🩺 Результат предпроверки сети, DNS и портов</div>
+              <div class="card-subtitle">Проверка готовности сервера перед обращением к Let's Encrypt</div>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('preflightCard').style.display='none'">Скрыть</button>
+          </div>
+          <div id="preflightBody"></div>
+        </div>
+
+        <!-- ISSUED CERTIFICATE RESULT CARD -->
+        <div class="card" id="resultCard" style="display:none;">
+          <div class="cert-banner">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+              <div>
+                <div style="font-size:15.5px;font-weight:800;color:var(--accent);" id="resBannerTitle">
+                  ✅ Ключ и SSL-сертификат для Kerio Connect готовы!
+                </div>
+                <div style="font-size:12.5px;color:var(--text-secondary);margin-top:2px;" id="resBannerSub"></div>
+              </div>
+              <button type="button" class="btn btn-kerio btn-sm" id="quickInstallKerioBtn">
+                📬 Установить в Kerio Connect
+              </button>
+            </div>
+          </div>
+
+          <div class="cert-meta-grid" id="resMetaGrid"></div>
+
+          <!-- Primary Downloads clearly labeled for Kerio Connect -->
+          <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:7px;text-transform:uppercase;">
+            Готовые файлы для импорта в Kerio Connect MailServer:
+          </div>
+          <div class="download-primary-grid">
+            <a id="dlServerCrt" href="#" class="btn btn-primary">
+              ⬇ Скачать сертификат (.crt Fullchain)
+            </a>
+            <a id="dlServerKey" href="#" class="btn btn-kerio">
+              🔑 Скачать приватный ключ (.key RSA)
+            </a>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+            <a id="dlBundleZip" href="#" class="btn btn-blue btn-sm">📦 Скачать весь комплект (.zip + install-kerio.bat)</a>
+            <a id="dlChainCrt" href="#" class="btn btn-outline btn-sm">Цепочка CA (chain.crt)</a>
+            <a id="dlCertOnly" href="#" class="btn btn-outline btn-sm">Только сертификат (cert-only.crt)</a>
+            <a id="dlPfx" href="#" class="btn btn-outline btn-sm">Архив PKCS#12 (.pfx)</a>
+            <a id="dlCsr" href="#" class="btn btn-outline btn-sm">Запрос CSR (.csr)</a>
+            <button type="button" class="btn btn-outline btn-sm" id="openCertFolderBtn">📂 Открыть папку</button>
+          </div>
+
+          <!-- PEM Preview & Step-by-Step Kerio Instructions -->
+          <div class="subtabs" id="pemSubtabs">
+            <button type="button" class="subtab active" data-pem="guide">📖 Куда нажимать в Kerio Connect</button>
+            <button type="button" class="subtab" data-pem="fullchain">📄 server.crt (Fullchain)</button>
+            <button type="button" class="subtab" data-pem="key">🔑 server.key (Private Key)</button>
+            <button type="button" class="subtab" data-pem="csr">📝 Запрос .csr</button>
+          </div>
+
+          <div id="pemGuideView" style="background:var(--bg-elevated);padding:14px;border-radius:8px;border:1px solid var(--border);">
+            <ol class="steps-list">
+              <li>Откройте веб-консоль <strong>Kerio Connect Administration</strong> (<code>https://&lt;IP-сервера&gt;:4040/admin</code>).</li>
+              <li>Перейдите в меню <strong>Конфигурация (Configuration) → Сертификаты SSL (SSL Certificates)</strong>.</li>
+              <li>Нажмите кнопку <strong>Импорт (Import) → Импортировать новый сертификат... (Import New Certificate...)</strong>.</li>
+              <li>В первом поле <strong>Сертификат (Certificate)</strong> выберите скачанный файл <code class="inline">server.crt</code> (он уже содержит ваш сертификат + промежуточный сертификат Let's Encrypt).</li>
+              <li>Во втором поле <strong>Приватный ключ (Private key)</strong> выберите файл <code class="inline">server.key</code> (незашифрованный RSA ключ).</li>
+              <li>Выделите добавленный сертификат в таблице и нажмите <strong>Использовать (Set as Active)</strong> — готово!</li>
+            </ol>
+          </div>
+
+          <div id="pemCodeWrap" style="display:none;">
+            <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
+              <button type="button" class="btn btn-outline btn-sm" id="copyPemBtn">📋 Скопировать текст PEM</button>
+            </div>
+            <pre class="pem-box" id="pemCodeBox"></pre>
+          </div>
+        </div>
+
+        <!-- Live Real-time Log Card -->
+        <div class="card">
+          <div class="card-header" style="margin-bottom:10px;">
+            <div>
+              <div class="card-title">🖥 Журнал выполнения операций (ACME / OpenSSL / Kerio)</div>
+              <div class="card-subtitle">Подробный ход генерации ключа, проверки IP/домена и выпуска сертификата</div>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" id="clearLogBtn">Очистить</button>
+          </div>
+          <div class="console-box" id="consoleLog"></div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 2: KERIO CONNECT INTEGRATION -->
+  <section id="tab-kerio" class="tab-page">
+    <div class="workspace-grid">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">📬 Автоматическая установка в Kerio Connect MailServer</div>
+            <div class="card-subtitle">Поддерживается прямое обновление папки <code>sslcert</code> (с учётом <code>mailserver.cfg</code>) и импорт без простоя через JSON-RPC Admin API (:4040)</div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="kerioCertSelect">Выберите выпущенный сертификат для установки</label>
+          <select id="kerioCertSelect"></select>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="kerioMethodSelect">Способ установки в Kerio Connect</label>
+          <select id="kerioMethodSelect">
+            <option value="filesystem">Файловый метод — Копирование в sslcert + авто-бэкап + перезапуск KerioMailServer</option>
+            <option value="api">Через Kerio Connect Admin API (порт 4040) — Онлайн без перезапуска службы почты!</option>
+          </select>
+        </div>
+
+        <div id="kerioFsBlock">
+          <div class="field">
+            <label class="field-label" for="kerioPathInput">Путь к папке <code>MailServer\sslcert</code> на сервере Windows</label>
+            <div class="input-with-btn">
+              <input type="text" id="kerioPathInput" value="C:\Program Files\Kerio\MailServer\sslcert">
+              <button type="button" class="btn btn-outline btn-sm" onclick="browseWindowsFolder('kerioPathInput', 'Выберите папку sslcert Kerio Connect')">Обзор...</button>
+              <button type="button" class="btn btn-outline btn-sm" id="rescanKerioBtn">Проверить папку</button>
+            </div>
+          </div>
+          <label class="check-box" for="kerioRestartCheck">
+            <input type="checkbox" id="kerioRestartCheck" checked>
+            <div>
+              <div class="check-box-title">Перезапустить службу Windows <code>KerioMailServer</code> после копирования</div>
+              <div class="check-box-sub">Программа также автоматически проверит <code>mailserver.cfg</code> (если активен профиль <code>cert_1</code> / <code>cert_2</code>, обновит и его, и <code>server.crt</code>/<code>server.key</code>).</div>
+            </div>
+          </label>
+        </div>
+
+        <div id="kerioApiBlock" style="display:none;">
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="kerioApiHost">Хост / IP админки Kerio</label>
+              <input type="text" id="kerioApiHost" value="127.0.0.1">
+            </div>
+            <div class="field">
+              <label class="field-label" for="kerioApiPort">Порт Admin API</label>
+              <input type="number" id="kerioApiPort" value="4040">
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="kerioApiUser">Логин администратора Kerio</label>
+              <input type="text" id="kerioApiUser" value="admin">
+            </div>
+            <div class="field">
+              <label class="field-label" for="kerioApiPass">Пароль администратора Kerio</label>
+              <input type="password" id="kerioApiPass" placeholder="Пароль от веб-админки Kerio">
+            </div>
+          </div>
+        </div>
+
+        <div class="actions-row">
+          <button type="button" class="btn btn-kerio btn-lg" id="installKerioNowBtn" style="flex:1;">
+            📬 Установить выбранный ключ и сертификат в Kerio Connect
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">⚙ Состояние сервера Kerio Connect</div>
+              <div class="card-subtitle">Обнаруженная служба Windows и текущие SSL-сертификаты в папке <code>sslcert</code></div>
+            </div>
+            <div style="display:flex;gap:6px;">
+              <button type="button" class="btn btn-outline btn-sm" onclick="controlKerioService('restart')">🔄 Перезапустить службу</button>
+            </div>
+          </div>
+          <div id="kerioDetectedBox"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title" style="margin-bottom:10px;">💡 Важные особенности SSL в Kerio Connect</div>
+          <ul class="steps-list">
+            <li><strong>Почему нужен Fullchain (<code>server.crt</code>):</strong> почтовые клиенты Outlook, Android и iOS требуют, чтобы сервер отдавал не только сертификат домена, но и промежуточный корневой сертификат Let's Encrypt (R10/R11/E5). Наш файл <code>server.crt</code> уже объединяет их в правильном порядке.</li>
+            <li><strong>Почему RSA 2048 Traditional PKCS#1 (<code>BEGIN RSA PRIVATE KEY</code>):</strong> встроенный SSL-движок Kerio Connect гарантированно читает незашифрованные ключи RSA 2048/4096 бит на всех версиях Kerio (8.x, 9.x, 10.x).</li>
+            <li><strong>Проверяемые почтовые протоколы после установки:</strong> HTTPS WebMail (<code>443</code>), SMTPS (<code>465</code>), SMTP STARTTLS (<code>25 / 587</code>), IMAPS (<code>993</code>), POP3S (<code>995</code>).</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 3: CERTIFICATE VAULT & AUTO-RENEWAL -->
+  <section id="tab-vault" class="tab-page">
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">⏰ Автоматическое продление сертификатов в Windows (Task Scheduler)</div>
+          <div class="card-subtitle">Программа сама проверит срок действия сертификатов в фоновом режиме (<code>KerioCertManager.exe --renew</code>), выпустит новый сертификат и обновит его в Kerio Connect</div>
+        </div>
+        <div id="autoRenewBadge" class="status-pill">Проверка...</div>
+      </div>
+
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
+        <div style="min-width:260px;">
+          <label class="field-label" for="renewIntervalSelect">Периодичность проверки в Планировщике заданий Windows</label>
+          <select id="renewIntervalSelect">
+            <option value="24" selected>Ежедневно в 03:15 ночи (для 90-дневных сертификатов Let's Encrypt)</option>
+            <option value="12">Каждые 12 часов (рекомендуется для 6-дневных сертификатов с IP SAN)</option>
+          </select>
+        </div>
+        <button type="button" class="btn btn-primary" onclick="manageAutoRenew('enable')">⏰ Включить автопродление в Windows</button>
+        <button type="button" class="btn btn-outline" onclick="manageAutoRenew('run-now')">🔄 Проверить и продлить сейчас</button>
+        <button type="button" class="btn btn-danger" onclick="manageAutoRenew('disable')">Отключить задачу</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">📂 Все выпущенные ключи и SSL-сертификаты</div>
+          <div class="card-subtitle">Нажмите «Открыть файлы», чтобы скачать <code>.key</code>, <code>.crt</code>, <code>.pfx</code> или <code>.zip</code> для любого сертификата</div>
+        </div>
+        <button type="button" class="btn btn-outline btn-sm" onclick="loadCertificates()">Обновить список</button>
+      </div>
+
+      <div style="overflow-x:auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Домен / Имя</th>
+              <th>SAN (DNS и IP)</th>
+              <th>Издатель / Режим</th>
+              <th>Действителен до</th>
+              <th>Действия</th>
+            </tr>
+          </thead>
+          <tbody id="vaultTableBody">
+            <tr><td colspan="5" style="color:var(--text-secondary);text-align:center;padding:24px;">Сертификатов пока нет — выпустите первый на вкладке «Выпуск сертификата»</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div class="toast" id="toastBox"></div>
+
+<script>
+  let systemState = null;
+  let currentCert = null;
+  let allCerts = [];
+  let selectedMode = 'letsencrypt';
+  let activePemTab = 'guide';
+  let pendingDnsSession = null;
+
+  function showToast(msg, isError = false) {
+    const el = document.getElementById('toastBox');
+    el.textContent = msg;
+    el.style.borderColor = isError ? 'var(--danger)' : 'var(--accent)';
+    el.style.display = 'block';
+    clearTimeout(window.__toastTimer);
+    window.__toastTimer = setTimeout(() => { el.style.display = 'none'; }, 4800);
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // Theme switcher
+  (function initTheme() {
+    const saved = localStorage.getItem('kerio_cert_theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', saved);
+  })();
+  document.getElementById('themeToggleBtn').addEventListener('click', () => {
+    const cur = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', cur);
+    localStorage.setItem('kerio_cert_theme', cur);
+  });
+
+  // Top navigation tabs
+  function switchTab(tabName) {
+    document.querySelectorAll('.nav-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tabName));
+    document.querySelectorAll('.tab-page').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tabName));
+    if (tabName === 'vault' || tabName === 'kerio') {
+      loadCertificates();
+    }
+  }
+  document.querySelectorAll('.nav-tab').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+
+  // Mode radio cards
+  function setMode(mode) {
+    selectedMode = mode;
+    document.querySelectorAll('.mode-card').forEach(c => c.classList.toggle('selected', c.dataset.mode === mode));
+    document.getElementById('acmeSettingsBlock').style.display = (mode === 'selfsigned') ? 'none' : 'block';
+    document.getElementById('selfSignedSettingsBlock').style.display = (mode === 'selfsigned') ? 'block' : 'none';
+  }
+  document.querySelectorAll('.mode-card').forEach(card => {
+    card.addEventListener('click', () => setMode(card.dataset.mode));
+  });
+
+  // Challenge selector UI updates
+  document.getElementById('challengeSelect').addEventListener('change', (e) => {
+    const val = e.target.value;
+    document.getElementById('webrootFieldWrap').style.display = (val === 'http-01-webroot') ? 'block' : 'none';
+    const showPort = (val === 'http-01' || val === 'tls-alpn-01');
+    document.getElementById('portFieldWrap').style.display = showPort ? 'block' : 'none';
+    document.getElementById('stopKerioTempWrap').style.display = showPort ? 'flex' : 'none';
+    if (val === 'http-01') document.getElementById('listenPortInput').value = '80';
+    if (val === 'tls-alpn-01') document.getElementById('listenPortInput').value = '443';
+  });
+
+  document.getElementById('autoInstallKerioCheck').addEventListener('change', (e) => {
+    document.getElementById('inlineKerioPathWrap').style.display = e.target.checked ? 'block' : 'none';
+  });
+
+  document.getElementById('kerioMethodSelect').addEventListener('change', (e) => {
+    const isApi = e.target.value === 'api';
+    document.getElementById('kerioFsBlock').style.display = isApi ? 'none' : 'block';
+    document.getElementById('kerioApiBlock').style.display = isApi ? 'block' : 'none';
+  });
+
+  // Quick Kerio subdomain SAN chips (+webmail, +autodiscover, +smtp, +imap, +pop3)
+  document.querySelectorAll('#sanQuickChips .chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const dom = document.getElementById('domainInput').value.trim().replace(/^https?:\/\//i, '').split('/')[0];
+      if (!dom || !dom.includes('.')) {
+        showToast('Сначала введите основное доменное имя (например, mail.company.by)', true);
+        document.getElementById('domainInput').focus();
+        return;
+      }
+      // Extract root domain: if domain starts with mail., smtp., mx., webmail., strip first label so autodiscover.company.by is accurate!
+      const parts = dom.split('.');
+      let baseDom = dom;
+      if (parts.length >= 3 && ['mail', 'mx', 'smtp', 'imap', 'pop', 'pop3', 'webmail'].includes(parts[0].toLowerCase())) {
+        baseDom = parts.slice(1).join('.');
+      }
+      const candidate = chip.dataset.prefix + '.' + baseDom;
+      if (candidate.toLowerCase() === dom.toLowerCase()) {
+        showToast(candidate + ' уже указан как основной домен');
+        return;
+      }
+      const extraEl = document.getElementById('extraDomainsInput');
+      const cur = extraEl.value.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+      if (!cur.some(x => x.toLowerCase() === candidate.toLowerCase())) {
+        cur.push(candidate);
+        extraEl.value = cur.join(', ');
+        chip.classList.add('active-san');
+      }
+    });
+  });
+
+  // Live IP classifier hint
+  document.getElementById('ipInput').addEventListener('input', updateIpHintBadge);
+  function updateIpHintBadge() {
+    const v = document.getElementById('ipInput').value.trim();
+    const badge = document.getElementById('ipClassBadge');
+    if (!v) {
+      badge.textContent = 'IPv4 / IPv6';
+      badge.style.color = 'var(--text-secondary)';
+      return;
+    }
+    const isPrivateV4 = /^(10\.|192\.168\.|127\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(v);
+    if (isPrivateV4) {
+      badge.textContent = 'Локальный IP (за NAT)';
+      badge.style.color = 'var(--kerio-orange)';
+    } else if (/^(\d{1,3}\.){3}\d{1,3}$/.test(v) || v.includes(':')) {
+      badge.textContent = 'Публичный IP';
+      badge.style.color = 'var(--accent)';
+    } else {
+      badge.textContent = 'Проверьте формат IP';
+      badge.style.color = 'var(--danger)';
+    }
+  }
+
+  document.getElementById('detectWanBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('detectWanBtn');
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/system-info');
+      const d = await r.json();
+      if (d.externalIp) {
+        document.getElementById('ipInput').value = d.externalIp;
+        updateIpHintBadge();
+        showToast('Определён внешний IP: ' + d.externalIp);
+      } else {
+        showToast('Не удалось автоматически определить внешний IP — введите IP сервера вручную', true);
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // SSE Real-time console log stream
+  function appendLogLine(entry) {
+    const box = document.getElementById('consoleLog');
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    const lvlClass = 'log-' + (entry.level || 'info');
+    div.innerHTML = `<span class="log-ts">[${escapeHtml(entry.timestamp)}]</span><span class="${lvlClass}">${escapeHtml(entry.message)}</span>`;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function connectSSE() {
+    const es = new EventSource('/api/events');
+    es.onmessage = (ev) => {
+      try {
+        appendLogLine(JSON.parse(ev.data));
+      } catch (_) {}
+    };
+    es.onerror = () => {
+      es.close();
+      setTimeout(connectSSE, 3000);
+    };
+  }
+  document.getElementById('clearLogBtn').addEventListener('click', () => {
+    document.getElementById('consoleLog').innerHTML = '';
+  });
+
+  // Build IssueRequest payload from form
+  function collectIssueRequest() {
+    const chall = document.getElementById('challengeSelect').value;
+    const portNum = parseInt(document.getElementById('listenPortInput').value || '80', 10);
+    const extras = document.getElementById('extraDomainsInput').value
+      .split(/[\s,;]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    return {
+      domain: document.getElementById('domainInput').value.trim(),
+      extraDomains: extras,
+      ipAddress: document.getElementById('ipInput').value.trim(),
+      email: document.getElementById('emailInput').value.trim(),
+      mode: selectedMode,
+      includeIpSan: document.getElementById('includeIpSanCheck').checked,
+      challengeType: chall,
+      httpPort: chall === 'http-01' ? portNum : 80,
+      tlsPort: chall === 'tls-alpn-01' ? portNum : 443,
+      webrootPath: document.getElementById('webrootInput').value.trim(),
+      stopKerioTemp: document.getElementById('stopKerioTempCheck').checked,
+      keyType: document.getElementById('keyTypeSelect').value,
+      pfxPassword: document.getElementById('pfxPasswordInput').value,
+      validityDays: parseInt(document.getElementById('validityDaysInput').value || '365', 10),
+      outputDir: document.getElementById('outputDirInput').value.trim(),
+      kerioInstall: {
+        enabled: document.getElementById('autoInstallKerioCheck').checked,
+        method: 'filesystem',
+        kerioPath: document.getElementById('inlineKerioPathInput').value.trim(),
+        restartService: true
+      }
+    };
+  }
+
+  // Pre-flight check
+  document.getElementById('preflightBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('preflightBtn');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Проверка...';
+    try {
+      const r = await fetch('/api/preflight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectIssueRequest())
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Ошибка проверки');
+      renderPreflight(d.preflight);
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  });
+
+  function renderPreflight(pf) {
+    const card = document.getElementById('preflightCard');
+    const body = document.getElementById('preflightBody');
+    card.style.display = 'block';
+
+    let html = '';
+    if (pf.ipValid) {
+      html += `<div class="alert ${pf.isPrivateIp ? 'alert-warn' : 'alert-ok'}">
+        <strong>IP-адрес сервера:</strong> ${escapeHtml(pf.inputIp)}
+        (${pf.isPrivateIp ? 'Локальный IP за NAT' : 'Публичный IP'}) • Локальный интерфейс приёма проверки: <strong>${escapeHtml(pf.effectiveBindIp)}</strong>
+      </div>`;
+    } else if (pf.inputIp) {
+      html += `<div class="alert alert-err">Некорректный IP-адрес: ${escapeHtml(pf.inputIp)}</div>`;
+    }
+
+    (pf.domains || []).forEach(dom => {
+      const puny = dom.isIdn ? ` (Punycode: <code>${escapeHtml(dom.asciiDomain)}</code>)` : '';
+      if (dom.lookupError) {
+        html += `<div class="alert alert-warn"><strong>Домен ${escapeHtml(dom.rawDomain)}${puny}:</strong> ${escapeHtml(dom.lookupError)}</div>`;
+      } else {
+        const cls = dom.matchesInputIP ? 'alert-ok' : 'alert-warn';
+        const matchNote = dom.matchesInputIP
+          ? '✅ Полностью совпадает с указанным IP!'
+          : '⚠ Отличается от введённого IP';
+        html += `<div class="alert ${cls}">
+          <strong>${escapeHtml(dom.displayDomain)}${puny}</strong> → DNS A/AAAA: <code>${escapeHtml(dom.resolvedIps.join(', '))}</code> — ${matchNote}
+        </div>`;
+      }
+    });
+
+    html += `<div class="alert ${pf.port80.canBind ? 'alert-ok' : 'alert-warn'}">
+      <strong>Проверка TCP порта ${pf.port80.port}:</strong> ${escapeHtml(pf.port80.statusText)}
+    </div>`;
+
+    (pf.recommendations || []).forEach(rec => {
+      html += `<div class="alert alert-info">💡 ${escapeHtml(rec)}</div>`;
+    });
+
+    body.innerHTML = html;
+  }
+
+  // Issue Certificate + Key
+  document.getElementById('issueBtn').addEventListener('click', async () => {
+    const req = collectIssueRequest();
+    if (!req.domain && !req.ipAddress) {
+      showToast('Введите доменное имя (например, mail.company.by) и IP-адрес сервера!', true);
+      document.getElementById('domainInput').focus();
+      return;
+    }
+
+    const btn = document.getElementById('issueBtn');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Генерация ключа и выпуск сертификата...';
+    document.getElementById('dns01WizardCard').style.display = 'none';
+
+    try {
+      const r = await fetch('/api/issue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req)
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Не удалось выпустить сертификат');
+
+      if (d.pendingDns01 && d.session) {
+        renderDns01Wizard(d.session);
+        showToast('Добавьте TXT-запись в DNS и нажмите «Подтвердить»');
+        return;
+      }
+
+      if (d.certificate) {
+        displayCertificateResult(d.certificate);
+        await loadCertificates();
+        showToast('Ключ и SSL-сертификат для Kerio Connect успешно созданы!');
+      }
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  });
+
+  // Interactive DNS-01 Wizard
+  function renderDns01Wizard(sess) {
+    pendingDnsSession = sess;
+    const card = document.getElementById('dns01WizardCard');
+    const cont = document.getElementById('dns01RecordsContainer');
+    card.style.display = 'block';
+
+    cont.innerHTML = sess.records.map((rec, idx) => `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;">
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">Домен: <strong>${escapeHtml(rec.domain)}</strong></div>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-bottom:6px;">
+          <div><span style="color:var(--text-secondary);font-size:12px;">Имя записи (Host):</span> <code class="inline">${escapeHtml(rec.record)}</code></div>
+          <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('${escapeHtml(rec.record)}');showToast('Имя TXT скопировано')">Копировать имя</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-bottom:8px;">
+          <div style="word-break:break-all;"><span style="color:var(--text-secondary);font-size:12px;">Значение TXT:</span> <code class="inline">${escapeHtml(rec.txtValue)}</code></div>
+          <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('${escapeHtml(rec.txtValue)}');showToast('Значение TXT скопировано')">Копировать TXT</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="verifyDnsTxtRecord('${escapeHtml(rec.record)}', '${escapeHtml(rec.txtValue)}', 'dnsCheckStatus_${idx}')">🔍 Проверить TXT в DNS</button>
+          <span id="dnsCheckStatus_${idx}" style="font-size:12px;color:var(--text-secondary);">Ожидание добавления записи...</span>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  async function verifyDnsTxtRecord(record, expected, targetElemId) {
+    const el = document.getElementById(targetElemId);
+    el.textContent = 'Проверка DNS...';
+    const r = await fetch(`/api/check-dns-txt?record=${encodeURIComponent(record)}&expected=${encodeURIComponent(expected)}`);
+    const d = await r.json();
+    if (d.matched) {
+      el.style.color = 'var(--accent)';
+      el.textContent = '✅ TXT-запись найдена и полностью совпадает! Можно выпускать сертификат.';
+    } else if (d.found) {
+      el.style.color = 'var(--kerio-orange)';
+      el.textContent = '⚠ Найдена другая TXT-запись: ' + d.records.join(', ');
+    } else {
+      el.style.color = 'var(--danger)';
+      el.textContent = '⏳ Пока не видна в публичном DNS (подождите 1–3 минуты)';
+    }
+  }
+
+  document.getElementById('completeDns01Btn').addEventListener('click', async () => {
+    if (!pendingDnsSession) return;
+    const btn = document.getElementById('completeDns01Btn');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Проверка в Let\'s Encrypt и выпуск...';
+    try {
+      const r = await fetch('/api/dns01/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: pendingDnsSession.sessionId })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Ошибка проверки DNS-01');
+      document.getElementById('dns01WizardCard').style.display = 'none';
+      displayCertificateResult(d.certificate);
+      await loadCertificates();
+      showToast('Сертификат Let\'s Encrypt успешно выпущен!');
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  });
+
+  // Render Issued Certificate Card & Download Links
+  function displayCertificateResult(cert) {
+    currentCert = cert;
+    const card = document.getElementById('resultCard');
+    card.style.display = 'block';
+
+    const dirParam = encodeURIComponent(document.getElementById('outputDirInput').value.trim());
+    const dlUrl = (key) => `/api/certs/download?id=${encodeURIComponent(cert.id)}&file=${encodeURIComponent(key)}&dir=${dirParam}`;
+
+    document.getElementById('resBannerTitle').textContent = `✅ Ключ и сертификат готовы: ${cert.displayDomain || cert.slug}`;
+    document.getElementById('resBannerSub').textContent = cert.kerioInstallNote
+      ? cert.kerioInstallNote
+      : `Папка файлов: ${cert.certDir}`;
+
+    const sanDns = (cert.dnsNames && cert.dnsNames.length) ? cert.dnsNames.join(', ') : '—';
+    const sanIp = (cert.ipAddresses && cert.ipAddresses.length)
+      ? cert.ipAddresses.join(', ') + ' (включён в SAN)'
+      : (cert.configuredIp ? `${cert.configuredIp} (сервер привязки)` : '—');
+    const validTo = new Date(cert.notAfter).toLocaleString('ru-RU');
+
+    document.getElementById('resMetaGrid').innerHTML = `
+      <div class="meta-item">
+        <div class="meta-k">Домены в сертификате (DNS SAN)</div>
+        <div class="meta-v">${escapeHtml(sanDns)}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-k">IP-адрес (IP SAN / Сервер)</div>
+        <div class="meta-v">${escapeHtml(sanIp)}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-k">Издатель и срок действия</div>
+        <div class="meta-v">${escapeHtml(cert.issuer)} • до ${escapeHtml(validTo)} (${cert.daysRemaining} дн.)</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-k">Тип приватного ключа Kerio</div>
+        <div class="meta-v">${escapeHtml(cert.keyFormat)}</div>
+      </div>
+      <div class="meta-item" style="grid-column: 1 / -1;">
+        <div class="meta-k">Отпечаток SHA-256</div>
+        <div class="meta-v" style="font-family:Consolas,monospace;font-size:11.5px;">${escapeHtml(cert.sha256Fingerprint)}</div>
+      </div>
+    `;
+
+    document.getElementById('dlServerCrt').href = dlUrl('serverCrt');
+    document.getElementById('dlServerKey').href = dlUrl('serverKey');
+    document.getElementById('dlBundleZip').href = dlUrl('zip');
+    document.getElementById('dlCertOnly').href = dlUrl('certOnlyCrt');
+    document.getElementById('dlPfx').href = dlUrl('pfx');
+    document.getElementById('dlCsr').href = dlUrl('csr');
+
+    const chainBtn = document.getElementById('dlChainCrt');
+    if (cert.files && cert.files.chainCrt) {
+      chainBtn.style.display = 'inline-flex';
+      chainBtn.href = dlUrl('chainCrt');
+    } else {
+      chainBtn.style.display = 'none';
+    }
+
+    renderActivePemSubtab();
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // PEM Subtabs
+  document.querySelectorAll('#pemSubtabs .subtab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activePemTab = btn.dataset.pem;
+      document.querySelectorAll('#pemSubtabs .subtab').forEach(b => b.classList.toggle('active', b === btn));
+      renderActivePemSubtab();
+    });
+  });
+
+  function renderActivePemSubtab() {
+    const guide = document.getElementById('pemGuideView');
+    const wrap = document.getElementById('pemCodeWrap');
+    const box = document.getElementById('pemCodeBox');
+    if (activePemTab === 'guide' || !currentCert) {
+      guide.style.display = 'block';
+      wrap.style.display = 'none';
+      return;
+    }
+    guide.style.display = 'none';
+    wrap.style.display = 'block';
+    if (activePemTab === 'fullchain') box.textContent = currentCert.fullchainPem || '';
+    if (activePemTab === 'key') box.textContent = currentCert.privateKeyPem || '';
+    if (activePemTab === 'csr') box.textContent = currentCert.csrPem || '';
+  }
+
+  document.getElementById('copyPemBtn').addEventListener('click', () => {
+    const txt = document.getElementById('pemCodeBox').textContent;
+    navigator.clipboard.writeText(txt);
+    showToast('Содержимое PEM скопировано в буфер обмена');
+  });
+
+  document.getElementById('openCertFolderBtn').addEventListener('click', async () => {
+    if (!currentCert) return;
+    const r = await fetch('/api/windows/open-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: currentCert.certDir })
+    });
+    const d = await r.json();
+    if (!d.ok) showToast(d.error, true);
+  });
+
+  document.getElementById('quickInstallKerioBtn').addEventListener('click', () => {
+    if (currentCert) {
+      document.getElementById('kerioCertSelect').value = currentCert.id;
+    }
+    switchTab('kerio');
+  });
+
+  // Windows Folder Picker & UAC Elevation
+  async function browseWindowsFolder(inputId, promptText) {
+    const r = await fetch('/api/windows/browse-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: promptText })
+    });
+    const d = await r.json();
+    if (d.ok && d.path) {
+      document.getElementById(inputId).value = d.path;
+    } else if (d.error) {
+      showToast(d.error, true);
+    }
+  }
+
+  async function requestWindowsElevation() {
+    const r = await fetch('/api/windows/elevate', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      showToast('Запуск нового окна с правами Администратора...');
+    } else {
+      showToast(d.error || 'Не удалось повысить права', true);
+    }
+  }
+
+  // Kerio Tab handlers
+  function renderKerioStatus(k) {
+    const box = document.getElementById('kerioDetectedBox');
+    if (!k) return;
+    let svcBadge = `<span style="color:var(--text-secondary)">${escapeHtml(k.serviceStatus)}</span>`;
+    if (k.serviceStatus === 'RUNNING') svcBadge = `<span style="color:var(--accent);font-weight:700;">● Запущена (RUNNING)</span>`;
+    if (k.serviceStatus === 'STOPPED') svcBadge = `<span style="color:var(--danger);font-weight:700;">● Остановлена (STOPPED)</span>`;
+    if (k.serviceStatus === 'DEMO_LINUX_PREVIEW') svcBadge = `<span style="color:var(--blue);font-weight:700;">● Веб-превью (скачайте .exe для Windows Server)</span>`;
+
+    let html = `
+      <div class="cert-meta-grid">
+        <div class="meta-item">
+          <div class="meta-k">Служба KerioMailServer</div>
+          <div class="meta-v">${svcBadge}</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-k">Активный профиль в mailserver.cfg</div>
+          <div class="meta-v"><code>${escapeHtml(k.activeCertName)}.crt / ${escapeHtml(k.activeCertName)}.key</code></div>
+        </div>
+        <div class="meta-item" style="grid-column: 1 / -1;">
+          <div class="meta-k">Папка SSL-сертификатов Kerio Connect</div>
+          <div class="meta-v">${escapeHtml(k.sslCertDir)}</div>
+        </div>
+      </div>
+    `;
+
+    if (k.existingCerts && k.existingCerts.length) {
+      html += `<div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:8px;">НАЙДЕННЫЕ СЕРТИФИКАТЫ В SSLCERT:</div>`;
+      k.existingCerts.forEach(c => {
+        html += `<div class="alert ${c.isActive ? 'alert-ok' : ''}">
+          <strong>${escapeHtml(c.fileName)}</strong> ${c.isActive ? '<em>(Активный)</em>' : ''} — CN: ${escapeHtml(c.subjectCN)} • до ${escapeHtml(c.notAfter)} (${c.daysRemaining} дн.)
+        </div>`;
+      });
+    } else {
+      html += `<div class="hint-text">После установки сертификата здесь отобразятся активные файлы из папки <code>sslcert</code> вашего сервера Kerio Connect.</div>`;
+    }
+    box.innerHTML = html;
+  }
+
+  document.getElementById('rescanKerioBtn').addEventListener('click', async () => {
+    const r = await fetch('/api/kerio/inspect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: document.getElementById('kerioPathInput').value.trim() })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      renderKerioStatus(d.kerio);
+      showToast('Состояние папки Kerio обновлено');
+    }
+  });
+
+  document.getElementById('installKerioNowBtn').addEventListener('click', async () => {
+    const certId = document.getElementById('kerioCertSelect').value;
+    if (!certId) {
+      showToast('Сначала сгенерируйте хотя бы один сертификат!', true);
+      return;
+    }
+    const btn = document.getElementById('installKerioNowBtn');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Установка в Kerio Connect...';
+    try {
+      const cfg = {
+        enabled: true,
+        method: document.getElementById('kerioMethodSelect').value,
+        kerioPath: document.getElementById('kerioPathInput').value.trim(),
+        restartService: document.getElementById('kerioRestartCheck').checked,
+        apiHost: document.getElementById('kerioApiHost').value.trim(),
+        apiPort: parseInt(document.getElementById('kerioApiPort').value || '4040', 10),
+        apiUser: document.getElementById('kerioApiUser').value.trim(),
+        apiPassword: document.getElementById('kerioApiPass').value
+      };
+      const r = await fetch('/api/kerio/install', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          certId,
+          dir: document.getElementById('outputDirInput').value.trim(),
+          config: cfg
+        })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Ошибка установки в Kerio Connect');
+      renderKerioStatus(d.kerio);
+      showToast(d.message);
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  });
+
+  async function controlKerioService(action) {
+    const r = await fetch('/api/kerio/service', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action })
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      showToast(d.error, true);
+      return;
+    }
+    showToast('Команда службе KerioMailServer выполнена (' + d.serviceStatus + ')');
+    document.getElementById('rescanKerioBtn').click();
+  }
+
+  // Vault & Auto-renewal
+  async function loadCertificates() {
+    const dir = document.getElementById('outputDirInput').value.trim();
+    const r = await fetch('/api/certs?dir=' + encodeURIComponent(dir));
+    const d = await r.json();
+    if (!d.ok) return;
+    allCerts = d.certificates || [];
+    document.getElementById('certCountBadge').textContent = allCerts.length;
+
+    // Populate Kerio dropdown
+    const sel = document.getElementById('kerioCertSelect');
+    const prev = sel.value;
+    sel.innerHTML = allCerts.length
+      ? allCerts.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.displayDomain || c.slug)} (до ${new Date(c.notAfter).toLocaleDateString('ru-RU')})</option>`).join('')
+      : '<option value="">— Сначала выпустите сертификат —</option>';
+    if (prev && allCerts.some(c => c.id === prev)) sel.value = prev;
+
+    // Populate Vault table
+    const tbody = document.getElementById('vaultTableBody');
+    if (!allCerts.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-secondary);text-align:center;padding:24px;">Выпущенных сертификатов пока нет</td></tr>';
+      return;
+    }
+    tbody.innerHTML = allCerts.map(c => {
+      const sans = [...(c.dnsNames || []), ...(c.ipAddresses || []).map(ip => 'IP:' + ip)].join(', ');
+      const zipHref = `/api/certs/download?id=${encodeURIComponent(c.id)}&file=zip&dir=${encodeURIComponent(dir)}`;
+      return `<tr>
+        <td><strong>${escapeHtml(c.displayDomain || c.slug)}</strong><br><span style="font-size:11.5px;color:var(--text-secondary)">${escapeHtml(c.keyType)}</span></td>
+        <td style="font-size:12px;">${escapeHtml(sans || c.configuredIp || '—')}</td>
+        <td style="font-size:12px;">${escapeHtml(c.issuer)}<br><span style="color:var(--text-secondary)">${escapeHtml(c.mode)}</span></td>
+        <td><strong>${new Date(c.notAfter).toLocaleDateString('ru-RU')}</strong><br><span style="font-size:11.5px;color:var(--accent)">Осталось ${c.daysRemaining} дн.</span></td>
+        <td>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="openCertInMainView('${escapeHtml(c.id)}')">Открыть файлы</button>
+            <a href="${zipHref}" class="btn btn-outline btn-sm">⬇ ZIP</a>
+            <button type="button" class="btn btn-danger btn-sm" onclick="deleteCertRecord('${escapeHtml(c.id)}')">Удалить</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function openCertInMainView(id) {
+    const dir = document.getElementById('outputDirInput').value.trim();
+    const r = await fetch(`/api/certs/detail?id=${encodeURIComponent(id)}&dir=${encodeURIComponent(dir)}`);
+    const d = await r.json();
+    if (d.ok && d.certificate) {
+      switchTab('issue');
+      displayCertificateResult(d.certificate);
+    }
+  }
+
+  async function deleteCertRecord(id) {
+    if (!confirm('Удалить сохранённый сертификат и ключ ' + id + '?')) return;
+    const dir = document.getElementById('outputDirInput').value.trim();
+    await fetch(`/api/certs/delete?id=${encodeURIComponent(id)}&dir=${encodeURIComponent(dir)}`, { method: 'DELETE' });
+    if (currentCert && currentCert.id === id) {
+      currentCert = null;
+      document.getElementById('resultCard').style.display = 'none';
+    }
+    await loadCertificates();
+    showToast('Сертификат удалён');
+  }
+
+  async function manageAutoRenew(action) {
+    const intervalHours = parseInt(document.getElementById('renewIntervalSelect').value || '24', 10);
+    const r = await fetch('/api/autorenew', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        intervalHours,
+        dir: document.getElementById('outputDirInput').value.trim()
+      })
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      showToast(d.error, true);
+      return;
+    }
+    if (typeof d.scheduled === 'boolean') {
+      updateAutoRenewBadge(d.scheduled);
+    }
+    await loadCertificates();
+    showToast(d.message);
+  }
+
+  function updateAutoRenewBadge(enabled) {
+    const b = document.getElementById('autoRenewBadge');
+    b.className = 'status-pill ' + (enabled ? 'ok' : '');
+    b.textContent = enabled ? '● Автопродление активно в Планировщике Windows' : '○ Автопродление не включено';
+  }
+
+  // Bootstrap initial system state
+  async function initApp() {
+    connectSSE();
+    try {
+      const r = await fetch('/api/system-info');
+      const d = await r.json();
+      systemState = d;
+
+      if (d.defaultCertsDir) {
+        document.getElementById('outputDirInput').value = d.defaultCertsDir;
+      }
+      if (d.kerio && d.kerio.sslCertDir) {
+        document.getElementById('kerioPathInput').value = d.kerio.sslCertDir;
+        document.getElementById('inlineKerioPathInput').value = d.kerio.sslCertDir;
+        renderKerioStatus(d.kerio);
+      }
+      updateAutoRenewBadge(!!d.autoRenewScheduled);
+
+      // Show Windows .exe download buttons when running in preview or anytime exe is available
+      if (d.windowsExeAvailable && !d.isWindows) {
+        const exeBtn = document.getElementById('downloadWinExeBtn');
+        exeBtn.style.display = 'inline-flex';
+        exeBtn.textContent = `⬇ Скачать для Windows (.exe • ${d.windowsExeSizeMB})`;
+        document.getElementById('downloadWinZipBtn').style.display = 'inline-flex';
+      }
+
+      // Admin status pill
+      const badge = document.getElementById('adminBadge');
+      const badgeTxt = document.getElementById('adminBadgeText');
+      if (d.isWindows) {
+        if (d.isAdmin) {
+          badge.className = 'status-pill ok';
+          badgeTxt.textContent = 'Windows • Права Администратора';
+        } else {
+          badge.className = 'status-pill warn';
+          badgeTxt.textContent = '🛡 Запустить от Администратора (UAC)';
+          badge.onclick = requestWindowsElevation;
+        }
+      } else {
+        badge.className = 'status-pill ok';
+        badgeTxt.textContent = 'Веб-интерфейс активен';
+      }
+
+      // Render local IP quick-fill chips + auto-fill external IP if available
+      const chipsWrap = document.getElementById('localIpChips');
+      let chipsHtml = '';
+      if (d.externalIp) {
+        document.getElementById('ipInput').value = d.externalIp;
+        updateIpHintBadge();
+      }
+      (d.localIps || []).forEach(nic => {
+        if (!nic.isIpv6) {
+          chipsHtml += `<button type="button" class="chip" onclick="document.getElementById('ipInput').value='${escapeHtml(nic.ip)}';updateIpHintBadge();">${escapeHtml(nic.interfaceName)}: ${escapeHtml(nic.ip)}</button>`;
+        }
+      });
+      chipsWrap.innerHTML = chipsHtml;
+
+      await loadCertificates();
+    } catch (e) {
+      showToast('Ошибка загрузки данных сервера: ' + e.message, true);
+    }
+  }
+
+  initApp();
+</script>
+</body>
+</html>
