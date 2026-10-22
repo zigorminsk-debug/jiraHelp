@@ -52,3 +52,7 @@ cleartext, file universal access или произвольный `readFile` ра
 PR и прочие ветки проверяются read-only и ничего не публикуют.
 Не возвращать Actions Artifacts до решения квоты. Старые assets/релизы не удалять
 без разрешения. Это тестовая сменная подпись, не production signing identity.
+
+Подтверждено: CI run `39752620540` на `73081a6` — **success**; prerelease
+`apk-39752620540-1` содержит настоящий APK, SHA256SUMS и signature.txt.
+Workflow сам скачал APK после upload и проверил совпадение содержимого.

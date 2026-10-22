@@ -166,3 +166,18 @@ production-подписи и совместимости с прежним сер
 Команды локальной проверки: `node --test tests/*.test.cjs` (14 тестов),
 `bash -n scripts/build-apk.sh scripts/publish-apk.sh`, `git diff --check`.
 Реальный запуск CI проверяется после отправки изменений; результат ниже.
+
+### Подтвержденный результат публикации
+
+- Commit: `73081a684971bbd4028c990fdea5aaae108b22f2`.
+- Run: https://github.com/zigorminsk-debug/jiraHelp/actions/runs/39752620540 — **success**.
+- Release: https://github.com/zigorminsk-debug/jiraHelp/releases/tag/apk-39752620540-1.
+- APK: https://github.com/zigorminsk-debug/jiraHelp/releases/download/apk-39752620540-1/CSL-HelpDesk-debug.apk.
+- Через API подтверждены три assets в состоянии uploaded: APK (54 213 байт),
+  SHA256SUMS (89 байт), signature.txt (953 байта).
+- Все 14 Node checks, Java/resource compile, D8, zipalign, apksigner verify и
+  публикация с повторным скачиванием/проверкой содержимого прошли успешно.
+- `check` job пропущен **ожидаемо**: доверенный push обслуживает `publish` job,
+  который сам запускает те же проверки перед сборкой. Это не пропуск тестирования.
+- Повторная сборка создает новый подписанный APK в новом prerelease, предыдущие
+  ссылки сохраняются. Физическое устройство не тестировалось; Jira API не добавлялся.
