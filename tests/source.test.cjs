@@ -103,3 +103,29 @@ test('logout clears hidden detail view, credentials and comment draft',()=>{
   assert.equal(element('dt-desc').textContent,'');assert.equal(element('set-password').value,'');
   assert.equal(element('cm-input').value,'');assert.equal(run('state.currentTicketId'),null);
 });
+test('native connection callback shows actual status and errors persist',()=>{
+  const {run,element}=app();
+  run("onConnectionResult(true,'Подключение подтверждено')");
+  assert.equal(element('server-name-label').textContent,'Онлайн');
+  assert.equal(run('state.isConnected'),true);
+  run("onConnectionResult(false,'HTTP 401')");
+  assert.equal(run('state.isConnected'),false);
+  assert.equal(element('test-result').textContent,'HTTP 401');
+});
+test('testing candidate credentials does not replace active native preferences',()=>{
+  const {run,element,ctx}=app();
+  let received;
+  ctx.window.AndroidBridge={testConnection(...args){received=args;},savePrefs(){throw new Error('Must not replace session');}};
+  element('set-server').value='https://jira.example/jira';element('set-login').value='test';element('set-password').value='secret';
+  run('testConnection()');assert.deepEqual(received,['https://jira.example/jira','test','secret']);
+  run("onConnectionTestResult(true,'ok')");assert.equal(run('!!state.isConnected'),false);
+});
+test('Jira empty snapshot removes old server records but retains local drafts',()=>{
+  const {run}=app();
+  run("state.tickets=[{id:'HD-1'},{id:'LOCAL-1',created:'2026-10-22T12:00',subject:'draft'}];onTicketsFetched({issues:[]})");
+  assert.equal(run('state.tickets.length'),1);assert.equal(run('state.tickets[0].id'),'LOCAL-1');
+});
+test('structured Jira descriptions render as text',()=>{
+  const {run}=app();
+  assert.equal(run("jiraText({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Hello'}]},{type:'paragraph',content:[{type:'text',text:'world'}]}]})"),'Hello\nworld');
+});

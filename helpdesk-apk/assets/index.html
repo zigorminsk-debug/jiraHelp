@@ -435,13 +435,13 @@
             <input type="text" id="login-username" placeholder="user@company.by" autocomplete="username">
         </div>
         <div class="login-field">
-            <label>Пароль (не требуется в локальном режиме)</label>
+            <label>Пароль / API токен</label>
             <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password">
         </div>
         <div class="login-error" id="login-error"></div>
-        <button class="btn-login" id="btn-login" onclick="doLogin()">Открыть локально</button>
+        <button class="btn-login" id="btn-login" onclick="doLogin()">Войти</button>
         <div class="login-loading" id="login-loading">Открытие интерфейса...</div>
-        <div class="login-hint">Локальный режим: Jira API в исходниках не реализован.<br>Не вводите настоящий пароль. Заявки сохраняются на устройстве.</div>
+        <div class="login-hint">Jira Server/Data Center: HTTPS + Basic Auth.<br>Пароль не сохраняется и потребуется при следующем запуске.<br>Создание, статусы и комментарии пока только локальные.</div>
     </div>
 </div>
 
@@ -855,6 +855,8 @@ function doLogin() {
 
 function doLogout() {
     state.isLoggedIn = false;
+    state.isConnected = false;
+    if (hasNative('clearSession')) callNative('clearSession');
     state.password = '';
     state.currentTicketId = null;
     state.previousPage = 'dashboard';
@@ -892,7 +894,7 @@ function enterApp() {
     document.getElementById('pr-name').textContent = state.username;
     document.getElementById('header-server-name').textContent = new URL(state.server).hostname;
     document.getElementById('pr-server').textContent = new URL(state.server).hostname;
-    document.getElementById('server-name-label').textContent = 'Локальный режим';
+    document.getElementById('server-name-label').textContent = hasNative('fetchTickets') ? 'Проверка...' : 'Локальный режим';
     document.getElementById('server-dot').className = 'server-dot offline';
 
     // Save prefs to native side
@@ -929,7 +931,7 @@ function saveSettings() {
     const server = document.getElementById('set-server').value.trim();
     const login = document.getElementById('set-login').value.trim();
     const password = document.getElementById('set-password').value;
-    if (!server || !login) { showToast('Заполните сервер и логин'); return; }
+    if (!server || !login || (hasNative('savePrefs') && !password)) { showToast('Заполните сервер и логин'); return; }
     const normalizedServer = normalizeServerUrl(server);
     if (!normalizedServer) { showToast('Укажите корректный HTTPS URL сервера'); return; }
     if (state.server !== normalizedServer || state.username !== login) {
@@ -941,10 +943,6 @@ function saveSettings() {
     localStorage.setItem('csl_hd_server', normalizedServer);
     localStorage.setItem('csl_hd_username', login);
     localStorage.removeItem('csl_hd_password');
-    if (window.AndroidBridge) {
-        callNative('savePrefs', normalizedServer, login, password);
-        callNative('fetchTickets');
-    }
     hideSettings();
     showToast('Настройки сохранены');
     enterApp();
@@ -955,18 +953,29 @@ function testConnection() {
         showToast('AndroidBridge недоступен');
         return;
     }
-    // Save first so native side has latest creds
+    // Test candidate credentials without changing the active account/session.
     const server = normalizeServerUrl(document.getElementById('set-server').value.trim());
     const login = document.getElementById('set-login').value.trim();
     const password = document.getElementById('set-password').value;
-    if (server && login && hasNative('savePrefs')) {
-        callNative('savePrefs', server, login, password);
+    if (!server || !login || !password) {
+        document.getElementById('test-result').textContent = 'Заполните HTTPS URL, логин и пароль/API токен';
+        return;
     }
     document.getElementById('test-result').textContent = 'Подключение...';
-    callNative('testConnection');
-    setTimeout(() => {
-        document.getElementById('test-result').textContent = '';
-    }, 5000);
+    callNative('testConnection', server, login, password);
+    // Native callback keeps the actual result visible; no arbitrary timeout clears it.
+}
+
+function onConnectionTestResult(success, message) {
+    document.getElementById('test-result').textContent = message;
+    if (!success) showToast(message);
+}
+
+function onConnectionResult(success, message) {
+    state.isConnected = !!success;
+    updateNetwork(!!success);
+    document.getElementById('test-result').textContent = message;
+    if (!success) showToast(message);
 }
 
 // ===== TICKETS CRUD =====
@@ -1392,16 +1401,19 @@ function onTicketCreated(success, response) {
     }
 }
 
+function jiraText(value) {
+    if (typeof value === 'string') return value;
+    if (!value || typeof value !== 'object') return '';
+    if (typeof value.text === 'string') return value.text;
+    return Array.isArray(value.content) ? value.content.map(jiraText).join(value.type === 'doc' ? '\n' : '') : '';
+}
+
 function onTicketsFetched(data) {
     console.log(' onTicketsFetched called');
     console.log('Data type:', typeof data);
     if (!data || typeof data !== 'object') { onFetchError('Некорректный ответ сервера'); return; }
     console.log('Data keys:', data ? Object.keys(data) : 'null');
 
-    if (!data) {
-        showToast('⚠️ Пустой ответ от сервера');
-        return;
-    }
 
     // Handle different Jira response formats
     let issues = [];
@@ -1415,7 +1427,7 @@ function onTicketsFetched(data) {
         issues = data;
     }
     // Format 3: Wrapped in another object
-    else if (data.data && data.data.issues) {
+    else if (data.data && Array.isArray(data.data.issues)) {
         issues = data.data.issues;
     }
     else {
@@ -1426,11 +1438,10 @@ function onTicketsFetched(data) {
 
     console.log(' Found', issues.length, 'issues');
 
-    if (issues.length === 0) {
-        showToast('ℹ️ Сервер вернул 0 заявок');
-        return;
-    }
+    if (issues.length === 0) { showToast('Сервер вернул 0 заявок'); }
 
+    const receivedIds = new Set(issues.filter(issue => issue && safeId(issue.key)).map(issue => issue.key));
+    state.tickets = state.tickets.filter(t => t.id.startsWith('LOCAL-') || receivedIds.has(t.id));
     let newCount = 0;
     let updatedCount = 0;
     const statusMap = {
@@ -1458,11 +1469,11 @@ function onTicketsFetched(data) {
         const ticket = {
             id: id,
             subject: issue.fields?.summary || issue.summary || 'Без темы',
-            description: issue.fields?.description || issue.description || '',
+            description: jiraText(issue.fields?.description || issue.description || ''),
             status: statusMap[issue.fields?.status?.name] || statusMap[issue.status?.name] || 'open',
             priority: priorityMap[issue.fields?.priority?.name] || priorityMap[issue.priority?.name] || 'medium',
-            assignee: issue.fields?.assignee?.displayName || issue.assignee?.displayName || issue.assignee || 'Не назначен',
-            client: issue.fields?.reporter?.displayName || issue.reporter?.displayName || issue.reporter || '',
+            assignee: issue.fields?.assignee?.displayName || issue.assignee?.displayName || (typeof issue.assignee === 'string' ? issue.assignee : 'Не назначен'),
+            client: issue.fields?.reporter?.displayName || issue.reporter?.displayName || (typeof issue.reporter === 'string' ? issue.reporter : ''),
             created: issue.fields?.created?.slice(0, 16) || issue.created?.slice(0, 16) || '',
             phone: null,
             category: 'other',
@@ -1475,10 +1486,7 @@ function onTicketsFetched(data) {
             newCount++;
             console.log('✅ New ticket:', ticket.id, ticket.subject);
         } else {
-            existing.status = ticket.status;
-            existing.priority = ticket.priority;
-            existing.subject = ticket.subject;
-            existing.assignee = ticket.assignee;
+            Object.assign(existing, ticket, {comments: existing.comments || []});
             updatedCount++;
             console.log('🔄 Updated:', ticket.id, ticket.status);
         }
@@ -1640,7 +1648,7 @@ if (location.protocol === 'https:' && 'serviceWorker' in navigator) {
 if (hasNative('fetchTickets')) {
     setInterval(() => {
         console.log('Auto-refresh triggered');
-        callNative('fetchTickets');
+        if (state.isLoggedIn) callNative('fetchTickets');
     }, 5 * 60 * 1000); // 5 minutes
     console.log('Auto-refresh scheduled: every 5 minutes');
 }

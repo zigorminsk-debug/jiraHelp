@@ -5,8 +5,8 @@
 Проект не использует Gradle и сторонние Java-зависимости:
 
 - `helpdesk-apk/AndroidManifest.xml` — applicationId `com.csl.helpdesk`, min API 21,
-  target API 33, версия из исходников `1.10.3` / code `11`.
-- `helpdesk-apk/src/` — Java Activity и JS bridge для обмена/телефона/буфера.
+  target API 33, версия из исходников `1.10.4` / code `12`.
+- `helpdesk-apk/src/` — Java Activity, native HTTPS Jira read-only клиент и JS bridge.
 - `helpdesk-apk/res/`, `helpdesk-apk/assets/` — Android-ресурсы и локальный HTML/JS.
 - `helpdesk-app/` и `v18_base/` не попадают в APK.
 

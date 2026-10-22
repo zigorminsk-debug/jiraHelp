@@ -21,20 +21,22 @@ Workflow `.github/workflows/android-apk.yml` использует JDK17 / SDK33 
 `helpdesk-app/` — отдельная демо, `v18_base/` — неизменяемый исторический снимок,
 не источник сборки и не безопасный production-вариант.
 
-## Критическое ограничение
-Методов Jira API нет в предоставленной Activity. Не утверждать, что вход
-аутентифицирован, заявки/статусы отправляются в Jira или существует фоновый polling.
-`callNative` сообщает об отсутствующем методе, локальные изменения помечены в UI.
-Пароль не сохраняется, backup выключен, HTTP выключен. Не включать глобальный
-cleartext, file universal access или произвольный `readFile` ради интеграции.
+## Текущая Jira-интеграция (1.10.4)
+Добавлены native `savePrefs`, `testConnection(server,user,password)`, `fetchTickets`,
+`clearSession`, pure-Java `JiraClient` (REST v2 Basic HTTPS) и UI callbacks.
+Подробности: `docs/JIRA_CONNECTION.md`. Проверка сервера владельца не выполнялась
+(домен не разрешен outbound sandbox). Не обещать подтвержденную авторизацию
+на `h.csl.by` до теста на телефоне. Полный Jira backend не реализован:
+create/status/comments остаются локальными, SSO/Bearer PAT/Cloud search v3 нет.
+Не включать cleartext/universal file access/небезопасный TLS для подключения.
 
 ## Дальше
 1. Проверить фактический результат CI и установить APK на Android 21/33+.
-2. Для Jira запросить требования: Server/Data Center/Cloud, версию REST API,
+2. Для расширения Jira запросить требования: Server/Data Center/Cloud, версию REST API,
    схему авторизации, проекты, типы задач и transitions. Без этих данных не
    обещать совместимость и не хардкодить Task/HD для реальной записи.
-3. Реализовать/протестировать сетевой слой, HTTPS, timeouts, pagination,
-   проверку ответов, безопасную передачу JSON в WebView, отмену запросов при logout.
+3. Расширять существующий read-only сетевой слой только с регрессиями.
+   Добавить Android integration tests для session races и реального TLS/API.
 4. Убрать legacy callbacks и демо-данные по согласованию; описания Cloud ADF
    требуют преобразования в текст, сейчас полной поддержки нет.
 5. Продолжить тесты реального DOM/WebView, доступности, PWA offline/update,

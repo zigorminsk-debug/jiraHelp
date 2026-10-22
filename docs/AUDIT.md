@@ -181,3 +181,27 @@ production-подписи и совместимости с прежним сер
   который сам запускает те же проверки перед сборкой. Это не пропуск тестирования.
 - Повторная сборка создает новый подписанный APK в новом prerelease, предыдущие
   ссылки сохраняются. Физическое устройство не тестировалось; Jira API не добавлялся.
+
+## 2026-10-22 — исправление отсутствующего подключения (1.10.4 / code12)
+
+По скриншоту телефона подтверждено: сообщение про `testConnection` обусловлено
+отсутствием реализации в предыдущем APK, а не диагностикой сервера. Добавлены
+нативный Jira REST v2 transport (GET myself/search), Basic Auth, HTTPS/TLS default,
+запрет redirects, timeouts/response limits/безопасные сообщения ошибок.
+Session credentials только в памяти; logout/destroy инвалидирует callbacks старого
+аккаунта. Список загружается постранично; частичные результаты при ошибках не
+применяются. Данные callback передаются через JSON serialization/parse, не JS code.
+Тест кандидатных credentials не меняет активный аккаунт; реальный результат виден
+в настройках, надпись «Онлайн» не выставляется по факту ввода данных.
+
+JS: успешный пустой снимок очищает старые server tickets, сохраняет LOCAL drafts;
+обновляются descriptions/client/created и поддерживается текстовое представление ADF.
+Периодический refresh не выполняется после logout. Создание/status/comments по-прежнему
+локальные; release notes/README/AGENTS обновлены, ограничение явно документировано.
+
+Локально: 18 Node tests успешны, `bash -n scripts/*.sh` успешно. JVM transport tests
+добавлены в `tests/java/JiraClientTest.java` и CI (`scripts/test-java.sh`): fake HTTP,
+URL/context path, auth/header, redirects, HTTP ошибки, HTML вместо JSON, response cap,
+disconnect. JDK локально отсутствует — реальная компиляция/выполнение проверяются CI.
+Сервер `h.csl.by` не проверялся из sandbox (outbound restrictions); реальные credentials
+не запрашивались. Инструкции и следующий device test: `docs/JIRA_CONNECTION.md`.

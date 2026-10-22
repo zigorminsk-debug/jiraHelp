@@ -13,7 +13,7 @@ Automated signed **debug/test APK**, not a production release.
 
 - Source commit: $GITHUB_SHA
 - Run: https://github.com/$GH_REPO/actions/runs/$GITHUB_RUN_ID
-- Offline HelpDesk shell: Jira REST integration is not implemented in the supplied sources.
+- Native read-only Jira REST v2 over HTTPS with Basic Auth: connection test and issue loading. Creation/status/comments remain local. Jira Server/Data Center is the initial target; SSO-only and newer Cloud search APIs need separate support.
 - Disposable debug signing key changes each build. Export local data before uninstalling an older build if signatures differ.
 - Download $APK; SHA256SUMS and signature.txt allow integrity/certificate checks.
 - Installation and runtime on a physical Android device are not automatically tested.

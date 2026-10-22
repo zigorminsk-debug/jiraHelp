@@ -13,6 +13,9 @@ runs:
       with:
         distribution: temurin
         java-version: '17'
+    - name: Test native Jira transport
+      shell: bash
+      run: bash scripts/test-java.sh
     - name: Install pinned SDK packages
       shell: bash
       run: |
