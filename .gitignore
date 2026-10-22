@@ -1,0 +1,10 @@
+/build/
+*.apk
+*.apk.idsig
+*.jks
+*.keystore
+local.properties
+/android-sdk/
+/jdk-*/
+node_modules/
+__pycache__/

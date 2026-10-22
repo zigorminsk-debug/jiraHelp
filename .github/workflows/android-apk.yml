@@ -1,0 +1,36 @@
+name: Android APK
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Source regression checks
+        run: node --test tests/*.test.cjs
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install pinned SDK packages
+        run: sdkmanager 'platforms;android-33' 'build-tools;35.0.0'
+      - name: Build and verify signed debug APK
+        run: bash scripts/build-apk.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CSL-HelpDesk-debug-${{ github.run_number }}-${{ github.run_attempt }}
+          path: build/android/CSL-HelpDesk-debug.apk
+          if-no-files-found: error
+          retention-days: 14

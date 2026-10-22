@@ -1,0 +1,1674 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#e8650a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Agent Jira Helpdesk — CSL</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        :root {
+            --bg-primary: #0d0d1a;
+            --bg-secondary: #1a1a2e;
+            --bg-card: #1e1e35;
+            --bg-input: #252542;
+            --accent: #e8650a;
+            --accent-light: #ff8c38;
+            --accent-dark: #c45200;
+            --text-primary: #f0f0f0;
+            --text-secondary: #9a9ab0;
+            --text-muted: #6b6b80;
+            --success: #2ecc71;
+            --warning: #f39c12;
+            --danger: #e74c3c;
+            --info: #3498db;
+            --border: #2a2a45;
+        }
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        .user-select { -webkit-user-select: text; user-select: text; }
+
+        /* ===== LOGIN SCREEN ===== */
+        #login-screen {
+            position: fixed;
+            inset: 0;
+            background: var(--bg-primary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            padding: 24px;
+        }
+        #login-screen.hidden { display: none; }
+        .login-logo {
+            width: 80px; height: 80px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-light));
+            border-radius: 20px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 36px; font-weight: bold; color: white;
+            margin-bottom: 16px;
+        }
+        .login-title { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+        .login-sub { font-size: 13px; color: var(--text-secondary); margin-bottom: 32px; }
+        .login-form { width: 100%; max-width: 360px; }
+        .login-field { margin-bottom: 14px; }
+        .login-field label { display: block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .login-field input {
+            width: 100%; padding: 14px 16px;
+            background: var(--bg-input); border: 1px solid var(--border); border-radius: 12px;
+            color: var(--text-primary); font-size: 15px; outline: none;
+            -webkit-user-select: text; user-select: text;
+        }
+        .login-field input:focus { border-color: var(--accent); }
+        .login-error { color: var(--danger); font-size: 12px; margin-bottom: 12px; min-height: 16px; }
+        .btn-login {
+            width: 100%; padding: 15px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-light));
+            border: none; border-radius: 12px;
+            color: white; font-size: 16px; font-weight: 600;
+            cursor: pointer; margin-bottom: 16px;
+        }
+        .btn-login:active { transform: scale(0.97); opacity: 0.9; }
+        .login-hint { font-size: 11px; color: var(--text-muted); text-align: center; line-height: 1.5; }
+        .login-loading { display: none; text-align: center; color: var(--text-secondary); font-size: 13px; }
+        .login-loading.show { display: block; }
+
+        /* ===== MAIN APP ===== */
+        .app { display: none; height: 100%; flex-direction: column; max-width: 480px; margin: 0 auto; position: relative; }
+        .app.active { display: flex; }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--bg-secondary), var(--bg-card));
+            padding: 12px 16px;
+            display: flex; align-items: center; justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+            padding-top: calc(12px + env(safe-area-inset-top));
+        }
+        .header-logo { display: flex; align-items: center; gap: 8px; }
+        .header-logo .logo-icon {
+            width: 32px; height: 32px; background: var(--accent); border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; font-size: 16px; color: white;
+        }
+        .header-logo .logo-text { font-size: 14px; font-weight: 600; }
+        .header-logo .logo-sub { font-size: 10px; color: var(--text-secondary); }
+        .header-actions { display: flex; gap: 10px; align-items: center; }
+        .header-btn {
+            width: 34px; height: 34px; border-radius: 8px;
+            background: var(--bg-input); border: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; color: var(--text-secondary); position: relative;
+        }
+        .header-btn:active { transform: scale(0.9); }
+        .header-btn.refresh { color: var(--accent); }
+        .header-btn.refresh:active { transform: rotate(180deg); }
+        .header-btn .badge {
+            position: absolute; top: -3px; right: -3px;
+            width: 14px; height: 14px; background: var(--danger); border-radius: 50%;
+            font-size: 8px; display: flex; align-items: center; justify-content: center;
+            color: white; font-weight: bold;
+        }
+        .avatar {
+            width: 34px; height: 34px; border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), var(--accent-light));
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; font-size: 12px; cursor: pointer;
+            border: 2px solid var(--accent);
+        }
+
+        /* Content */
+        .content { flex: 1; overflow-y: auto; padding: 14px; padding-bottom: 80px; }
+        .content::-webkit-scrollbar { display: none; }
+
+        /* Pages */
+        .page { display: none; animation: fadeIn 0.2s ease; }
+        .page.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Stats */
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+        .stat-card {
+            background: var(--bg-card); border-radius: 12px; padding: 12px;
+            border: 1px solid var(--border); position: relative; overflow: hidden;
+        }
+        .stat-card::after { content:''; position: absolute; top:0; right:0; width:50px; height:50px; border-radius:50%; opacity:0.08; }
+        .stat-card.orange::after { background: var(--accent); }
+        .stat-card.blue::after { background: var(--info); }
+        .stat-card.green::after { background: var(--success); }
+        .stat-card.red::after { background: var(--danger); }
+        .stat-value { font-size: 24px; font-weight: 800; margin-bottom: 2px; }
+        .stat-card.orange .stat-value { color: var(--accent); }
+        .stat-card.blue .stat-value { color: var(--info); }
+        .stat-card.green .stat-value { color: var(--success); }
+        .stat-card.red .stat-value { color: var(--danger); }
+        .stat-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+
+        /* Section */
+        .section-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+        .section-title .see-all { font-size: 11px; color: var(--accent); cursor: pointer; }
+
+        /* Tickets */
+        .ticket-list { display: flex; flex-direction: column; gap: 8px; }
+        .ticket-card {
+            background: var(--bg-card); border-radius: 12px; padding: 12px;
+            border: 1px solid var(--border); cursor: pointer; transition: all 0.15s;
+        }
+        .ticket-card:active { transform: scale(0.98); border-color: var(--accent); }
+        .ticket-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+        .ticket-id { font-size: 10px; color: var(--text-muted); font-family: monospace; }
+        .ticket-priority { font-size: 9px; padding: 2px 7px; border-radius: 14px; font-weight: 600; text-transform: uppercase; }
+        .priority-critical { background: rgba(231,76,60,0.15); color: var(--danger); }
+        .priority-high { background: rgba(243,156,18,0.15); color: var(--warning); }
+        .priority-medium { background: rgba(52,152,219,0.15); color: var(--info); }
+        .priority-low { background: rgba(46,204,113,0.15); color: var(--success); }
+        .ticket-title { font-size: 13px; font-weight: 500; margin-bottom: 6px; line-height: 1.3; }
+        .ticket-meta { display: flex; align-items: center; justify-content: space-between; }
+        .ticket-status { font-size: 10px; padding: 2px 8px; border-radius: 14px; font-weight: 500; }
+        .status-open { background: rgba(243,156,18,0.15); color: var(--warning); }
+        .status-in-progress { background: rgba(52,152,219,0.15); color: var(--info); }
+        .status-resolved { background: rgba(46,204,113,0.15); color: var(--success); }
+        .status-closed { background: rgba(107,107,128,0.15); color: var(--text-muted); }
+        .ticket-time { font-size: 10px; color: var(--text-muted); }
+
+        /* Search & Filters */
+        .search-bar {
+            display: flex; align-items: center; gap: 8px;
+            background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
+            padding: 9px 12px; margin-bottom: 10px;
+        }
+        .search-bar svg { color: var(--text-muted); flex-shrink: 0; }
+        .search-bar input {
+            flex: 1; background: none; border: none;
+            color: var(--text-primary); font-size: 13px; outline: none;
+            -webkit-user-select: text; user-select: text;
+        }
+        .search-bar input::placeholder { color: var(--text-muted); }
+        .filters-row { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; margin-bottom: 10px; -webkit-overflow-scrolling: touch; }
+        .filters-row::-webkit-scrollbar { display: none; }
+        .filter-chip {
+            padding: 6px 12px; border-radius: 16px; font-size: 11px; font-weight: 500;
+            white-space: nowrap; background: var(--bg-input); border: 1px solid var(--border);
+            color: var(--text-secondary); cursor: pointer;
+        }
+        .filter-chip.active { background: var(--accent); border-color: var(--accent); color: white; }
+
+        /* Forms */
+        .form-group { margin-bottom: 14px; }
+        .form-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 5px; display: block; text-transform: uppercase; letter-spacing: 0.5px; }
+        .form-input, .form-select, .form-textarea {
+            width: 100%; padding: 11px 13px;
+            background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
+            color: var(--text-primary); font-size: 13px; outline: none;
+            -webkit-user-select: text; user-select: text;
+        }
+        .form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--accent); }
+        .form-textarea { min-height: 100px; resize: vertical; font-family: inherit; }
+        .form-select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239a9ab0' stroke-width='2'%3E%3Cpolyline points='6,9 12,15 18,9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; }
+        .btn { width: 100%; padding: 13px; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
+        .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-light)); color: white; }
+        .btn-primary:active { transform: scale(0.97); opacity: 0.9; }
+        .btn-secondary { background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border); }
+
+        /* Detail */
+        .detail-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+        .back-btn {
+            width: 34px; height: 34px; border-radius: 8px;
+            background: var(--bg-input); border: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-secondary);
+        }
+        .detail-title { flex: 1; }
+        .detail-title h3 { font-size: 14px; font-weight: 600; }
+        .detail-title span { font-size: 10px; color: var(--text-muted); }
+        .detail-info, .detail-description { background: var(--bg-card); border-radius: 12px; padding: 12px; border: 1px solid var(--border); margin-bottom: 12px; }
+        .detail-description h4 { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+        .detail-description p { font-size: 13px; line-height: 1.5; }
+        .detail-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+        .detail-row:last-child { border-bottom: none; }
+        .detail-row .label { font-size: 11px; color: var(--text-secondary); }
+        .detail-row .value { font-size: 12px; font-weight: 500; }
+
+        /* Phone links */
+        .phone-link {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 500;
+            cursor: pointer;
+            -webkit-user-select: all;
+            user-select: all;
+        }
+        .phone-link:active { opacity: 0.7; }
+
+        /* Status actions */
+        .status-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+        .status-btn {
+            flex: 1; min-width: 70px; padding: 8px;
+            border-radius: 8px; border: 1px solid var(--border);
+            background: var(--bg-input); color: var(--text-secondary);
+            font-size: 11px; font-weight: 500; cursor: pointer; text-align: center;
+        }
+        .status-btn:active { transform: scale(0.95); }
+        .status-btn.active-status { border-color: var(--accent); background: rgba(232,101,10,0.1); color: var(--accent); }
+
+        /* Comments */
+        .comment-item { background: var(--bg-card); border-radius: 10px; padding: 10px; margin-bottom: 6px; border: 1px solid var(--border); }
+        .comment-author { font-size: 11px; font-weight: 600; color: var(--accent); margin-bottom: 3px; }
+        .comment-text { font-size: 12px; line-height: 1.4; }
+        .comment-time { font-size: 9px; color: var(--text-muted); margin-top: 3px; }
+        .comment-input-row { display: flex; gap: 6px; }
+        .comment-input-row .form-input { flex: 1; }
+        .comment-send-btn {
+            width: 40px; height: 40px; border-radius: 8px;
+            background: var(--accent); border: none;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; color: white; flex-shrink: 0;
+        }
+
+        /* Share bar */
+        .share-bar {
+            display: flex; gap: 8px; margin-top: 12px; padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+        .share-btn {
+            flex: 1; padding: 8px 4px;
+            border-radius: 8px; border: 1px solid var(--border);
+            background: var(--bg-input); color: var(--text-secondary);
+            font-size: 10px; font-weight: 500; cursor: pointer;
+            text-align: center; display: flex; flex-direction: column;
+            align-items: center; gap: 3px;
+        }
+        .share-btn:active { transform: scale(0.95); }
+        .share-btn svg { width: 18px; height: 18px; }
+        .share-btn.telegram { color: #0088cc; border-color: rgba(0,136,204,0.3); }
+        .share-btn.whatsapp { color: #25d366; border-color: rgba(37,211,102,0.3); }
+        .share-btn.viber { color: #7360f2; border-color: rgba(115,96,242,0.3); }
+        .share-btn.copy { color: var(--text-secondary); }
+
+        /* Notifications */
+        .notification-item { display: flex; gap: 10px; padding: 12px; background: var(--bg-card); border-radius: 10px; margin-bottom: 6px; border: 1px solid var(--border); }
+        .notification-item.unread { border-left: 3px solid var(--accent); }
+        .notification-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .notification-icon.update { background: rgba(52,152,219,0.15); color: var(--info); }
+        .notification-icon.alert { background: rgba(231,76,60,0.15); color: var(--danger); }
+        .notification-icon.success { background: rgba(46,204,113,0.15); color: var(--success); }
+        .notification-content { flex: 1; }
+        .notification-content .title { font-size: 12px; font-weight: 500; margin-bottom: 2px; }
+        .notification-content .desc { font-size: 11px; color: var(--text-secondary); }
+        .notification-content .time { font-size: 9px; color: var(--text-muted); margin-top: 3px; }
+
+        /* Profile */
+        .profile-header { text-align: center; padding: 16px 0 20px; }
+        .profile-avatar {
+            width: 70px; height: 70px; border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), var(--accent-light));
+            display: flex; align-items: center; justify-content: center;
+            font-size: 28px; font-weight: bold; color: white;
+            margin: 0 auto 10px; border: 3px solid var(--accent);
+        }
+        .profile-name { font-size: 18px; font-weight: 700; margin-bottom: 3px; }
+        .profile-role { font-size: 12px; color: var(--text-secondary); }
+        .profile-menu { display: flex; flex-direction: column; gap: 2px; }
+        .profile-menu-item {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px; background: var(--bg-card); border-radius: 10px;
+            cursor: pointer;
+        }
+        .profile-menu-item:active { transform: scale(0.98); }
+        .profile-menu-item .icon {
+            width: 32px; height: 32px; border-radius: 8px;
+            background: var(--bg-input); display: flex; align-items: center; justify-content: center;
+            color: var(--accent);
+        }
+        .profile-menu-item .item-text { flex: 1; }
+        .profile-menu-item .item-text .title { font-size: 13px; font-weight: 500; }
+        .profile-menu-item .item-text .subtitle { font-size: 10px; color: var(--text-muted); }
+        .profile-menu-item .chevron { color: var(--text-muted); }
+
+        /* Bottom Nav */
+        .bottom-nav {
+            position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+            width: 100%; max-width: 480px;
+            background: var(--bg-secondary); border-top: 1px solid var(--border);
+            display: flex; justify-content: space-around;
+            padding: 6px 0 calc(6px + env(safe-area-inset-bottom));
+            z-index: 100;
+        }
+        .nav-item {
+            display: flex; flex-direction: column; align-items: center; gap: 2px;
+            cursor: pointer; padding: 4px 10px; border-radius: 8px;
+            color: var(--text-muted);
+        }
+        .nav-item.active { color: var(--accent); }
+        .nav-item:active { transform: scale(0.9); }
+        .nav-item svg { width: 20px; height: 20px; }
+        .nav-item span { font-size: 9px; font-weight: 500; }
+
+        /* Empty state */
+        .empty-state { text-align: center; padding: 30px 20px; }
+        .empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.3; }
+        .empty-state h3 { font-size: 14px; margin-bottom: 4px; }
+        .empty-state p { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
+
+        /* Toast */
+        .toast {
+            position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(80px);
+            background: var(--bg-card); color: var(--text-primary);
+            padding: 10px 16px; border-radius: 10px; font-size: 12px; font-weight: 500;
+            border: 1px solid var(--border); z-index: 1000;
+            opacity: 0; transition: all 0.25s ease; pointer-events: none;
+            max-width: 90%;
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+        /* Server settings modal */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+            z-index: 5000; display: none; align-items: center; justify-content: center;
+            padding: 20px;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: var(--bg-card); border-radius: 16px; padding: 20px;
+            width: 100%; max-width: 340px; border: 1px solid var(--border);
+        }
+        .modal h3 { font-size: 16px; margin-bottom: 16px; }
+        .modal .btn-row { display: flex; gap: 6px; margin-top: 16px; }
+        .modal .btn-row .btn { flex: 1; font-size: 12px; padding: 11px; }
+
+        /* Project list */
+        .project-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px; margin-bottom: 6px;
+            background: var(--bg-input); border-radius: 8px;
+            cursor: pointer; border: 1px solid var(--border);
+        }
+        .project-item:active { transform: scale(0.97); border-color: var(--accent); }
+        .project-key { font-weight: 700; color: var(--accent); font-size: 13px; min-width: 50px; }
+        .project-name { font-size: 13px; color: var(--text-primary); flex: 1; }
+
+        /* Server status */
+        .server-status {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 10px; padding: 4px 10px;
+            background: var(--bg-input); border-radius: 8px;
+            color: var(--text-secondary);
+        }
+        .server-dot { width: 6px; height: 6px; border-radius: 50%; }
+        .server-dot.online { background: var(--success); }
+        .server-dot.offline { background: var(--danger); }
+
+        /* Greeting */
+        .greeting { margin-bottom: 14px; }
+        .greeting h2 { font-size: 18px; font-weight: 700; margin-bottom: 2px; }
+        .greeting p { font-size: 12px; color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+
+<!-- ===== LOGIN SCREEN ===== -->
+<div id="login-screen">
+    <div class="login-logo">J</div>
+    <div class="login-title">HelpDesk Agent</div>
+    <div class="login-sub">Компьютерная безопасность · CSL.by</div>
+
+    <div class="login-form" id="login-form">
+        <div class="login-field">
+            <label>Сервер Jira</label>
+            <input type="text" id="login-server" placeholder="https://jira.yourcompany.by" autocomplete="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="login-field">
+            <label>Логин / Email</label>
+            <input type="text" id="login-username" placeholder="user@company.by" autocomplete="username">
+        </div>
+        <div class="login-field">
+            <label>Пароль (не требуется в локальном режиме)</label>
+            <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password">
+        </div>
+        <div class="login-error" id="login-error"></div>
+        <button class="btn-login" id="btn-login" onclick="doLogin()">Открыть локально</button>
+        <div class="login-loading" id="login-loading">Открытие интерфейса...</div>
+        <div class="login-hint">Локальный режим: Jira API в исходниках не реализован.<br>Не вводите настоящий пароль. Заявки сохраняются на устройстве.</div>
+    </div>
+</div>
+
+<!-- ===== MAIN APP ===== -->
+<div class="app" id="main-app">
+    <!-- Header -->
+    <div class="header">
+        <div class="header-logo">
+            <div class="logo-icon">J</div>
+            <div>
+                <div class="logo-text">HelpDesk Agent</div>
+                <div class="logo-sub" id="header-server-name">CSL.by</div>
+            </div>
+        </div>
+        <div class="header-actions">
+            <div class="server-status" onclick="showSettings()">
+                <span class="server-dot online" id="server-dot"></span>
+                <span id="server-name-label">Онлайн</span>
+            </div>
+            <div class="header-btn refresh" onclick="refreshTickets()" title="Обновить">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </div>
+            <div class="header-btn" onclick="showPage('notifications')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                <span class="badge" id="notif-badge" style="display:none">0</span>
+            </div>
+            <div class="avatar" id="header-avatar" onclick="showPage('profile')">??</div>
+        </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+        <!-- Dashboard -->
+        <div class="page active" id="page-dashboard">
+            <div class="greeting">
+                <h2 id="greeting-text">Добрый день</h2>
+                <p id="greeting-sub">Загрузка...</p>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-card orange" onclick="filterAndShow('open')" style="cursor:pointer">
+                    <div class="stat-value" id="stat-open">0</div>
+                    <div class="stat-label">Открытых</div>
+                </div>
+                <div class="stat-card blue" onclick="filterAndShow('in-progress')" style="cursor:pointer">
+                    <div class="stat-value" id="stat-progress">0</div>
+                    <div class="stat-label">В работе</div>
+                </div>
+                <div class="stat-card green" onclick="filterAndShow('resolved')" style="cursor:pointer">
+                    <div class="stat-value" id="stat-resolved">0</div>
+                    <div class="stat-label">Решено</div>
+                </div>
+                <div class="stat-card red" onclick="filterAndShow('overdue')" style="cursor:pointer">
+                    <div class="stat-value" id="stat-overdue">0</div>
+                    <div class="stat-label">Просрочено</div>
+                </div>
+            </div>
+            <div class="section-title"><span>Последние заявки</span><span class="see-all" onclick="showPage('tickets')">Все →</span></div>
+            <div class="ticket-list" id="dash-tickets"></div>
+        </div>
+
+        <!-- Tickets -->
+        <div class="page" id="page-tickets">
+            <div class="search-bar">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" placeholder="Поиск заявок..." id="search-input" oninput="renderTickets()">
+            </div>
+            <div class="filters-row">
+                <div class="filter-chip active" data-filter="all" onclick="setFilter(this,'all')">Все</div>
+                <div class="filter-chip" data-filter="open" onclick="setFilter(this,'open')">Открытые</div>
+                <div class="filter-chip" data-filter="in-progress" onclick="setFilter(this,'in-progress')">В работе</div>
+                <div class="filter-chip" data-filter="resolved" onclick="setFilter(this,'resolved')">Решённые</div>
+                <div class="filter-chip" data-filter="closed" onclick="setFilter(this,'closed')">Закрытые</div>
+            </div>
+            <div class="ticket-list" id="all-tickets"></div>
+        </div>
+
+        <!-- Create -->
+        <div class="page" id="page-create">
+            <div class="greeting"><h2>Новая заявка</h2><p>Заполните форму обращения</p></div>
+            <div class="form-group">
+                <label class="form-label">Тема *</label>
+                <input class="form-input" type="text" placeholder="Кратко опишите проблему..." id="tk-subject">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Категория *</label>
+                <select class="form-select" id="tk-category">
+                    <option value="">Выберите категорию</option>
+                    <option value="admin">Системное администрирование</option>
+                    <option value="print">Заправка картриджей</option>
+                    <option value="repair">Ремонт оргтехники</option>
+                    <option value="telephony">Настройка АТС</option>
+                    <option value="electronics">Ремонт электроники</option>
+                    <option value="network">Сеть / Интернет</option>
+                    <option value="software">Программное обеспечение</option>
+                    <option value="access">Доступы / Учётные записи</option>
+                    <option value="cctv">Видеонаблюдение и СКУД</option>
+                    <option value="other">Другое</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Приоритет</label>
+                <select class="form-select" id="tk-priority">
+                    <option value="low">Низкий</option>
+                    <option value="medium" selected>Средний</option>
+                    <option value="high">Высокий</option>
+                    <option value="critical">Критический</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Телефон клиента</label>
+                <input class="form-input" type="tel" placeholder="+375 (XX) XXX-XX-XX" id="tk-phone">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Исполнитель</label>
+                <select class="form-select" id="tk-assignee">
+                    <option value="">Автоматически</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Описание</label>
+                <textarea class="form-textarea" placeholder="Подробно опишите проблему..." id="tk-desc"></textarea>
+            </div>
+            <button class="btn btn-primary" onclick="createTicket()">Создать заявку</button>
+        </div>
+
+        <!-- Detail -->
+        <div class="page" id="page-detail">
+            <div class="detail-header">
+                <div class="back-btn" onclick="goBack()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg>
+                </div>
+                <div class="detail-title">
+                    <h3 id="dt-title">—</h3>
+                    <span id="dt-id">—</span>
+                </div>
+            </div>
+            <div class="detail-info" id="dt-info"></div>
+            <div class="detail-description">
+                <h4>Описание</h4>
+                <p id="dt-desc" class="user-select">—</p>
+            </div>
+            <div class="status-actions" id="dt-status"></div>
+            <div class="share-bar" id="dt-share"></div>
+            <div class="section-title" style="margin-top:16px"><span>Комментарии</span></div>
+            <div id="dt-comments"></div>
+            <div class="comment-input-row" style="margin-top:10px">
+                <input class="form-input" type="text" placeholder="Комментарий..." id="cm-input">
+                <button class="comment-send-btn" onclick="addComment()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22,2 15,22 11,13 2,9 22,2"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Notifications -->
+        <div class="page" id="page-notifications">
+            <div class="greeting"><h2>Уведомления</h2><p>События по заявкам</p></div>
+            <div id="notif-list"></div>
+        </div>
+
+        <!-- Profile -->
+        <div class="page" id="page-profile">
+            <div class="profile-header">
+                <div class="profile-avatar" id="pr-avatar">??</div>
+                <div class="profile-name" id="pr-name">Пользователь</div>
+                <div class="profile-role" id="pr-role">Инженер поддержки</div>
+            </div>
+            <div class="profile-menu">
+                <div class="profile-menu-item" onclick="showSettings()">
+                    <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+                    <div class="item-text"><div class="title">Настройки сервера</div><div class="subtitle" id="pr-server">Не подключён</div></div>
+                    <span class="chevron">›</span>
+                </div>
+                <div class="profile-menu-item" onclick="showMyTickets()">
+                    <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></div>
+                    <div class="item-text"><div class="title">Мои заявки</div><div class="subtitle">Назначенные на меня</div></div>
+                    <span class="chevron">›</span>
+                </div>
+                <div class="profile-menu-item" onclick="showPage('notifications')">
+                    <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></div>
+                    <div class="item-text"><div class="title">Уведомления</div><div class="subtitle">Оповещения и алерты</div></div>
+                    <span class="chevron">›</span>
+                </div>
+                <div class="profile-menu-item" onclick="exportData()">
+                    <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+                    <div class="item-text"><div class="title">Экспорт данных</div><div class="subtitle">Сохранить заявки в JSON</div></div>
+                    <span class="chevron">›</span>
+                </div>
+                <div class="profile-menu-item" onclick="doLogout()">
+                    <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></div>
+                    <div class="item-text"><div class="title">Выйти</div><div class="subtitle">Завершить сессию</div></div>
+                    <span class="chevron">›</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Nav -->
+    <div class="bottom-nav">
+        <div class="nav-item active" data-page="dashboard" onclick="showPage('dashboard')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>
+            <span>Главная</span>
+        </div>
+        <div class="nav-item" data-page="tickets" onclick="showPage('tickets')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <span>Заявки</span>
+        </div>
+        <div class="nav-item" data-page="create" onclick="showPage('create')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            <span>Создать</span>
+        </div>
+        <div class="nav-item" data-page="notifications" onclick="showPage('notifications')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span>Алерты</span>
+        </div>
+        <div class="nav-item" data-page="profile" onclick="showPage('profile')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span>Профиль</span>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settings-modal">
+    <div class="modal">
+        <h3>Настройки сервера</h3>
+        <div class="form-group">
+            <label class="form-label">URL сервера Jira</label>
+            <input class="form-input" type="text" id="set-server" placeholder="https://jira.yourcompany.by" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Логин</label>
+            <input class="form-input" type="text" id="set-login" placeholder="user@company.by">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Пароль / API токен</label>
+            <input class="form-input" type="password" id="set-password" placeholder="••••••••">
+        </div>
+        <div class="btn-row">
+            <button class="btn btn-secondary" onclick="testConnection()"> Тест</button>
+            <button class="btn btn-secondary" onclick="hideSettings()">Отмена</button>
+            <button class="btn btn-primary" onclick="saveSettings()">Сохранить</button>
+        </div>
+        <div id="test-result" style="margin-top:10px;font-size:12px;color:var(--text-secondary);text-align:center;min-height:16px"></div>
+    </div>
+</div>
+
+<script src="safety.js"></script>
+<script>
+// ===== STATE =====
+let state = {
+    server: '',
+    username: '',
+    password: '',
+    isLoggedIn: false,
+    tickets: [],
+    notifications: [],
+    currentFilter: 'all',
+    currentTicketId: null,
+    previousPage: 'dashboard'
+};
+
+// Cash register sound
+let cashSound = null;
+function loadCashSound() {
+    try {
+        cashSound = new Audio('cash_register.wav');
+        cashSound.volume = 0.8;
+        cashSound.preload = 'auto';
+    } catch(e) {}
+}
+
+function playCashSound() {
+    try {
+        if (cashSound) {
+            cashSound.currentTime = 0;
+            cashSound.play().catch(() => {});
+        }
+    } catch(e) {}
+}
+
+// ===== SERVER URL HELPER =====
+function normalizeServerUrl(url) {
+    if (!url) return '';
+    url = url.trim();
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://' + url;
+    }
+    try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== 'https:' || !parsed.hostname || parsed.username || parsed.password) return '';
+        return parsed.origin + parsed.pathname.replace(/\/+$/, '');
+    } catch (_) { return ''; }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    ['login-server', 'set-server'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('blur', () => {
+                if (el.value.trim()) el.value = normalizeServerUrl(el.value);
+            });
+            el.addEventListener('input', () => {
+                el.value = el.value.replace(/\. +/g, '.');
+            });
+        }
+    });
+});
+
+// ===== PHONE PARSING =====
+function normalizePhone(raw) {
+    if (!raw) return null;
+    if (!/^[+0-9\s().-]+$/.test(String(raw))) return null;
+    let p = String(raw).replace(/[\s\-\(\)\.]/g, '');
+    // +375XX... format
+    if (p.startsWith('+375') && p.length === 13) return '+' + p.substring(1);
+    // 80XX... format (Belarus old style)
+    if (p.startsWith('80') && p.length === 11) return '+375' + p.substring(2);
+    // 375XX... without +
+    if (p.startsWith('375') && p.length === 12) return '+' + p;
+    // XX...XXX format - 9 digits starting with operator code (29, 33, 44, 25, 17)
+    if (p.length === 9 && /^[1-4]/.test(p)) return '+375' + p;
+    // 7 digits - city number
+    if (p.length === 7) return '+375' + p;
+    // Already has +
+    if (p.startsWith('+')) return p;
+    return '+375' + p;
+}
+
+function formatPhoneDisplay(raw) {
+    let n = normalizePhone(raw);
+    if (!n) return escapeHtml(raw || '');
+    // +375 29 123 23 23
+    if (n.length === 13 && n.startsWith('+375')) {
+        return '+' + n.substring(1, 4) + ' ' + n.substring(4, 6) + ' ' + n.substring(6, 9) + '-' + n.substring(9, 11) + '-' + n.substring(11, 13);
+    }
+    return n;
+}
+
+function makePhoneLink(raw) {
+    let n = normalizePhone(raw);
+    if (!n) return escapeHtml(raw || '');
+    let display = formatPhoneDisplay(raw);
+    return '<a class="phone-link" onclick="callPhone(\'' + n + '\')" href="tel:' + n + '">' + display + '</a>';
+}
+
+function callPhone(number) {
+    if (window.AndroidBridge) {
+        callNative('callPhone', number);
+    } else {
+        window.location.href = 'tel:' + number;
+    }
+}
+
+// ===== AUTH =====
+function doLogin() {
+    const server = document.getElementById('login-server').value.trim();
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    const errorEl = document.getElementById('login-error');
+    const loadingEl = document.getElementById('login-loading');
+    const btnEl = document.getElementById('btn-login');
+
+    if (!server || !username || (hasNative('savePrefs') && !password)) {
+        errorEl.textContent = 'Заполните все поля';
+        return;
+    }
+
+    const checkedServer = normalizeServerUrl(server);
+    if (!checkedServer) { errorEl.textContent = 'Укажите корректный HTTPS URL сервера'; return; }
+    errorEl.textContent = '';
+    btnEl.style.display = 'none';
+    loadingEl.classList.add('show');
+
+    const normalizedServer = normalizeServerUrl(server);
+    if (!normalizedServer) { showToast('Укажите корректный HTTPS URL сервера'); return; }
+    if (localStorage.getItem('csl_hd_server') !== normalizedServer || localStorage.getItem('csl_hd_username') !== username) {
+        state.tickets = []; state.notifications = []; saveTickets();
+    }
+    state.server = normalizedServer;
+    state.username = username;
+    state.password = password;
+    state.isLoggedIn = true;
+
+    localStorage.setItem('csl_hd_server', normalizedServer);
+    localStorage.setItem('csl_hd_username', username);
+    localStorage.removeItem('csl_hd_password');
+
+    // Save to native side
+    try {
+        if (hasNative('savePrefs')) {
+            callNative('savePrefs', normalizedServer, username, password);
+        }
+    } catch(e) {
+        console.error('savePrefs error:', e);
+    }
+
+    setTimeout(() => {
+        loadingEl.classList.remove('show');
+        btnEl.style.display = 'block';
+        try {
+            enterApp();
+        } catch(e) {
+            console.error('enterApp error:', e);
+            errorEl.textContent = 'Ошибка входа: ' + e.message;
+        }
+    }, 600);
+}
+
+function doLogout() {
+    state.isLoggedIn = false;
+    state.password = '';
+    state.server = '';
+    state.username = '';
+    localStorage.removeItem('csl_hd_tickets');
+    localStorage.removeItem('csl_hd_notifications');
+    state.tickets = [];
+    state.notifications = [];
+    localStorage.removeItem('csl_hd_server');
+    localStorage.removeItem('csl_hd_username');
+    localStorage.removeItem('csl_hd_password');
+    document.getElementById('main-app').classList.remove('active');
+    document.getElementById('login-screen').classList.remove('hidden');
+    document.getElementById('login-username').value = '';
+    document.getElementById('login-password').value = '';
+}
+
+function enterApp() {
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('main-app').classList.add('active');
+
+    // Set user info
+    const initials = state.username.substring(0, 2).toUpperCase();
+    document.getElementById('header-avatar').textContent = initials;
+    document.getElementById('pr-avatar').textContent = initials;
+    document.getElementById('pr-name').textContent = state.username;
+    document.getElementById('header-server-name').textContent = new URL(state.server).hostname;
+    document.getElementById('pr-server').textContent = new URL(state.server).hostname;
+    document.getElementById('server-name-label').textContent = 'Локальный режим';
+    document.getElementById('server-dot').className = 'server-dot offline';
+
+    // Save prefs to native side
+    if (hasNative('savePrefs')) {
+        callNative('savePrefs', state.server, state.username, state.password);
+        // Fetch tickets from server
+        callNative('fetchTickets');
+    }
+
+    // Update greeting
+    const h = new Date().getHours();
+    let greet = h < 6 ? 'Доброй ночи' : h < 12 ? 'Доброе утро' : h < 18 ? 'Добрый день' : 'Добрый вечер';
+    document.getElementById('greeting-text').textContent = greet + ', ' + state.username.split('@')[0];
+    document.getElementById('greeting-sub').textContent = 'Смена: 08:00 — 20:00';
+
+    loadCashSound();
+    renderAll();
+}
+
+// ===== SETTINGS =====
+function showSettings() {
+    document.getElementById('set-server').value = state.server;
+    document.getElementById('set-login').value = state.username;
+    document.getElementById('set-password').value = state.password;
+    document.getElementById('settings-modal').classList.add('show');
+}
+
+function hideSettings() {
+    document.getElementById('settings-modal').classList.remove('show');
+}
+
+function saveSettings() {
+    const server = document.getElementById('set-server').value.trim();
+    const login = document.getElementById('set-login').value.trim();
+    const password = document.getElementById('set-password').value;
+    if (!server || !login) { showToast('Заполните сервер и логин'); return; }
+    const normalizedServer = normalizeServerUrl(server);
+    if (!normalizedServer) { showToast('Укажите корректный HTTPS URL сервера'); return; }
+    if (state.server !== normalizedServer || state.username !== login) {
+        state.tickets = []; state.notifications = []; saveTickets();
+    }
+    state.server = normalizedServer;
+    state.username = login;
+    state.password = password;
+    localStorage.setItem('csl_hd_server', normalizedServer);
+    localStorage.setItem('csl_hd_username', login);
+    localStorage.removeItem('csl_hd_password');
+    if (window.AndroidBridge) {
+        callNative('savePrefs', normalizedServer, login, password);
+        callNative('fetchTickets');
+    }
+    hideSettings();
+    showToast('Настройки сохранены');
+    enterApp();
+}
+
+function testConnection() {
+    if (!window.AndroidBridge) {
+        showToast('AndroidBridge недоступен');
+        return;
+    }
+    // Save first so native side has latest creds
+    const server = normalizeServerUrl(document.getElementById('set-server').value.trim());
+    const login = document.getElementById('set-login').value.trim();
+    const password = document.getElementById('set-password').value;
+    if (server && login && hasNative('savePrefs')) {
+        callNative('savePrefs', server, login, password);
+    }
+    document.getElementById('test-result').textContent = 'Подключение...';
+    callNative('testConnection');
+    setTimeout(() => {
+        document.getElementById('test-result').textContent = '';
+    }, 5000);
+}
+
+// ===== TICKETS CRUD =====
+function createTicket() {
+    const subject = document.getElementById('tk-subject').value.trim();
+    const category = document.getElementById('tk-category').value;
+    const priority = document.getElementById('tk-priority').value;
+    const phone = document.getElementById('tk-phone').value.trim();
+    const assignee = document.getElementById('tk-assignee').value;
+    const desc = document.getElementById('tk-desc').value.trim();
+
+    if (!subject || !category) { showToast('Заполните тему и категорию'); return; }
+
+    const now = new Date();
+    const id = 'LOCAL-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    const ticket = {
+        id, subject, category, priority,
+        phone: phone ? normalizePhone(phone) : null,
+        assignee: assignee || 'Система',
+        status: 'open',
+        created: now.toISOString().slice(0, 16),
+        client: state.username.split('@')[0],
+        description: desc || 'Описание не указано',
+        sla: 100,
+        comments: []
+    };
+
+    state.tickets.unshift(ticket);
+    saveTickets();
+
+    // Send to server
+    const priorityMap = { 'low': 'Low', 'medium': 'Medium', 'high': 'High', 'critical': 'Highest' };
+    const serverBody = JSON.stringify({
+        fields: {
+            project: { key: 'HD' },
+            summary: subject,
+            description: desc || '',
+            issuetype: { name: 'Task' },
+            priority: { name: priorityMap[priority] || 'Medium' }
+        }
+    });
+
+    if (hasNative('createTicketOnServer')) {
+        callNative('createTicketOnServer', serverBody);
+    }
+
+    document.getElementById('tk-subject').value = '';
+    document.getElementById('tk-category').value = '';
+    document.getElementById('tk-priority').value = 'medium';
+    document.getElementById('tk-phone').value = '';
+    document.getElementById('tk-assignee').value = '';
+    document.getElementById('tk-desc').value = '';
+
+    showToast('✅ Заявка ' + id + ' создана локально (без Jira)');
+    showPage('tickets');
+}
+
+function changeStatus(id, status) {
+    const t = state.tickets.find(x => x.id === id);
+    if (t) {
+        t.status = status;
+        if (status === 'resolved' || status === 'closed') t.sla = 100;
+        saveTickets();
+        renderTicketDetail(id);
+        renderDashboard();
+        showToast('Статус изменён локально (без Jira)');
+        // Sync with Jira server
+        if (hasNative('syncStatus')) {
+            callNative('syncStatus', id, status);
+        }
+    }
+}
+
+function addComment() {
+    const input = document.getElementById('cm-input');
+    const text = input.value.trim();
+    if (!text || !state.currentTicketId) return;
+    const t = state.tickets.find(x => x.id === state.currentTicketId);
+    if (t) {
+        const now = new Date();
+        t.comments.push({
+            author: state.username.split('@')[0],
+            text,
+            time: now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0')
+        });
+        input.value = '';
+        saveTickets();
+        renderTicketDetail(state.currentTicketId);
+        showToast('Комментарий добавлен');
+    }
+}
+
+// ===== NAVIGATION =====
+function showPage(page) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    const el = document.getElementById('page-' + page);
+    if (el) el.classList.add('active');
+
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    const nav = document.querySelector('.nav-item[data-page="' + page + '"]');
+    if (nav) nav.classList.add('active');
+
+    if (page === 'dashboard') renderDashboard();
+    if (page === 'tickets') renderTickets();
+    if (page === 'notifications') renderNotifications();
+    if (page === 'create') updateAssigneeSelect();
+    if (page === 'profile') renderProfile();
+
+    document.getElementById('notif-badge').style.display = 'none';
+}
+
+function openTicket(id) {
+    state.currentTicketId = id;
+    const active = document.querySelector('.page.active');
+    if (active) state.previousPage = active.id.replace('page-', '');
+    renderTicketDetail(id);
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-detail').classList.add('active');
+}
+
+function goBack() {
+    showPage(state.previousPage);
+}
+
+function setFilter(el, filter) {
+    state.currentFilter = filter;
+    document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+    renderTickets();
+}
+
+function showMyTickets() {
+    state.currentFilter = 'all';
+    document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+    document.querySelector('.filter-chip[data-filter="all"]').classList.add('active');
+    showPage('tickets');
+}
+
+// ===== STAT CLICK FILTER =====
+function filterAndShow(filter) {
+    if (filter === 'overdue') {
+        // Show overdue tickets
+        state.currentFilter = 'open';
+        showPage('tickets');
+        // Filter by SLA < 30
+        setTimeout(() => {
+            const overdue = state.tickets.filter(t => t.sla < 30 && t.status !== 'closed');
+            document.getElementById('all-tickets').innerHTML = overdue.length
+                ? overdue.map(renderTicketCard).join('')
+                : emptyState('⏰', 'Нет просроченных', 'Все заявки в рамках SLA');
+            // Update filter chips
+            document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+        }, 100);
+    } else {
+        state.currentFilter = filter;
+        document.querySelectorAll('.filter-chip').forEach(c => {
+            c.classList.remove('active');
+            if (c.dataset.filter === filter) c.classList.add('active');
+        });
+        showPage('tickets');
+    }
+}
+
+// ===== SHARE =====
+function getTicketShareText(ticket) {
+    const pLabels = { critical: '🔴 Критический', high: '🟠 Высокий', medium: '🔵 Средний', low: '🟢 Низкий' };
+    const sLabels = { 'open': '📂 Открыта', 'in-progress': '🔄 В работе', 'resolved': '✅ Решена', 'closed': ' Закрыта' };
+    let text = '📋 Заявка ' + ticket.id + '\n';
+    text += ' ' + ticket.subject + '\n';
+    text += '📊 Приоритет: ' + (pLabels[ticket.priority] || ticket.priority) + '\n';
+    text += '📈 Статус: ' + (sLabels[ticket.status] || ticket.status) + '\n';
+    text += '👤 Исполнитель: ' + ticket.assignee + '\n';
+    if (ticket.phone) text += ' Телефон: ' + formatPhoneDisplay(ticket.phone) + '\n';
+    text += ' Создана: ' + ticket.created + '\n';
+    if (ticket.description) text += '\n📝 ' + ticket.description;
+    return text;
+}
+
+function shareTicket(text) {
+    if (window.AndroidBridge) {
+        const t = state.tickets.find(x => x.id === state.currentTicketId);
+        callNative('shareTicket', 'Заявка ' + (t ? t.id : ''), text);
+    } else {
+        navigator.clipboard.writeText(text).then(() => showToast('Скопировано'));
+    }
+}
+
+function shareToTelegram() {
+    const t = state.tickets.find(x => x.id === state.currentTicketId);
+    if (!t) return;
+    const text = getTicketShareText(t);
+    if (window.AndroidBridge) callNative('shareToTelegram', text);
+    else window.open('https://t.me/share/url?url=&text=' + encodeURIComponent(text));
+}
+
+function shareToWhatsApp() {
+    const t = state.tickets.find(x => x.id === state.currentTicketId);
+    if (!t) return;
+    const text = getTicketShareText(t);
+    if (window.AndroidBridge) callNative('shareToWhatsApp', text);
+    else window.open('https://wa.me/?text=' + encodeURIComponent(text));
+}
+
+function shareToViber() {
+    const t = state.tickets.find(x => x.id === state.currentTicketId);
+    if (!t) return;
+    const text = getTicketShareText(t);
+    if (window.AndroidBridge) callNative('shareToViber', text);
+    else showToast('Откройте Viber вручную');
+}
+
+function copyTicket() {
+    const t = state.tickets.find(x => x.id === state.currentTicketId);
+    if (!t) return;
+    const text = getTicketShareText(t);
+    if (window.AndroidBridge) callNative('copyToClipboard', text);
+    else navigator.clipboard.writeText(text).then(() => showToast('Скопировано'));
+}
+
+function callFromDetail() {
+    const t = state.tickets.find(x => x.id === state.currentTicketId);
+    if (t && t.phone) callPhone(t.phone);
+}
+
+// ===== RENDER =====
+function renderAll() {
+    renderDashboard();
+    renderTickets();
+    renderNotifications();
+}
+
+function renderDashboard() {
+    const open = state.tickets.filter(t => t.status === 'open').length;
+    const progress = state.tickets.filter(t => t.status === 'in-progress').length;
+    const resolved = state.tickets.filter(t => t.status === 'resolved' || t.status === 'closed').length;
+    const overdue = state.tickets.filter(t => t.sla < 30 && t.status !== 'closed').length;
+
+    document.getElementById('stat-open').textContent = open;
+    document.getElementById('stat-progress').textContent = progress;
+    document.getElementById('stat-resolved').textContent = resolved;
+    document.getElementById('stat-overdue').textContent = overdue;
+
+    const recent = [...state.tickets].sort((a,b) => b.created.localeCompare(a.created)).slice(0, 5);
+    document.getElementById('dash-tickets').innerHTML = recent.length
+        ? recent.map(renderTicketCard).join('')
+        : emptyState('📭', 'Нет заявок', 'Создайте первую заявку через кнопку «Создать»');
+}
+
+function renderTickets() {
+    let filtered = state.tickets;
+    if (state.currentFilter !== 'all') {
+        filtered = filtered.filter(t => t.status === state.currentFilter);
+    }
+    const search = (document.getElementById('search-input')?.value || '').toLowerCase();
+    if (search) {
+        filtered = filtered.filter(t =>
+            t.subject.toLowerCase().includes(search) ||
+            t.id.toLowerCase().includes(search) ||
+            (t.client && t.client.toLowerCase().includes(search))
+        );
+    }
+    document.getElementById('all-tickets').innerHTML = filtered.length
+        ? filtered.map(renderTicketCard).join('')
+        : emptyState('🔍', 'Ничего не найдено', 'Попробуйте изменить фильтр или поисковый запрос');
+}
+
+function renderTicketCard(t) {
+    const pLabels = { critical: 'Критический', high: 'Высокий', medium: 'Средний', low: 'Низкий' };
+    const sLabels = { 'open': 'Открыта', 'in-progress': 'В работе', 'resolved': 'Решена', 'closed': 'Закрыта' };
+    return '<div class="ticket-card" onclick="openTicket(\'' + safeId(t.id) + '\')">' +
+        '<div class="ticket-header"><span class="ticket-id">' + safeId(t.id) + '</span>' +
+        '<span class="ticket-priority priority-' + cssToken(t.priority) + '">' + pLabels[t.priority] + '</span></div>' +
+        '<div class="ticket-title">' + escapeHtml(t.subject) + '</div>' +
+        '<div class="ticket-meta"><span class="ticket-status status-' + cssToken(t.status) + '">' + sLabels[t.status] + '</span>' +
+        '<span class="ticket-time">' + escapeHtml(t.created.split('T')[1] || t.created.split(' ')[1] || '') + '</span></div>' +
+        (t.phone ? '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">📞 ' + formatPhoneDisplay(t.phone) + '</div>' : '') +
+        '</div>';
+}
+
+function renderTicketDetail(id) {
+    const t = state.tickets.find(x => x.id === id);
+    if (!t) return;
+
+    const pLabels = { critical: 'Критический', high: 'Высокий', medium: 'Средний', low: 'Низкий' };
+    const sLabels = { 'open': 'Открыта', 'in-progress': 'В работе', 'resolved': 'Решена', 'closed': 'Закрыта' };
+    const cLabels = { admin:'Сис.администрирование', print:'Заправка/печать', repair:'Ремонт оргтехники', telephony:'Настройка АТС', electronics:'Электроника', network:'Сеть', software:'ПО', access:'Доступы', cctv:'Видеонаблюдение', other:'Другое' };
+
+    document.getElementById('dt-title').textContent = t.subject;
+    document.getElementById('dt-id').textContent = t.id + ' • ' + t.client;
+    document.getElementById('dt-desc').textContent = t.description;
+
+    let phoneHtml = t.phone ? makePhoneLink(t.phone) : 'Не указан';
+    document.getElementById('dt-info').innerHTML =
+        '<div class="detail-row"><span class="label">Категория</span><span class="value">' + escapeHtml(cLabels[t.category]||t.category) + '</span></div>' +
+        '<div class="detail-row"><span class="label">Приоритет</span><span class="value"><span class="ticket-priority priority-' + cssToken(t.priority) + '">' + pLabels[t.priority] + '</span></span></div>' +
+        '<div class="detail-row"><span class="label">Статус</span><span class="value"><span class="ticket-status status-' + cssToken(t.status) + '">' + sLabels[t.status] + '</span></span></div>' +
+        '<div class="detail-row"><span class="label">Исполнитель</span><span class="value">' + escapeHtml(t.assignee) + '</span></div>' +
+        '<div class="detail-row"><span class="label">Телефон</span><span class="value user-select">' + phoneHtml + '</span></div>' +
+        '<div class="detail-row"><span class="label">Создана</span><span class="value">' + escapeHtml(t.created) + '</span></div>' +
+        '<div class="detail-row"><span class="label">SLA</span><span class="value" style="color:' + (t.sla > 60 ? 'var(--success)' : t.sla > 30 ? 'var(--accent)' : 'var(--danger)') + '">' + (Number(t.sla) || 0) + '%</span></div>';
+
+    // Status actions
+    const statuses = ['open','in-progress','resolved','closed'];
+    document.getElementById('dt-status').innerHTML = statuses.map(s =>
+        '<div class="status-btn' + (t.status === s ? ' active-status' : '') + '" onclick="changeStatus(\'' + safeId(t.id) + '\',\'' + s + '\')">' + sLabels[s] + '</div>'
+    ).join('');
+
+    // Share bar
+    document.getElementById('dt-share').innerHTML =
+        '<div class="share-btn copy" onclick="copyTicket()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Копировать</div>' +
+        '<div class="share-btn telegram" onclick="shareToTelegram()"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm5.53 8.16l-1.87 8.81c-.14.63-.51.78-1.03.49l-2.85-2.1-1.37 1.32c-.15.15-.28.28-.58.28l.21-2.95 5.38-4.86c.23-.21-.05-.32-.37-.12l-6.64 4.18-2.86-.89c-.62-.19-.63-.62.13-.92l11.15-4.3c.52-.19.97.12.8.92z"/></svg>Telegram</div>' +
+        '<div class="share-btn whatsapp" onclick="shareToWhatsApp()"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 2.63.85 5.06 2.29 7.03L.46 24l5.12-1.79C7.52 23.46 9.69 24 12 24c6.63 0 12-5.37 12-12S18.63 0 12 0zm0 21.75c-2.03 0-3.93-.56-5.56-1.54l-.4-.24-3.04 1.06.82-2.96-.26-.42C2.54 16.17 2 14.13 2 12c0-5.51 4.49-10 10-10s10 4.49 10 10-4.49 10-10 10zm5.49-7.49c-.3-.15-1.77-.87-2.04-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.07-.15-.67-1.61-.92-2.21-.24-.58-.48-.5-.67-.51-.17-.01-.37-.01-.57-.01-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48 0 1.47 1.07 2.89 1.22 3.09.15.2 2.1 3.21 5.08 4.5.71.31 1.26.49 1.69.63.71.22 1.35.19 1.86.12.57-.08 1.77-.72 2.02-1.42.25-.7.25-1.29.17-1.42-.07-.12-.27-.2-.57-.35z"/></svg>WhatsApp</div>' +
+        '<div class="share-btn viber" onclick="shareToViber()"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.4 0C9.48.03 5.33.27 3.2 2.37 1.84 3.71 1.07 5.66 1 8.3c-.07 2.64-.15 7.62 4.64 9.18 0 0 2.33.87 4.74.83 0 0 2.2.04 4.66-.93 0 0 3.25-1.36 3.94-5.4.09-.55.58-3.58.58-3.58s.27-1.77-.47-3.12C18.44 4.17 16.97 3.07 14.6 2.13 13.22 1.59 11.4.03 11.4 0zm.03 1.5c.03 0 .05 0 .08.01 1.4.11 3.55.56 5.04 2.04 1.07 1.07 1.51 2.4 1.42 3.83-.02.32-.07.64-.13.95-.1.52-.24 1.04-.4 1.55-.17.52-.37 1.03-.62 1.51-.15.3-.33.58-.53.85-.2.27-.43.52-.68.75-.25.23-.52.43-.82.61-.29.18-.61.33-.94.45-.17.06-.34.11-.52.15-.06.01-.13.02-.19.03-.07 0-.13 0-.2 0-.17 0-.34-.02-.51-.06-.17-.04-.33-.1-.49-.17-.16-.07-.31-.16-.45-.26-.14-.1-.27-.22-.39-.34-.12-.13-.22-.27-.32-.41-.09-.15-.17-.31-.24-.47-.06-.17-.11-.34-.14-.51-.03-.18-.05-.36-.05-.54 0-.18.02-.36.06-.53.04-.18.1-.35.17-.51.08-.17.17-.33.28-.48.11-.15.24-.29.38-.41.14-.13.3-.24.46-.34.17-.1.35-.18.54-.25.19-.06.39-.11.59-.13.2-.03.41-.03.61-.01.2.02.4.06.59.12.2.06.39.14.57.24.18.1.35.22.5.36.16.14.3.3.42.47.12.17.23.35.31.54.08.19.14.39.18.59.04.21.06.42.05.63-.01.21-.04.42-.09.62-.06.21-.13.41-.23.6-.1.19-.22.37-.36.53-.14.16-.3.31-.48.44-.17.13-.36.24-.56.33-.2.09-.42.16-.64.21-.22.05-.45.07-.68.07-.23 0-.46-.03-.68-.08-.22-.06-.44-.14-.64-.24-.2-.11-.39-.24-.56-.39-.17-.15-.32-.32-.45-.51-.13-.18-.24-.38-.33-.59-.09-.21-.16-.43-.2-.65-.05-.23-.07-.46-.07-.69 0-.23.03-.46.08-.68.06-.23.14-.45.24-.65.11-.21.24-.4.39-.57.15-.18.32-.33.51-.46.18-.13.38-.24.59-.32.21-.09.43-.15.65-.19.23-.04.46-.06.69-.05.23.01.46.04.68.09.23.06.44.14.64.24.2.11.39.24.56.4.17.15.32.32.45.51.06.09.12.18.17.28.05.1.09.2.12.31.03.1.05.21.06.32.01.11.01.22 0 .33-.01.11-.04.22-.07.32-.04.11-.09.21-.15.3-.06.1-.13.19-.21.27-.08.08-.18.15-.28.21-.1.06-.21.11-.32.14-.11.04-.23.06-.35.07-.12.01-.24 0-.36-.02-.12-.02-.23-.06-.34-.11-.11-.05-.21-.11-.3-.19-.09-.07-.17-.16-.24-.25-.07-.1-.12-.2-.17-.31-.04-.11-.07-.22-.09-.34-.02-.11-.02-.23-.01-.34.01-.12.04-.23.08-.34.04-.11.1-.21.17-.3.07-.09.16-.17.25-.24.1-.06.2-.11.32-.14.11-.04.23-.06.35-.06.12 0 .24.02.35.05.12.04.23.09.33.15.1.07.19.15.27.24.08.09.14.19.19.3.05.11.09.22.11.34.02.12.03.24.01.36-.01.12-.04.23-.08.34-.05.11-.11.21-.18.3-.08.09-.17.17-.27.23-.1.07-.22.12-.34.15-.12.04-.24.06-.37.06-.13 0-.26-.02-.38-.06-.13-.04-.24-.1-.35-.17-.11-.07-.21-.16-.29-.26-.08-.1-.15-.21-.2-.33-.05-.12-.08-.25-.1-.38-.01-.13-.01-.26.01-.39.02-.13.06-.25.11-.37.06-.12.13-.23.22-.33.09-.1.19-.18.31-.25.12-.07.25-.12.38-.15.14-.04.28-.05.42-.04.14.01.28.04.41.09.13.05.25.12.36.2.11.09.21.19.29.3.09.12.15.25.2.38.04.14.07.28.07.43.01.14 0 .29-.03.43-.03.14-.08.28-.14.41-.07.13-.15.25-.25.36-.1.11-.22.21-.35.29-.13.08-.27.15-.42.2-.15.05-.31.08-.47.09-.16.01-.32-.01-.47-.04-.16-.04-.31-.1-.45-.18-.14-.08-.27-.18-.38-.3-.11-.12-.21-.25-.28-.4-.08-.14-.13-.3-.16-.46-.03-.16-.04-.32-.03-.48.02-.16.05-.32.11-.47.05-.15.13-.29.22-.42.1-.13.21-.24.34-.34.13-.1.27-.18.42-.24.16-.07.32-.11.49-.13.17-.02.34-.02.51.01.17.03.33.08.48.15.16.08.3.17.43.28.13.12.24.25.33.4.09.15.16.31.21.48.05.17.07.34.08.52.01.17 0 .35-.04.52-.03.17-.09.34-.16.49-.08.16-.18.3-.3.43-.12.13-.26.24-.41.33-.16.09-.33.16-.51.21-.18.05-.37.07-.56.07-.19 0-.38-.03-.56-.08-.19-.05-.36-.13-.52-.23-.16-.1-.31-.22-.43-.36-.13-.14-.23-.3-.31-.47-.08-.17-.14-.35-.17-.54-.03-.19-.04-.38-.02-.57.02-.19.06-.37.13-.55.07-.17.16-.34.28-.48.11-.15.25-.27.41-.38.15-.1.33-.18.51-.23.19-.06.38-.09.58-.09.2 0 .39.04.58.1.18.07.35.16.51.27.15.12.29.26.4.42.12.16.21.33.28.52.06.18.1.37.12.57.01.19.01.39-.02.58-.03.2-.08.38-.16.56-.08.18-.18.34-.3.49-.13.14-.27.27-.44.37-.16.11-.34.19-.54.25-.19.06-.4.09-.6.09z"/></svg>Viber</div>' +
+        (t.phone ? '<div class="share-btn" style="color:var(--success)" onclick="callFromDetail()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>Позвонить</div>' : '');
+
+    // Comments
+    document.getElementById('dt-comments').innerHTML = t.comments.length
+        ? t.comments.map(c => '<div class="comment-item"><div class="comment-author">' + escapeHtml(c.author) + '</div><div class="comment-text user-select">' + escapeHtml(c.text) + '</div><div class="comment-time">' + escapeHtml(c.time) + '</div></div>').join('')
+        : '<p style="color:var(--text-muted);font-size:12px;padding:8px 0">Нет комментариев</p>';
+}
+
+function renderNotifications() {
+    const list = document.getElementById('notif-list');
+    if (state.notifications.length === 0) {
+        list.innerHTML = emptyState('🔔', 'Нет уведомлений', 'Здесь будут оповещения о новых заявках');
+        return;
+    }
+    list.innerHTML = state.notifications.map(n =>
+        '<div class="notification-item' + (n.unread ? ' unread' : '') + '">' +
+        '<div class="notification-icon ' + cssToken(n.type) + '">' +
+        (n.type === 'alert' ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' :
+         n.type === 'success' ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22,4 12,14.01 9,11.01"/></svg>' :
+         '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>') +
+        '</div><div class="notification-content"><div class="title">' + escapeHtml(n.title) + '</div><div class="desc">' + escapeHtml(n.desc) + '</div><div class="time">' + escapeHtml(n.time) + '</div></div></div>'
+    ).join('');
+
+    const unread = state.notifications.filter(n => n.unread).length;
+    const badge = document.getElementById('notif-badge');
+    badge.textContent = unread;
+    badge.style.display = unread > 0 ? 'flex' : 'none';
+}
+
+function renderProfile() {
+    const initials = state.username.substring(0, 2).toUpperCase();
+    document.getElementById('pr-avatar').textContent = initials;
+    document.getElementById('pr-name').textContent = state.username;
+    document.getElementById('pr-server').textContent = state.server ? new URL(state.server).hostname : 'Не подключён';
+}
+
+function updateAssigneeSelect() {
+    const sel = document.getElementById('tk-assignee');
+    const currentVal = sel.value;
+    sel.innerHTML = '<option value="">Автоматически</option><option value="' + escapeHtml(state.username) + '">' + escapeHtml(state.username.split('@')[0]) + ' (я)</option>';
+    sel.value = currentVal;
+}
+
+function exportData() {
+    const data = JSON.stringify({ tickets: state.tickets, notifications: state.notifications, exported: new Date().toISOString() }, null, 2);
+    if (window.AndroidBridge) {
+        callNative('copyToClipboard', data);
+        showToast('Данные скопированы в буфер');
+    } else {
+        navigator.clipboard.writeText(data).then(() => showToast('Данные скопированы'));
+    }
+}
+
+// ===== UTILS =====
+function emptyState(icon, title, desc) {
+    return '<div class="empty-state"><div class="empty-icon">' + icon + '</div><h3>' + title + '</h3><p>' + desc + '</p></div>';
+}
+
+function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function saveTickets() {
+    localStorage.setItem('csl_hd_tickets', JSON.stringify(state.tickets));
+    localStorage.setItem('csl_hd_notifications', JSON.stringify(state.notifications));
+}
+
+function loadSaved() {
+    const server = localStorage.getItem('csl_hd_server');
+    const username = localStorage.getItem('csl_hd_username');
+    localStorage.removeItem('csl_hd_password');
+    const password = ''; // Credentials must be entered each session.
+    if (server && username && password) {
+        state.server = server;
+        state.username = username;
+        state.password = password;
+        state.isLoggedIn = true;
+        document.getElementById('login-server').value = server;
+        document.getElementById('login-username').value = username;
+        document.getElementById('login-password').value = password;
+    }
+
+    try {
+        const saved = localStorage.getItem('csl_hd_tickets');
+        if (saved && Array.isArray(JSON.parse(saved))) state.tickets = JSON.parse(saved);
+    } catch(e) {}
+    try {
+        const saved = localStorage.getItem('csl_hd_notifications');
+        if (saved && Array.isArray(JSON.parse(saved))) state.notifications = JSON.parse(saved);
+    } catch(e) {}
+}
+
+// ===== SERVER SYNC CALLBACKS (from Java) =====
+function onSyncResult(ticketId, success) {
+    if (success) {
+        showToast('✅ Синхронизировано с сервером');
+    } else {
+        showToast('⚠️ Ошибка синхронизации');
+    }
+}
+
+function onTicketCreated(success, response) {
+    if (success) {
+        showToast('✅ Заявка создана на сервере');
+        // Fetch updated list
+        if (window.AndroidBridge) callNative('fetchTickets');
+    }
+}
+
+function onTicketsFetched(data) {
+    console.log(' onTicketsFetched called');
+    console.log('Data type:', typeof data);
+    if (!data || typeof data !== 'object') { onFetchError('Некорректный ответ сервера'); return; }
+    console.log('Data keys:', data ? Object.keys(data) : 'null');
+
+    if (!data) {
+        showToast('⚠️ Пустой ответ от сервера');
+        return;
+    }
+
+    // Handle different Jira response formats
+    let issues = [];
+
+    // Format 1: Standard Jira { issues: [...] }
+    if (data.issues && Array.isArray(data.issues)) {
+        issues = data.issues;
+    }
+    // Format 2: Direct array
+    else if (Array.isArray(data)) {
+        issues = data;
+    }
+    // Format 3: Wrapped in another object
+    else if (data.data && data.data.issues) {
+        issues = data.data.issues;
+    }
+    else {
+        console.error('Unknown format:', JSON.stringify(data).substring(0, 500));
+        showToast('️ Неизвестный формат ответа. Keys: ' + Object.keys(data).join(','));
+        return;
+    }
+
+    console.log(' Found', issues.length, 'issues');
+
+    if (issues.length === 0) {
+        showToast('ℹ️ Сервер вернул 0 заявок');
+        return;
+    }
+
+    let newCount = 0;
+    let updatedCount = 0;
+    const statusMap = {
+        'Open': 'open', 'Открыта': 'open', 'Открыт': 'open', 'Открыто': 'open',
+        'In Progress': 'in-progress', 'В работе': 'in-progress', 'В процессе': 'in-progress',
+        'Resolved': 'resolved', 'Решена': 'resolved', 'Решено': 'resolved', 'Выполнено': 'resolved',
+        'Closed': 'closed', 'Закрыта': 'closed', 'Закрыто': 'closed', 'Закрыт': 'closed',
+        'To Do': 'open', 'К выполнению': 'open', 'Новая': 'open', 'Новый': 'open'
+    };
+    const priorityMap = {
+        'Highest': 'critical', 'Критический': 'critical', 'Наивысший': 'critical',
+        'High': 'high', 'Высокий': 'high', 'Высокая': 'high',
+        'Medium': 'medium', 'Средний': 'medium', 'Средняя': 'medium',
+        'Low': 'low', 'Низкий': 'low', 'Низкая': 'low',
+        'Lowest': 'low', 'Наименьший': 'low'
+    };
+
+    issues.forEach((issue, idx) => {
+        console.log(`Issue ${idx}:`, issue.key, issue.fields?.summary);
+
+        if (!issue || !safeId(issue.key)) return;
+        const id = issue.key;
+        const existing = state.tickets.find(t => t.id === id);
+
+        const ticket = {
+            id: id,
+            subject: issue.fields?.summary || issue.summary || 'Без темы',
+            description: issue.fields?.description || issue.description || '',
+            status: statusMap[issue.fields?.status?.name] || statusMap[issue.status?.name] || 'open',
+            priority: priorityMap[issue.fields?.priority?.name] || priorityMap[issue.priority?.name] || 'medium',
+            assignee: issue.fields?.assignee?.displayName || issue.assignee?.displayName || issue.assignee || 'Не назначен',
+            client: issue.fields?.reporter?.displayName || issue.reporter?.displayName || issue.reporter || '',
+            created: issue.fields?.created?.slice(0, 16) || issue.created?.slice(0, 16) || '',
+            phone: null,
+            category: 'other',
+            sla: 100,
+            comments: []
+        };
+
+        if (!existing) {
+            state.tickets.unshift(ticket);
+            newCount++;
+            console.log('✅ New ticket:', ticket.id, ticket.subject);
+        } else {
+            existing.status = ticket.status;
+            existing.priority = ticket.priority;
+            existing.subject = ticket.subject;
+            existing.assignee = ticket.assignee;
+            updatedCount++;
+            console.log('🔄 Updated:', ticket.id, ticket.status);
+        }
+    });
+
+    const total = issues.length;
+    console.log(`📊 Total: ${total}, New: ${newCount}, Updated: ${updatedCount}`);
+
+    if (newCount > 0) {
+        playCashSound();
+        state.notifications.unshift({
+            type: 'alert',
+            title: 'Получено ' + newCount + ' новых заяв' + (newCount === 1 ? 'ок' : 'вок'),
+            desc: 'Всего с сервера: ' + total,
+            time: 'только что',
+            unread: true
+        });
+        showToast(' +' + newCount + ' новых (всего: ' + total + ')');
+    } else if (updatedCount > 0) {
+        showToast('🔄 Обновлено ' + updatedCount + ' из ' + total);
+    } else {
+        showToast('✅ Получено ' + total + ' заявок');
+    }
+
+    saveTickets();
+    renderAll();
+}
+
+function onFetchError(msg) {
+    console.error('onFetchError:', msg);
+    showToast('⚠️ ' + msg);
+}
+
+function onProjectsFetched(data) {
+    console.log('onProjectsFetched called');
+    if (!data || !Array.isArray(data)) {
+        showToast('⚠️ Нет проектов');
+        return;
+    }
+
+    console.log('Found', data.length, 'projects');
+
+    // Показываем список проектов в модалке
+    let html = '<h3 style="margin-bottom:12px">Выберите проект:</h3>';
+    data.forEach(p => {
+        html += `<div class="project-item" onclick="fetchProjectTickets('${safeId(p.key)}')">
+            <div class="project-key">${safeId(p.key)}</div>
+            <div class="project-name">${escapeHtml(p.name)}</div>
+        </div>`;
+    });
+
+    // Показываем модалку с проектами
+    let modal = document.getElementById('projects-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'projects-modal';
+        modal.className = 'modal-overlay';
+        modal.innerHTML = '<div class="modal" id="projects-list"></div>';
+        document.body.appendChild(modal);
+    }
+    document.getElementById('projects-list').innerHTML = html;
+    modal.classList.add('show');
+}
+
+function fetchProjectTickets(projectKey) {
+    console.log('Fetching tickets for project:', projectKey);
+    document.getElementById('projects-modal').classList.remove('show');
+    showToast('Загрузка ' + projectKey + '...');
+
+    if (window.AndroidBridge) {
+        // Можно добавить метод для получения заявок конкретного проекта
+        // Пока просто показываем что проект выбран
+        showToast('Выбран проект: ' + projectKey);
+    }
+}
+
+function closeProjectsModal() {
+    let modal = document.getElementById('projects-modal');
+    if (modal) modal.classList.remove('show');
+}
+
+// Restore session from native side
+function restoreSession(server, username, password) {
+    state.server = server;
+    state.username = username;
+    state.password = password;
+    state.isLoggedIn = true;
+    localStorage.setItem('csl_hd_server', server);
+    localStorage.setItem('csl_hd_username', username);
+    localStorage.removeItem('csl_hd_password');
+    enterApp();
+}
+
+function updateNetwork(online) {
+    const dot = document.getElementById('server-dot');
+    const label = document.getElementById('server-name-label');
+    if (dot) dot.className = 'server-dot ' + (online ? 'online' : 'offline');
+    if (label) label.textContent = online ? 'Онлайн' : 'Офлайн';
+}
+
+function refreshTickets() {
+    if (!window.AndroidBridge) {
+        showToast('AndroidBridge недоступен');
+        return;
+    }
+    showToast(' Обновление...');
+    callNative('fetchTickets');
+}
+
+// ===== SIMULATED INCOMING TICKET (for demo sound) =====
+function simulateIncomingTicket() {
+    // Play cash register sound
+    playCashSound();
+
+    // Add notification
+    const id = 'LOCAL-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    state.notifications.unshift({
+        type: 'alert',
+        title: 'Новая заявка ' + id,
+        desc: 'Требуется внимание',
+        time: 'только что',
+        unread: true
+    });
+
+    // Add ticket
+    const now = new Date();
+    state.tickets.unshift({
+        id: id,
+        subject: 'Входящая заявка от клиента',
+        category: 'admin',
+        priority: 'high',
+        phone: null,
+        assignee: state.username.split('@')[0],
+        status: 'open',
+        created: now.toISOString().slice(0, 16),
+        client: 'Клиент',
+        description: 'Новая заявка поступила из системы',
+        sla: 100,
+        comments: []
+    });
+
+    saveTickets();
+    renderAll();
+    showToast('🔔 Новая заявка ' + id);
+}
+
+// ===== INIT =====
+loadSaved();
+if (state.isLoggedIn) {
+    enterApp();
+}
+
+// Service Worker
+if (location.protocol === 'https:' && 'serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+// Auto-refresh every 5 minutes
+if (hasNative('fetchTickets')) {
+    setInterval(() => {
+        console.log('Auto-refresh triggered');
+        callNative('fetchTickets');
+    }, 5 * 60 * 1000); // 5 minutes
+    console.log('Auto-refresh scheduled: every 5 minutes');
+}
+
+// Expose simulateIncomingTicket for testing
+window.simulateIncomingTicket = simulateIncomingTicket;
+function onTicketsFetchedFile(path) {
+    console.log('Reading file:', path);
+    if (!window.AndroidBridge) {
+        showToast('AndroidBridge недоступен');
+        return;
+    }
+    const json = callNative('readFile', path);
+    if (!json) {
+        showToast('Ошибка чтения файла');
+        return;
+    }
+    console.log('File content length:', json.length);
+    try {
+        const data = JSON.parse(json);
+        onTicketsFetched(data);
+    } catch (e) {
+        console.error('Parse error:', e);
+        showToast('Ошибка парсинга JSON');
+    }
+}
+
+function onProjectsFetchedFile(path) {
+    console.log('Reading projects file:', path);
+    if (!window.AndroidBridge) return;
+    const json = callNative('readFile', path);
+    if (!json) return;
+    try {
+        const data = JSON.parse(json);
+        onProjectsFetched(data);
+    } catch (e) {
+        console.error('Parse error:', e);
+    }
+}
+</script>
+</body>
+</html>
