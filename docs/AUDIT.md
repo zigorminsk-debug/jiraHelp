@@ -205,3 +205,14 @@ URL/context path, auth/header, redirects, HTTP ошибки, HTML вместо J
 disconnect. JDK локально отсутствует — реальная компиляция/выполнение проверяются CI.
 Сервер `h.csl.by` не проверялся из sandbox (outbound restrictions); реальные credentials
 не запрашивались. Инструкции и следующий device test: `docs/JIRA_CONNECTION.md`.
+
+### Результат CI 1.10.4
+
+Run https://github.com/zigorminsk-debug/jiraHelp/actions/runs/39754888214 — **success**,
+commit `356221a8a30d38c7c05a8953328cba6e0815e4e9`. Composite build выполнил Node
+regressions и pure-JVM JiraClient tests, компиляцию Android, подпись и verify.
+APK опубликован и повторно скачан/проверен через SHA-256 и cmp.
+Release: https://github.com/zigorminsk-debug/jiraHelp/releases/tag/apk-39754888214-1.
+Через API подтвержден uploaded APK размером 62 405 байт, SHA256SUMS и signature.txt.
+Это подтверждает сборку/публикацию, **не подключение к серверу h.csl.by** — нужна
+проверка владельцем с телефона по `docs/JIRA_CONNECTION.md`.

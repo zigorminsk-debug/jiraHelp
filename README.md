@@ -34,13 +34,13 @@ Actions Artifacts не используется из-за исчерпанной
 `v18_base/` — историческая копия, не используется сборкой. Не редактируйте их как
 взаимозаменяемые версии: содержимое различается.
 
-## Предыдущая проверенная сборка (локальный режим)
+## Проверенная сборка 1.10.4
 
-[Скачать подписанный тестовый APK](https://github.com/zigorminsk-debug/jiraHelp/releases/download/apk-39752620540-1/CSL-HelpDesk-debug.apk)
-· [успешный CI](https://github.com/zigorminsk-debug/jiraHelp/actions/runs/39752620540)
-· [контрольная сумма и сертификат](https://github.com/zigorminsk-debug/jiraHelp/releases/tag/apk-39752620540-1).
+[Скачать подписанный APK с Jira-подключением](https://github.com/zigorminsk-debug/jiraHelp/releases/download/apk-39754888214-1/CSL-HelpDesk-debug.apk)
+· [успешный CI](https://github.com/zigorminsk-debug/jiraHelp/actions/runs/39754888214)
+· [SHA-256 и сертификат](https://github.com/zigorminsk-debug/jiraHelp/releases/tag/apk-39754888214-1).
 
-Это подтвержденная сборка `73081a6`; для более новых сборок смотрите Releases
-или ссылку в Summary соответствующего успешного запуска Actions.
-
-Для подключения к Jira используйте сборку 1.10.4 или новее, а не старый APK по ссылке выше.
+Сборка `356221a`: тесты JS/JVM, компиляция Android, подпись и проверка опубликованного
+файла прошли. Подключение к `h.csl.by` требуется проверить с телефона владельца:
+см. [инструкцию](docs/JIRA_CONNECTION.md). Для более новых APK смотрите Releases
+или ссылку в Summary успешного запуска Actions.
