@@ -17,7 +17,10 @@ bash scripts/build-apk.sh
 ```
 
 Результат: `build/android/CSL-HelpDesk-debug.apk` (тестовая подпись).
-GitHub Actions делает те же проверки и сборку на push/PR, APK доступен в Artifacts.
+GitHub Actions делает те же проверки и сборку на push/PR. Для доверенных веток
+`main` и `arena/0b4677fb-jirahelp` подписанный APK публикуется в **Releases** как
+prerelease `apk-<run-id>-<attempt>`; ссылка появляется в Summary запуска.
+Actions Artifacts не используется из-за исчерпанной квоты аккаунта.
 
 - [Сборка и получение APK](docs/ANDROID_BUILD.md)
 - [Аудит, изменения и ограничения](docs/AUDIT.md)

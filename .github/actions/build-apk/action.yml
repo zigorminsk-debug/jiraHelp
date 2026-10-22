@@ -1,0 +1,23 @@
+name: Build signed APK
+description: Check sources and build the dependency-free Android project
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '22'
+    - name: Source regression checks
+      shell: bash
+      run: node --test tests/*.test.cjs
+    - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      with:
+        distribution: temurin
+        java-version: '17'
+    - name: Install pinned SDK packages
+      shell: bash
+      run: |
+        test -n "$ANDROID_HOME"
+        "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-33' 'build-tools;35.0.0'
+    - name: Build and verify signed debug APK
+      shell: bash
+      run: bash scripts/build-apk.sh

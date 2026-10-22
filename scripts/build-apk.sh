@@ -32,6 +32,6 @@ keytool -genkeypair -noprompt -keystore "$OUT/debug.keystore" -storepass android
   -keyalg RSA -keysize 2048 -validity 3650
 "$BT/apksigner" sign --ks "$OUT/debug.keystore" --ks-pass pass:android \
   --key-pass pass:android --out "$OUT/CSL-HelpDesk-debug.apk" "$OUT/aligned.apk"
-"$BT/apksigner" verify --verbose "$OUT/CSL-HelpDesk-debug.apk"
+"$BT/apksigner" verify --verbose --print-certs "$OUT/CSL-HelpDesk-debug.apk" | tee "$OUT/signature.txt"
 "$BT/aapt" dump badging "$OUT/CSL-HelpDesk-debug.apk"
 echo "APK: $OUT/CSL-HelpDesk-debug.apk"

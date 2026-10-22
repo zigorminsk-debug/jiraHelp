@@ -44,9 +44,11 @@ cleartext, file universal access или произвольный `readFile` ра
 Не коммитить APK/SDK/JDK/cache/ключи/пароли. Не объявлять тесты на VM полноценным
 аудитом безопасности. `safety.js` одинаков в обеих активных версиях (есть тест).
 
-## Результат CI / ближайшее действие
-Run `39751498573` (bce87d4) собрал и проверил подписанный APK успешно; upload упал
-из-за **Artifact storage quota has been hit**. Не обещать доступный artifact.
-Нужно согласовать освобождение Actions storage или увеличение квоты владельцем,
-затем повторить workflow. Не удалять artifacts без разрешения, не скрывать upload failure.
-`docs/AUDIT.md` содержит ссылки на все три проверочных запуска и исправления.
+## Актуальная выдача APK
+Ранее upload-artifact блокировался квотой аккаунта. Теперь доверенный publish job
+публикует подписанный debug APK в GitHub Releases (уникальный prerelease по run ID
+и attempt), скачивает файл обратно и проверяет SHA-256/совпадение. Общая сборка —
+`.github/actions/build-apk/action.yml`; публикация — `scripts/publish-apk.sh`.
+PR и прочие ветки проверяются read-only и ничего не публикуют.
+Не возвращать Actions Artifacts до решения квоты. Старые assets/релизы не удалять
+без разрешения. Это тестовая сменная подпись, не production signing identity.

@@ -31,16 +31,30 @@ bash scripts/build-apk.sh
 показала отсутствие `lib/server/libjvm.so` и зависимость aapt от `libc++.so`.
 CI скачивает стандартные пакеты самостоятельно.
 
-## GitHub Actions
+## GitHub Actions и получение APK
 
 Workflow `.github/workflows/android-apk.yml` запускается на push, pull request,
-workflow_dispatch. Он проверяет JS/регрессии, устанавливает JDK/SDK, собирает,
-проверяет и загружает **только конечный APK**, без ключей и промежуточных файлов.
+workflow_dispatch. Общие шаги сборки вынесены в `.github/actions/build-apk/action.yml`.
 
-После отправки рабочей ветки: GitHub → Actions → Android APK → успешный запуск →
-Artifacts → `CSL-HelpDesk-debug-<run>-<attempt>`. Скачать ZIP, извлечь APK.
-Срок хранения — 14 дней. Ручной запуск в UI доступен после появления workflow
-в default branch; для ветки до слияния используется push.
+- Push/manual в `main` или `arena/0b4677fb-jirahelp`: job `publish` проверяет
+  исходники, компилирует/подписывает APK и публикует GitHub **prerelease**
+  `apk-<GITHUB_RUN_ID>-<GITHUB_RUN_ATTEMPT>` с APK, `SHA256SUMS`, `signature.txt`.
+- PR/прочие ветки: read-only job `check`, проверка и сборка без публикации.
+- Checkout не сохраняет credentials. Только доверенный publish job получает
+  `contents: write`; токен передается лишь шагу публикации. `pull_request_target`
+  не используется. Старые релизы/теги не удаляются и не перезаписываются.
+- После upload скрипт скачивает APK обратно, проверяет SHA-256 и точное совпадение
+  с собранным файлом. Только затем выводит ссылку в Actions Summary.
+
+Открыть GitHub → Actions → Android APK → успешный запуск → Summary → Download
+release; либо репозиторий → Releases → нужный `apk-...` → Assets →
+`CSL-HelpDesk-debug.apk`. Не скачивать Source code ZIP вместо APK.
+Новый prerelease не объявляется latest production release. Releases не расходуют
+квоту Actions Artifacts и не имеют автоматического срока хранения 14 дней.
+Владельцу нужно самому управлять сроком хранения; ничего автоматически не удаляем.
+При ручном запуске в UI workflow должен находиться в default branch; до слияния
+запускается push рабочей ветки. При ошибке прав публикации проверить разрешения
+GITHUB_TOKEN/политики Actions: без успешной выдачи файла запуск останется красным.
 
 ## Подпись и установка
 
@@ -59,12 +73,9 @@ checks, компиляция Java/ресурсов и проверка APK; эт
 проверять исходники и менять SHA осознанно. Runner закреплен `ubuntu-24.04`, SDK manager
 берется из предустановленного Android SDK runner. GitHub-hosted runner нужен с доступом к загрузкам Google SDK.
 
-## Известный внешний блокер: квота Actions
+## История квоты Actions
 
-При проверке сборка/подпись/verify прошли, но GitHub отклонил загрузку артефакта:
-`Artifact storage quota has been hit`. Владелец должен освободить хранилище Actions
-(в том числе в других репозиториях аккаунта) либо изменить доступный лимит/биллинг.
-Удаление artifacts необратимо — сначала сохранить нужные файлы. После пересчета
-квоты повторить workflow (Re-run all jobs). Скрипт подписи/сборки менять не требуется;
-не добавлять continue-on-error к upload: иначе зеленый статус не гарантирует APK.
-Пока квота не исправлена, скачать APK из этого запуска нельзя.
+Первые запуски успешно собирали/проверяли APK, но `upload-artifact` возвращал
+`Artifact storage quota has been hit`. Существующие артефакты не удалялись.
+Текущая схема использует Releases вместо Actions Artifacts: менять квоту для неё
+не требуется. Не возвращать upload-artifact без решения вопроса квоты владельцем.
