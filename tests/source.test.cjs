@@ -81,3 +81,17 @@ test('manifest contains no missing resources/services and disables backup/cleart
   assert.ok(!manifest.includes('network_security_config'));assert.ok(!manifest.includes('PollJobService'));
   assert.match(manifest,/allowBackup="false"/);assert.match(manifest,/usesCleartextTraffic="false"/);
 });
+test('comment and assignee markup is escaped in Android detail view',()=>{
+  const {run,element}=app();
+  run(`state.tickets=[{id:'HD-1',subject:'test',client:'client',description:'text',category:'other',priority:'high',status:'open',assignee:'<img src=x>',created:'today',sla:100,comments:[{author:'<b>author</b>',text:'<img src=x onerror=alert(1)>',time:'now'}]}];renderTicketDetail('HD-1')`);
+  assert.ok(!element('dt-info').innerHTML.includes('<img'));
+  assert.ok(!element('dt-comments').innerHTML.includes('<img'));
+  assert.ok(element('dt-comments').innerHTML.includes('&lt;img'));
+});
+test('different local account does not inherit previous account tickets',()=>{
+  const {run,element,storage}=app();
+  storage.set('csl_hd_server','https://jira.example.com');storage.set('csl_hd_username','old-user');
+  run("state.tickets=[{id:'HD-1'}];state.notifications=[{title:'secret'}]");
+  element('login-server').value='jira.example.com';element('login-username').value='new-user';
+  run('doLogin()');assert.equal(run('state.tickets.length'),0);assert.equal(run('state.notifications.length'),0);
+});

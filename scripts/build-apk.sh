@@ -20,7 +20,7 @@ mkdir -p "$OUT/gen" "$OUT/classes" "$OUT/dex"
 "$BT/aapt" package -f -m -J "$OUT/gen" -M helpdesk-apk/AndroidManifest.xml \
   -S helpdesk-apk/res -A helpdesk-apk/assets -I "$JAR" -F "$OUT/resources.apk"
 find helpdesk-apk/src "$OUT/gen" -name '*.java' -print | sort > "$OUT/sources.txt"
-javac -encoding UTF-8 -source 8 -target 8 -bootclasspath "$JAR" -d "$OUT/classes" @"$OUT/sources.txt"
+javac -encoding UTF-8 -source 8 -target 8 -bootclasspath "$JAR:$BT/core-lambda-stubs.jar" -d "$OUT/classes" @"$OUT/sources.txt"
 find "$OUT/classes" -name '*.class' -print | sort > "$OUT/classes.txt"
 "$BT/d8" --lib "$JAR" --min-api 21 --output "$OUT/dex" @"$OUT/classes.txt"
 cp "$OUT/resources.apk" "$OUT/unsigned.apk"
