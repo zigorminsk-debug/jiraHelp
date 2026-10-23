@@ -716,6 +716,7 @@ func solveAutomatedChallenges(client *ACMEClient, authURLs []string, req IssueRe
 	httpTokens := map[string]string{}
 	var httpMu sync.RWMutex
 	var httpSrv *http.Server
+	var httpsRedirectSrv *http.Server
 
 	tlsCerts := map[string]*tls.Certificate{}
 	var tlsMu sync.RWMutex
@@ -729,6 +730,11 @@ func solveAutomatedChallenges(client *ACMEClient, authURLs []string, req IssueRe
 		if httpSrv != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			_ = httpSrv.Shutdown(ctx)
+			cancel()
+		}
+		if httpsRedirectSrv != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = httpsRedirectSrv.Shutdown(ctx)
 			cancel()
 		}
 		if tlsLn != nil {
@@ -746,20 +752,26 @@ func solveAutomatedChallenges(client *ACMEClient, authURLs []string, req IssueRe
 		if port <= 0 {
 			port = 80
 		}
-		closeFW := PlatformOpenTempFirewallPort(port)
-		defer closeFW()
-		addr := net.JoinHostPort(bindIP, fmt.Sprintf("%d", port))
-		ln, err := net.Listen("tcp", addr)
-		if err != nil {
-			return fmt.Errorf("не удалось занять порт %s для HTTP-01 проверки Let's Encrypt: %w (запустите программу от имени Администратора и убедитесь, что порт 80 не занят Kerio/IIS, либо включите опцию временной остановки KerioMailServer)", addr, err)
+		tlsPort := req.TLSPort
+		if tlsPort <= 0 {
+			tlsPort = 443
 		}
+		closeFW80 := PlatformOpenTempFirewallPort(port)
+		defer closeFW80()
+		closeFW443 := PlatformOpenTempFirewallPort(tlsPort)
+		defer closeFW443()
+
 		mux := http.NewServeMux()
 		mux.HandleFunc("/.well-known/acme-challenge/", func(w http.ResponseWriter, r *http.Request) {
 			tok := strings.TrimPrefix(r.URL.Path, "/.well-known/acme-challenge/")
 			httpMu.RLock()
 			val, ok := httpTokens[tok]
 			httpMu.RUnlock()
-			log("info", fmt.Sprintf("Входящий HTTP-01 запрос проверки от %s для токена %s...", r.RemoteAddr, tok[:minInt(len(tok), 12)]))
+			proto := "HTTP"
+			if r.TLS != nil {
+				proto = "HTTPS"
+			}
+			log("success", fmt.Sprintf("Получен входящий %s запрос проверки от Let's Encrypt (%s) для токена %s...", proto, r.RemoteAddr, tok[:minInt(len(tok), 12)]))
 			if !ok {
 				http.NotFound(w, r)
 				return
@@ -768,9 +780,40 @@ func solveAutomatedChallenges(client *ACMEClient, authURLs []string, req IssueRe
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(val))
 		})
-		httpSrv = &http.Server{Handler: mux}
-		go func() { _ = httpSrv.Serve(ln) }()
-		log("success", fmt.Sprintf("Встроенный HTTP-01 сервер проверки запущен на %s", addr))
+
+		addr80 := net.JoinHostPort(bindIP, fmt.Sprintf("%d", port))
+		ln80, err80 := net.Listen("tcp", addr80)
+		if err80 == nil {
+			httpSrv = &http.Server{Handler: mux}
+			go func() { _ = httpSrv.Serve(ln80) }()
+			log("success", fmt.Sprintf("Встроенный HTTP-01 сервер проверки запущен на %s", addr80))
+		}
+
+		// ALSO start an HTTPS listener on port 443 serving /.well-known/acme-challenge/!
+		// Many edge routers / Kerio Control / Nginx proxies redirect http://<domain>/.well-known/... -> https://<domain>/.well-known/... (RFC 8555 §8.3; Let's Encrypt accepts self-signed TLS certs on redirected HTTP-01!).
+		addr443 := net.JoinHostPort(bindIP, fmt.Sprintf("%d", tlsPort))
+		var err443 error
+		if tempKey, _, _, _, kerr := GeneratePrivateKey("ecdsa256"); kerr == nil {
+			if tempPEM, cerr := CreateSelfSignedKerioCert(tempKey, append([]string{req.Domain}, req.ExtraDomains...), nil, 7); cerr == nil {
+				if keyDER, merr := x509.MarshalECPrivateKey(tempKey.(*ecdsa.PrivateKey)); merr == nil {
+					keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+					if pair, perr := tls.X509KeyPair(tempPEM, keyPEM); perr == nil {
+						ln443, lerr := tls.Listen("tcp", addr443, &tls.Config{Certificates: []tls.Certificate{pair}})
+						if lerr == nil {
+							httpsRedirectSrv = &http.Server{Handler: mux}
+							go func() { _ = httpsRedirectSrv.Serve(ln443) }()
+							log("success", fmt.Sprintf("Дополнительный HTTPS-сервер проверки запущен на %s (приём редиректов http → https)", addr443))
+						} else {
+							err443 = lerr
+						}
+					}
+				}
+			}
+		}
+
+		if err80 != nil && httpsRedirectSrv == nil {
+			return fmt.Errorf("не удалось занять порт %s (%v; 443: %v) — запустите программу от имени Администратора или выберите метод подтверждения DNS-01", addr80, err80, err443)
+		}
 	} else if challType == "tls-alpn-01" {
 		port := req.TLSPort
 		if port <= 0 {
