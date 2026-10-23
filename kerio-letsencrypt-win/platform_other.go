@@ -5,7 +5,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -66,6 +65,4 @@ func PlatformQueryAutoRenewTask() bool {
 	return false
 }
 
-func LaunchDesktopGUI(_ string) (*exec.Cmd, bool) {
-	return nil, false
-}
+func LaunchDesktopGUI(_ string) {}

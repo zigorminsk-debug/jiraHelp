@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -79,12 +80,24 @@ func (b *LogBroadcaster) Subscribe() (chan LogEntry, []LogEntry, func()) {
 	return ch, histCopy, unsubscribe
 }
 
+func (b *LogBroadcaster) ClientCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.clients)
+}
+
 var (
-	logHub       = NewLogBroadcaster()
-	serverCancel context.CancelFunc
-	windowsExeMu sync.RWMutex
-	windowsExeFP string
+	logHub            = NewLogBroadcaster()
+	serverCancel      context.CancelFunc
+	windowsExeMu      sync.RWMutex
+	windowsExeFP      string
+	lastActivityUnixN atomic.Int64
+	everHadClient     atomic.Bool
 )
+
+func touchActivity() {
+	lastActivityUnixN.Store(time.Now().UnixNano())
+}
 
 func locateWindowsExe() string {
 	windowsExeMu.RLock()
@@ -151,6 +164,25 @@ func buildRouter() http.Handler {
 		_, _ = w.Write(embeddedIconICO)
 	})
 
+	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("client") == "ui" {
+			everHadClient.Store(true)
+			touchActivity()
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
+
+	mux.HandleFunc("/api/app-shutdown", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"ok": true})
+		go func() {
+			time.Sleep(250 * time.Millisecond)
+			if serverCancel != nil {
+				serverCancel()
+			}
+			os.Exit(0)
+		}()
+	})
+
 	// SSE stream for real-time ACME / Crypto / Kerio progress logs
 	mux.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
@@ -158,6 +190,9 @@ func buildRouter() http.Handler {
 			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 			return
 		}
+		everHadClient.Store(true)
+		touchActivity()
+		defer touchActivity()
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
@@ -594,7 +629,30 @@ func buildRouter() http.Handler {
 		}
 	})
 
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/ping" {
+			touchActivity()
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+func waitForLocalHTTPReady(pingURL string) {
+	noProxyClient := &http.Client{
+		Timeout:   500 * time.Millisecond,
+		Transport: &http.Transport{Proxy: nil},
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := noProxyClient.Get(pingURL)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				return
+			}
+		}
+		time.Sleep(40 * time.Millisecond)
+	}
 }
 
 func main() {
@@ -623,7 +681,11 @@ func main() {
 	ln, err := net.Listen("tcp", bind)
 	if err != nil && *listenAddr == "" {
 		// Check if another instance of KerioCertManager is already listening on 127.0.0.1:17840!
-		resp, herr := http.Get("http://127.0.0.1:17840/api/system-info")
+		localClient := &http.Client{
+			Timeout:   900 * time.Millisecond,
+			Transport: &http.Transport{Proxy: nil},
+		}
+		resp, herr := localClient.Get("http://127.0.0.1:17840/api/ping")
 		if herr == nil {
 			resp.Body.Close()
 			if !*serverOnly {
@@ -641,6 +703,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	serverCancel = cancel
+	touchActivity()
 
 	actualAddr := ln.Addr().String()
 	appURL := "http://" + actualAddr + "/"
@@ -653,12 +716,42 @@ func main() {
 		_ = srv.Serve(ln)
 	}()
 
+	// Ensure HTTP listener is 100% live and responding before launching Edge/Browser window
+	waitForLocalHTTPReady(appURL + "api/ping")
+
 	if !*serverOnly && runtime.GOOS == "windows" {
-		uiCmd, waitOnClose := LaunchDesktopGUI(appURL)
-		if waitOnClose && uiCmd != nil {
-			_ = uiCmd.Wait()
-			cancel()
-		}
+		LaunchDesktopGUI(appURL)
+		// Keep backend alive continuously while window SSE/heartbeat is connected; exit cleanly 30s after all windows close.
+		go func() {
+			bootTime := time.Now()
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if logHub.ClientCount() > 0 {
+						touchActivity()
+						continue
+					}
+					idle := time.Since(time.Unix(0, lastActivityUnixN.Load()))
+					if !everHadClient.Load() {
+						// Allow up to 3 minutes on cold Windows boot before initial browser window finishes opening
+						if time.Since(bootTime) > 3*time.Minute {
+							cancel()
+							return
+						}
+						continue
+					}
+					// Window was open and has now been closed with zero SSE/ping reconnects for 30s -> exit cleanly!
+					if idle > 30*time.Second {
+						cancel()
+						return
+					}
+				}
+			}
+		}()
 	} else {
 		fmt.Printf("Kerio SSL & Let's Encrypt GUI listening on %s\n", appURL)
 	}

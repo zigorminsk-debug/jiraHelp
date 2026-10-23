@@ -697,6 +697,10 @@
     <button type="button" class="btn btn-outline btn-sm" id="themeToggleBtn" title="Переключить тёмную / светлую тему">
       ☀ Тема
     </button>
+
+    <button type="button" class="btn btn-danger btn-sm" id="exitAppBtn" style="display:none;" title="Закрыть программу и остановить локальный фоновый процесс">
+      ⏻ Выход
+    </button>
   </div>
 </header>
 
@@ -1980,10 +1984,16 @@
         document.getElementById('downloadWinZipBtn').style.display = 'inline-flex';
       }
 
-      // Admin status pill
+      // Admin status pill & Windows Exit button
       const badge = document.getElementById('adminBadge');
       const badgeTxt = document.getElementById('adminBadgeText');
       if (d.isWindows) {
+        document.getElementById('exitAppBtn').style.display = 'inline-flex';
+        document.getElementById('exitAppBtn').onclick = async () => {
+          try { await fetch('/api/app-shutdown', { method: 'POST' }); } catch (_) {}
+          window.close();
+          document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Segoe UI,sans-serif;font-size:16px;color:#94a3b8;">Программа завершена. Можете закрыть это окно.</div>';
+        };
         if (d.isAdmin) {
           badge.className = 'status-pill ok';
           badgeTxt.textContent = 'Windows • Права Администратора';
@@ -2016,6 +2026,11 @@
       showToast('Ошибка загрузки данных сервера: ' + e.message, true);
     }
   }
+
+  // Keep-alive heartbeat so Windows desktop process knows the GUI window is open
+  setInterval(() => {
+    fetch('/api/ping?client=ui').catch(() => {});
+  }, 4000);
 
   initApp();
 </script>

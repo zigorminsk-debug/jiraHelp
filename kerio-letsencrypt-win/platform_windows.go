@@ -192,7 +192,7 @@ func PlatformQueryAutoRenewTask() bool {
 }
 
 // LaunchDesktopGUI opens a frameless native-style Windows app window (Edge App Mode / Chrome App Mode) with automatic fallback to default browser.
-func LaunchDesktopGUI(appURL string) (*exec.Cmd, bool) {
+func LaunchDesktopGUI(appURL string) {
 	appBrowsers := []string{
 		filepath.Join(os.Getenv("ProgramFiles(x86)"), `Microsoft\Edge\Application\msedge.exe`),
 		filepath.Join(os.Getenv("ProgramFiles"), `Microsoft\Edge\Application\msedge.exe`),
@@ -200,9 +200,6 @@ func LaunchDesktopGUI(appURL string) (*exec.Cmd, bool) {
 		filepath.Join(os.Getenv("ProgramFiles(x86)"), `Google\Chrome\Application\chrome.exe`),
 		filepath.Join(os.Getenv("LocalAppData"), `Google\Chrome\Application\chrome.exe`),
 	}
-
-	profileDir := filepath.Join(os.TempDir(), "KerioCertManagerUIProfile")
-	_ = os.MkdirAll(profileDir, 0700)
 
 	for _, bin := range appBrowsers {
 		if bin == "" {
@@ -212,15 +209,13 @@ func LaunchDesktopGUI(appURL string) (*exec.Cmd, bool) {
 			cmd := exec.Command(
 				bin,
 				"--app="+appURL,
-				"--user-data-dir="+profileDir,
-				"--window-size=1220,880",
-				"--no-first-run",
-				"--no-default-browser-check",
+				"--window-size=1240,880",
+				"--proxy-bypass-list=<-loopback>",
 				"--disable-features=Translate",
 			)
 			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 			if err := cmd.Start(); err == nil {
-				return cmd, true
+				return
 			}
 		}
 	}
@@ -229,5 +224,4 @@ func LaunchDesktopGUI(appURL string) (*exec.Cmd, bool) {
 	fallback := exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", appURL)
 	fallback.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	_ = fallback.Start()
-	return nil, false
 }
