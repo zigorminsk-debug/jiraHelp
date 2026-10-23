@@ -384,6 +384,28 @@ func buildRouter() http.Handler {
 		})
 	})
 
+	mux.HandleFunc("/api/mail-audit", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, 405, fmt.Errorf("method not allowed"))
+			return
+		}
+		var req MailAuditRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		rep, err := RunMailDeliverabilityAudit(req, logHub.Emit)
+		if err != nil {
+			logHub.Emit("error", err.Error())
+			writeErr(w, 400, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{
+			"ok":     true,
+			"report": rep,
+		})
+	})
+
 	mux.HandleFunc("/api/issue", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeErr(w, 405, fmt.Errorf("method not allowed"))

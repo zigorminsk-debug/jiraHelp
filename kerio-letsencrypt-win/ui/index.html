@@ -674,7 +674,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v1.8 • Kerio Connect</span>
+        <span class="brand-badge">Windows Native GUI v2.0 • SSL + Почтовый Аудит</span>
       </div>
       <div class="brand-sub">Генерация приватного ключа (.key) и выпуск SSL-сертификатов (.crt / .pfx) по IP и домену для Kerio MailServer</div>
     </div>
@@ -711,6 +711,9 @@
   </button>
   <button type="button" class="nav-tab" data-tab="kerio">
     📬 Установка в Kerio Connect
+  </button>
+  <button type="button" class="nav-tab" data-tab="mailcheck">
+    📨 Проверка почты и Антиспам
   </button>
   <button type="button" class="nav-tab" data-tab="vault">
     📂 Выпущенные сертификаты и Автопродление
@@ -1255,6 +1258,149 @@
           </tbody>
         </table>
       </div>
+    </div>
+  </section>
+
+
+  <!-- TAB 4: FULL MAIL SERVER & ANTI-SPAM DELIVERABILITY AUDIT -->
+  <section id="tab-mailcheck" class="tab-page">
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">
+            <span class="step-num">📨</span>
+            Комплексная диагностика почтового сервера, доставляемости и защиты от СПАМа
+          </div>
+          <div class="card-subtitle">
+            Проверяет <strong>MX, прямую и обратную зону PTR (FCrDNS), SPF, цифровую подпись DKIM (Kerio <code>mail._domainkey</code>), DMARC, порты 25/465/587/993/995/443, SSL-цепочку, баннер HELO, защиту от Open Relay и 11 мировых спам-баз (Spamhaus, Barracuda, SpamCop, SORBS)</strong> + формирует готовые записи и пошаговый план исправления!
+          </div>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="auditDomainInput">
+            <span>Почтовый домен или email *</span>
+            <span class="label-hint">например: <code>leend.by</code>, <code>csl.by</code> или <code>info@leend.by</code></span>
+          </label>
+          <input type="text" id="auditDomainInput" placeholder="leend.by" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label class="field-label" for="auditMailHostInput">
+            <span>Хост почтового сервера (необязательно)</span>
+            <span class="label-hint">определяется сам по MX, напр. <code>mail.leend.by</code></span>
+          </label>
+          <input type="text" id="auditMailHostInput" placeholder="Автоопределение из MX" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="auditDkimSelectorInput">
+            <span>Селектор DKIM (необязательно)</span>
+            <span class="label-hint">по умолчанию автопоиск <code>mail</code> (Kerio), <code>default</code>, <code>dkim</code> и др.</span>
+          </label>
+          <input type="text" id="auditDkimSelectorInput" placeholder="mail (автопоиск по 12 селекторам)" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label class="field-label" for="auditTargetIpInput">
+            <span>IP для прямой проверки портов по VPN/сети (необязательно)</span>
+            <span class="label-hint">например <code>10.146.100.14</code>, если ваш провайдер режет порт 25</span>
+          </label>
+          <input type="text" id="auditTargetIpInput" placeholder="Оставьте пустым для проверки через интернет" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+
+      <div class="actions-row" style="justify-content:space-between;">
+        <div style="font-size:12.5px;color:var(--text-secondary);">
+          💡 Совет: даже если вы укажете локальный/VPN IP в правом поле для проверки портов 25/465/993, записи <strong>PTR, SPF и спам-базы RBL</strong> всё равно проверяются по реальному <strong>внешнему белому IP</strong> вашего домена!
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-outline" id="exportAuditHtmlBtn" style="display:none;" onclick="exportMailAuditHTML()">
+            📄 Сохранить HTML-отчёт
+          </button>
+          <button type="button" class="btn btn-primary btn-lg" id="runMailAuditBtn" onclick="runFullMailAudit()">
+            🔍 Проверить почтовый сервер и сформировать инструкцию
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- AUDIT RESULTS CONTAINER -->
+    <div id="mailAuditResultsWrap" style="display:none;">
+
+      <!-- 1. SCORE HERO BANNER -->
+      <div class="card" id="mailAuditScoreCard" style="border-width:2px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:18px;flex:1;min-width:260px;">
+            <div id="auditGradeCircle" style="width:78px;height:78px;border-radius:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:900;flex-shrink:0;">
+              <div id="auditScoreNum" style="font-size:24px;line-height:1;">100</div>
+              <div id="auditGradeLetter" style="font-size:12px;margin-top:3px;opacity:0.9;">A+</div>
+            </div>
+            <div>
+              <div style="font-size:17px;font-weight:800;" id="auditVerdictTitle">Результат аудита</div>
+              <div style="font-size:13.5px;color:var(--text-secondary);margin-top:4px;" id="auditTargetMeta"></div>
+              <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;" id="auditCountersBar"></div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <a href="#remediationSectionAnchor" class="btn btn-kerio" id="jumpToFixesBtn" style="display:none;text-decoration:none;">
+              🛠️ Перейти к инструкции по устранению (<span id="fixesCountNum">0</span>) ↓
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. STEP-BY-STEP REMEDIATION GUIDE (PROMINENTLY AT TOP WHEN ISSUES EXIST!) -->
+      <div id="remediationSectionAnchor"></div>
+      <div class="card" id="mailRemediationCard" style="display:none;border:2px solid var(--kerio-orange);">
+        <div class="card-header">
+          <div>
+            <div class="card-title" style="font-size:16.5px;color:var(--kerio-orange);">
+              🛠️ Пошаговое руководство по устранению найденных проблем (Kerio Connect + DNS + Провайдер)
+            </div>
+            <div class="card-subtitle">
+              Выполните эти пункты сверху вниз (сначала критические 🔴, затем важные 🟠) — все имена записей, значения TXT и тексты писем уже заполнены под ваш домен и IP!
+            </div>
+          </div>
+        </div>
+        <div id="mailRemediationList"></div>
+      </div>
+
+      <!-- 3. DETAILED DIAGNOSTIC CHECKLIST -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">📋 Детальные результаты всех проверок</div>
+            <div class="card-subtitle">Состояние каждого компонента приёма, отправки, подписи и шифрования почты</div>
+          </div>
+        </div>
+        <div id="mailChecksList"></div>
+      </div>
+
+      <!-- 4. PORTS + SSL MATRIX & 11 DNSBL BLACKLISTS SIDE BY SIDE -->
+      <div class="workspace-grid">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">🔌 Почтовые порты и SSL/STARTTLS шифрование</div>
+              <div class="card-subtitle">Прямая проверка соединения, скорости отклика и цепочки сертификатов</div>
+            </div>
+          </div>
+          <div id="mailPortsMatrix"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">🚫 Проверка IP по 11 спам-базам (DNSBL / RBL)</div>
+              <div class="card-subtitle">Репутация внешнего почтового IP в мировых фильтрах</div>
+            </div>
+          </div>
+          <div id="mailRblMatrix"></div>
+        </div>
+      </div>
+
     </div>
   </section>
 
@@ -2229,6 +2375,277 @@
   setInterval(() => {
     fetch('/api/ping?client=ui').catch(() => {});
   }, 4000);
+
+
+  // =========================================================================
+  // FULL MAIL SERVER & ANTI-SPAM AUDIT + REMEDIATION WIZARD
+  // =========================================================================
+  let lastMailAuditReport = null;
+
+  // Auto-populate auditDomainInput from Tab 1 domainInput if still empty
+  document.querySelectorAll('.nav-tab').forEach(tabBtn => {
+    tabBtn.addEventListener('click', () => {
+      if (tabBtn.dataset.tab === 'mailcheck') {
+        const audDom = document.getElementById('auditDomainInput');
+        const mainDom = document.getElementById('domainInput').value.trim();
+        if (audDom && !audDom.value.trim() && mainDom) {
+          audDom.value = mainDom;
+        }
+        const audIp = document.getElementById('auditTargetIpInput');
+        const apiHost = document.getElementById('kerioApiHost').value.trim();
+        if (audIp && !audIp.value.trim() && apiHost && apiHost !== '127.0.0.1') {
+          audIp.value = apiHost;
+        }
+      }
+    });
+  });
+
+  document.getElementById('auditDomainInput').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      runFullMailAudit();
+    }
+  });
+
+  async function runFullMailAudit() {
+    const domain = document.getElementById('auditDomainInput').value.trim();
+    const mailHost = document.getElementById('auditMailHostInput').value.trim();
+    const dkimSelector = document.getElementById('auditDkimSelectorInput').value.trim();
+    const serverIp = document.getElementById('auditTargetIpInput').value.trim();
+
+    if (!domain && !mailHost) {
+      showToast('Введите почтовый домен (например, leend.by или csl.by)!', true);
+      document.getElementById('auditDomainInput').focus();
+      return;
+    }
+
+    const btn = document.getElementById('runMailAuditBtn');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Проверка MX, PTR, SPF, DKIM, DMARC, SMTP, SSL и 11 спам-баз...';
+
+    try {
+      const r = await fetch('/api/mail-audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain, mailHost, dkimSelector, serverIp })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Ошибка при выполнении аудита почтового сервера');
+      lastMailAuditReport = d.report;
+      renderMailAuditReport(d.report);
+      showToast(`Проверка завершена! Рейтинг доставляемости: ${d.report.score}/100 (${d.report.grade})`);
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  }
+
+  function jumpToSslIssueForHost(host) {
+    document.getElementById('domainInput').value = host;
+    document.querySelector('.nav-tab[data-tab="issue"]').click();
+    showToast('Подставлен хост ' + host + ' — нажмите «Сгенерировать ключ и выпустить сертификат»!');
+  }
+
+  function renderMailAuditReport(rep) {
+    document.getElementById('mailAuditResultsWrap').style.display = 'block';
+    document.getElementById('exportAuditHtmlBtn').style.display = 'inline-flex';
+
+    // 1. Score Card Styling
+    const scoreCard = document.getElementById('mailAuditScoreCard');
+    const circle = document.getElementById('auditGradeCircle');
+    let accentColor = '#10b981';
+    let softBg = 'rgba(16,185,129,0.16)';
+    if (rep.score < 50) {
+      accentColor = '#ef4444';
+      softBg = 'rgba(239,68,68,0.16)';
+    } else if (rep.score < 82) {
+      accentColor = '#f59e0b';
+      softBg = 'rgba(245,158,11,0.16)';
+    }
+    scoreCard.style.borderColor = accentColor;
+    circle.style.background = softBg;
+    circle.style.border = `2px solid ${accentColor}`;
+    circle.style.color = accentColor;
+
+    document.getElementById('auditScoreNum').textContent = `${rep.score}`;
+    document.getElementById('auditGradeLetter').textContent = `Оценка ${rep.grade}`;
+    document.getElementById('auditVerdictTitle').textContent = rep.verdict;
+    document.getElementById('auditTargetMeta').innerHTML =
+      `Почтовый домен: <strong>@${escapeHtml(rep.mailDomain)}</strong> • Сервер (MX/SMTP): <strong>${escapeHtml(rep.mailHost)}</strong> • Внешний IP: <strong>${escapeHtml(rep.serverIp || 'не определён')}</strong> • Время: ${escapeHtml(rep.checkedAt)}`;
+
+    document.getElementById('auditCountersBar').innerHTML = `
+      <span class="status-pill ok">✅ Пройдено успешно: <strong>${rep.passedCount}</strong></span>
+      <span class="status-pill warn" style="${rep.warningCount ? '' : 'opacity:0.65;'}">🟠 Предупреждений: <strong>${rep.warningCount}</strong></span>
+      <span class="status-pill" style="border-color:${rep.criticalCount ? '#ef4444' : 'var(--border)'};color:${rep.criticalCount ? '#fca5a5' : 'var(--text-secondary)'};">🔴 Критических проблем: <strong>${rep.criticalCount}</strong></span>
+    `;
+
+    // 2. Remediation Guide
+    const remCard = document.getElementById('mailRemediationCard');
+    const remList = document.getElementById('mailRemediationList');
+    const jumpBtn = document.getElementById('jumpToFixesBtn');
+
+    if (rep.remediations && rep.remediations.length > 0) {
+      remCard.style.display = 'block';
+      jumpBtn.style.display = 'inline-flex';
+      document.getElementById('fixesCountNum').textContent = rep.remediations.length;
+
+      // Sort critical first, then warning, then info
+      const orderMap = { critical: 0, warning: 1, info: 2 };
+      const sortedRems = [...rep.remediations].sort((a, b) => (orderMap[a.severity] ?? 9) - (orderMap[b.severity] ?? 9));
+
+      remList.innerHTML = sortedRems.map((rem, idx) => {
+        let badgeHtml = '<span style="padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:800;background:rgba(59,130,246,0.18);color:#93c5fd;">💡 РЕКОМЕНДАЦИЯ</span>';
+        let borderCol = 'rgba(59,130,246,0.45)';
+        if (rem.severity === 'critical') {
+          badgeHtml = '<span style="padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:800;background:rgba(239,68,68,0.2);color:#fca5a5;">🔴 КРИТИЧНО — ВЛИЯЕТ НА СПАМ / ОТКАЗЫ</span>';
+          borderCol = 'rgba(239,68,68,0.55)';
+        } else if (rem.severity === 'warning') {
+          badgeHtml = '<span style="padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:800;background:rgba(245,158,11,0.2);color:#fcd34d;">🟠 ВАЖНО ИСПРАВИТЬ</span>';
+          borderCol = 'rgba(245,158,11,0.55)';
+        }
+
+        const stepsHtml = (rem.steps || []).map((st, sIdx) => `
+          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:7px;font-size:13.5px;line-height:1.5;">
+            <span style="min-width:22px;height:22px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:800;color:var(--accent);margin-top:1px;">${sIdx + 1}</span>
+            <div>${escapeHtml(st)}</div>
+          </div>
+        `).join('');
+
+        const copyHtml = (rem.copyItems || []).map((ci, cIdx) => {
+          const safeVal = String(ci.value || '');
+          const btnId = `rem_copy_btn_${idx}_${cIdx}`;
+          return `
+            <div style="margin-top:8px;background:var(--bg-card);padding:10px 12px;border-radius:8px;border:1px solid var(--border);">
+              <div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;font-weight:600;">${escapeHtml(ci.label)}:</div>
+              <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;">
+                <input type="text" readonly id="${btnId}_inp" value="${escapeHtml(safeVal)}" onclick="this.select()" style="font-family:Consolas,monospace;font-size:13px;font-weight:700;color:#fde68a;">
+                <button type="button" class="btn btn-primary btn-sm" onclick="copyTextSafe(document.getElementById('${btnId}_inp').value, 'Скопировано в буфер обмена!')">📋 Копировать</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        const quickBtnHtml = rem.quickAction === 'goto_issue_ssl'
+          ? `<div style="margin-top:12px;">
+               <button type="button" class="btn btn-primary" onclick="jumpToSslIssueForHost('${escapeHtml(rep.mailHost)}')">
+                 🔐 Выпустить доверенный SSL-сертификат для ${escapeHtml(rep.mailHost)} прямо сейчас →
+               </button>
+             </div>`
+          : '';
+
+        return `
+          <div style="background:var(--bg-elevated);border:1.5px solid ${borderCol};border-radius:12px;padding:16px 18px;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                ${badgeHtml}
+                <span style="font-size:12px;color:var(--text-secondary);font-weight:600;">• ${escapeHtml(rem.category)}</span>
+              </div>
+              <span style="font-size:12px;color:var(--text-secondary);">Пункт #${idx + 1}</span>
+            </div>
+            <div style="font-size:15.5px;font-weight:800;margin-bottom:6px;">${escapeHtml(rem.title)}</div>
+            <div style="font-size:13px;color:var(--text-secondary);background:rgba(15,23,42,0.45);padding:9px 12px;border-radius:8px;margin-bottom:12px;line-height:1.45;">
+              <strong>Почему это важно:</strong> ${escapeHtml(rem.whyItMatters)}
+            </div>
+            <div style="font-size:12.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--accent);margin-bottom:8px;">Как устранить по шагам:</div>
+            ${stepsHtml}
+            ${copyHtml}
+            ${quickBtnHtml}
+          </div>
+        `;
+      }).join('');
+    } else {
+      remCard.style.display = 'none';
+      jumpBtn.style.display = 'none';
+    }
+
+    // 3. Detailed Checks List
+    const iconByStatus = { ok: '✅', warning: '🟠', error: '🔴', info: '💡' };
+    const borderByStatus = {
+      ok: 'rgba(16,185,129,0.35)',
+      warning: 'rgba(245,158,11,0.5)',
+      error: 'rgba(239,68,68,0.55)',
+      info: 'var(--border)'
+    };
+    document.getElementById('mailChecksList').innerHTML = (rep.checks || []).map(ch => `
+      <div style="background:var(--bg-elevated);border:1px solid ${borderByStatus[ch.status] || 'var(--border)'};border-radius:10px;padding:13px 15px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <div style="font-weight:800;font-size:14px;">${iconByStatus[ch.status] || '•'} ${escapeHtml(ch.title)}</div>
+          <span style="font-size:11.5px;color:var(--text-secondary);">${escapeHtml(ch.category)}</span>
+        </div>
+        <div style="font-size:13.5px;margin-top:5px;line-height:1.45;">${escapeHtml(ch.summary)}</div>
+        ${(ch.details && ch.details.length) ? `
+          <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);font-family:Consolas,monospace;font-size:12px;color:var(--text-secondary);word-break:break-all;">
+            ${ch.details.map(d => `<div style="margin-bottom:3px;">• ${escapeHtml(d)}</div>`).join('')}
+          </div>` : ''}
+      </div>
+    `).join('');
+
+    // 4. Ports Matrix
+    document.getElementById('mailPortsMatrix').innerHTML = (rep.ports || []).map(p => {
+      let stBadge = '<span style="color:#94a3b8;">Закрыт / недоступен</span>';
+      if (p.open && p.tlsTrusted) {
+        stBadge = `<span style="color:#10b981;font-weight:700;">✅ Открыт + Доверенный ${escapeHtml(p.tlsVersion || 'TLS')} (${p.latencyMs} мс)</span>`;
+      } else if (p.open && p.tlsOk && !p.tlsTrusted) {
+        stBadge = `<span style="color:#f59e0b;font-weight:700;">⚠ Открыт, но SSL НЕ доверен (${p.latencyMs} мс)</span>`;
+      } else if (p.open) {
+        stBadge = `<span style="color:#f59e0b;font-weight:700;">⚠ Открыт без TLS (${p.latencyMs} мс)</span>`;
+      }
+      return `
+        <div style="padding:10px 12px;border-radius:8px;background:var(--bg-elevated);border:1px solid var(--border);margin-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:13px;">
+            <strong>Порт ${p.port} — ${escapeHtml(p.protocol)}</strong>
+            ${stBadge}
+          </div>
+          ${p.certSubject ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">Сертификат: <code>${escapeHtml(p.certSubject)}</code> (${escapeHtml(p.certIssuer)}) • до <strong>${escapeHtml(p.certExpiry)}</strong> (${p.certDays} дн.)</div>` : ''}
+          ${p.banner ? `<div style="font-size:11.5px;color:var(--text-secondary);margin-top:3px;font-family:Consolas,monospace;word-break:break-all;">Баннер: ${escapeHtml(p.banner)}</div>` : ''}
+          ${p.error ? `<div style="font-size:11.5px;color:#fca5a5;margin-top:3px;word-break:break-all;">Детали: ${escapeHtml(p.error)}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    // 5. DNSBL Matrix
+    if (!rep.blacklists || rep.blacklists.length === 0) {
+      document.getElementById('mailRblMatrix').innerHTML = '<div class="hint-text">Внешний IPv4 адрес не определён для проверки RBL.</div>';
+    } else {
+      document.getElementById('mailRblMatrix').innerHTML = rep.blacklists.map(b => `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-radius:8px;background:var(--bg-elevated);border:1px solid ${b.listed ? '#ef4444' : 'var(--border)'};margin-bottom:7px;font-size:13px;">
+          <div>
+            <strong>${escapeHtml(b.provider)}</strong>
+            <span style="font-size:11.5px;color:var(--text-secondary);margin-left:6px;">(${escapeHtml(b.zone)})</span>
+          </div>
+          ${b.listed
+            ? `<a href="${escapeHtml(b.delistUrl)}" target="_blank" style="color:#fca5a5;font-weight:800;">🔴 В СПИСКЕ (${escapeHtml(b.returnCode)}) — Удалить ↗</a>`
+            : `<span style="color:#10b981;font-weight:700;">✅ Чисто</span>`}
+        </div>
+      `).join('');
+    }
+  }
+
+  function exportMailAuditHTML() {
+    if (!lastMailAuditReport) return;
+    const rep = lastMailAuditReport;
+    const htmlDoc = `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Аудит почтового сервера ${escapeHtml(rep.mailDomain)}</title>
+      <style>body{font-family:Segoe UI,Arial,sans-serif;max-width:960px;margin:24px auto;padding:0 16px;color:#0f172a;background:#f8fafc;}
+      .box{background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:16px 20px;margin-bottom:14px;}
+      code,pre{background:#f1f5f9;padding:2px 6px;border-radius:5px;font-family:Consolas,monospace;word-break:break-all;}
+      h1,h2,h3{margin:0 0 8px;}</style></head><body>
+      <div class="box"><h1>Отчёт аудита почтового сервера @${escapeHtml(rep.mailDomain)}</h1>
+      <p><strong>Сервер:</strong> ${escapeHtml(rep.mailHost)} (${escapeHtml(rep.serverIp)}) • <strong>Оценка:</strong> ${rep.score}/100 (${rep.grade}) • <strong>Дата:</strong> ${escapeHtml(rep.checkedAt)}</p>
+      <p>${escapeHtml(rep.verdict)}</p></div>
+      <h2>План устранения замечаний</h2>
+      ${(rep.remediations || []).map((r, i) => `<div class="box"><h3>${i + 1}. [${r.severity.toUpperCase()}] ${escapeHtml(r.title)}</h3><p><em>${escapeHtml(r.whyItMatters)}</em></p><ol>${(r.steps || []).map(st => `<li>${escapeHtml(st)}</li>`).join('')}</ol>${(r.copyItems || []).map(c => `<p><strong>${escapeHtml(c.label)}:</strong> <code>${escapeHtml(c.value)}</code></p>`).join('')}</div>`).join('')}
+      <h2>Детальные проверки</h2>
+      ${(rep.checks || []).map(c => `<div class="box"><strong>[${c.status.toUpperCase()}] ${escapeHtml(c.title)}</strong><p>${escapeHtml(c.summary)}</p></div>`).join('')}
+      </body></html>`;
+    const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `mail-audit-${rep.mailDomain}.html`;
+    a.click();
+  }
 
   initApp();
 </script>

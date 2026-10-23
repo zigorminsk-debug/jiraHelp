@@ -495,3 +495,42 @@ func TestEndToEndACMEv2HTTP01AndTLSALPN01AndDNS01(t *testing.T) {
 	}
 	t.Logf("Kerio Admin API success: %s", apiNote)
 }
+
+func TestMailDeliverabilityAuditHelpersAndReport(t *testing.T) {
+	// 1. Test DKIM 2048-bit RSA key extraction
+	priv, _, _, _, err := GeneratePrivateKey("rsa2048")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubDER, err := x509.MarshalPKIXPublicKey(priv.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dkimTxt := "v=DKIM1; k=rsa; p=" + base64.StdEncoding.EncodeToString(pubDER)
+	algo, bits := parseDKIMPublicKeyBits(dkimTxt)
+	if algo != "rsa" || bits != 2048 {
+		t.Fatalf("expected rsa 2048-bit DKIM key, got algo=%s bits=%d", algo, bits)
+	}
+
+	// 2. Test end-to-end RunMailDeliverabilityAudit report & remediation guide builder
+	rep, err := RunMailDeliverabilityAudit(MailAuditRequest{
+		Domain:   "user@nonexistent-test-domain-kerio.invalid",
+		ServerIP: "127.0.0.1",
+	}, func(lvl, msg string) {
+		t.Logf("[AUDIT %s] %s", lvl, msg)
+	})
+	if err != nil {
+		t.Fatalf("RunMailDeliverabilityAudit failed: %v", err)
+	}
+	if rep.MailDomain != "nonexistent-test-domain-kerio.invalid" {
+		t.Fatalf("unexpected mailDomain: %s", rep.MailDomain)
+	}
+	if len(rep.Checks) < 8 {
+		t.Fatalf("expected at least 8 diagnostic checks, got %d", len(rep.Checks))
+	}
+	if len(rep.Remediations) < 4 {
+		t.Fatalf("expected step-by-step remediation guides to be generated, got %d", len(rep.Remediations))
+	}
+	t.Logf("Generated %d checks and %d remediation guides (score=%d, grade=%s)", len(rep.Checks), len(rep.Remediations), rep.Score, rep.Grade)
+}
+
