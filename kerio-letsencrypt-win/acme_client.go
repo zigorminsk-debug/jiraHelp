@@ -571,17 +571,18 @@ func ExecuteCertificateIssuance(req IssueRequest, log LogFunc) (*IssuedCertRecor
 		challType = "http-01"
 	}
 
-	// Interactive 2-step DNS-01 mode
-	if challType == "dns-01" {
+	buildDNS01FromOrder := func(ord acmeOrder, ordURL string) (*IssuedCertRecord, *PendingDNS01Session, error) {
 		sessID := fmt.Sprintf("dns01-%d", time.Now().UnixNano())
+		dnsReq := req
+		dnsReq.ChallengeType = "dns-01"
 		sess := &PendingDNS01Session{
 			SessionID:     sessID,
 			CreatedAt:     time.Now(),
-			Request:       req,
+			Request:       dnsReq,
 			DisplayDomain: displayPrimary,
 			ACMEProfile:   acmeProfile,
-			OrderURL:      orderURL,
-			FinalizeURL:   order.Finalize,
+			OrderURL:      ordURL,
+			FinalizeURL:   ord.Finalize,
 			Client:        client,
 			PrivKey:       priv,
 			PrivPEM:       privPEM,
@@ -590,7 +591,7 @@ func ExecuteCertificateIssuance(req IssueRequest, log LogFunc) (*IssuedCertRecor
 			CSRDER:        csrDER,
 			CSRPEM:        csrPEM,
 		}
-		for _, authURL := range order.Authorizations {
+		for _, authURL := range ord.Authorizations {
 			ab, _, _, err := client.signedPost(authURL, nil, false)
 			if err != nil {
 				return nil, nil, err
@@ -639,20 +640,37 @@ func ExecuteCertificateIssuance(req IssueRequest, log LogFunc) (*IssuedCertRecor
 		}
 
 		if len(sess.Records) == 0 {
-			// All authorizations already cached as valid -> finalize right away!
-			rec, err := finalizeAndSaveOrder(client, orderURL, order.Finalize, csrDER, csrPEM, req, displayPrimary, acmeProfile, priv, privPEM, privPKCS8PEM, keyDesc, log)
+			rec, err := finalizeAndSaveOrder(client, ordURL, ord.Finalize, csrDER, csrPEM, dnsReq, displayPrimary, acmeProfile, priv, privPEM, privPKCS8PEM, keyDesc, log)
 			return rec, nil, err
 		}
 
 		pendingDNS01Mu.Lock()
 		pendingDNS01Sessions[sessID] = sess
 		pendingDNS01Mu.Unlock()
-		log("warning", "Для завершения выпуска добавьте указанные DNS TXT-записи у вашего DNS-провайдера и нажмите «Подтвердить DNS и завершить выпуск».")
+		log("warning", "Для завершения выпуска добавьте указанную ниже DNS TXT-запись в панели управления вашим доменом и нажмите «Подтвердить TXT-записи и выпустить сертификат».")
 		return nil, sess, nil
+	}
+
+	// Interactive 2-step DNS-01 mode
+	if challType == "dns-01" {
+		return buildDNS01FromOrder(order, orderURL)
 	}
 
 	// Automated HTTP-01 / HTTP-01-Webroot / TLS-ALPN-01 Challenge Solver
 	if err := solveAutomatedChallenges(client, order.Authorizations, req, log); err != nil {
+		// If running from an admin PC / VPN (e.g. 10.146.100.10) where port 80 hits remote Kerio (got "") or cannot bind/connect,
+		// automatically switch to DNS-01 in the same run without failing!
+		if strings.TrimSpace(req.CustomDirectoryURL) == "" && !useShortlived && len(asciiDomains) > 0 {
+			log("warning", fmt.Sprintf("Авто-переключение на DNS-01 (так как порт 80 направлен на удалённый сервер Kerio, а не на этот ПК): %v", err))
+			newOrderBody, newOrderHdr, _, nerr := client.signedPost(client.dir.NewOrder, orderReq, false)
+			if nerr == nil {
+				var newOrder acmeOrder
+				if json.Unmarshal(newOrderBody, &newOrder) == nil {
+					log("success", "Создана готовая TXT-запись для выпуска сертификата прямо с этого ПК без проброса портов!")
+					return buildDNS01FromOrder(newOrder, newOrderHdr.Get("Location"))
+				}
+			}
+		}
 		return nil, nil, err
 	}
 

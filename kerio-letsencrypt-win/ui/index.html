@@ -674,7 +674,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v1.5 • Kerio Connect</span>
+        <span class="brand-badge">Windows Native GUI v1.6 • Kerio Connect</span>
       </div>
       <div class="brand-sub">Генерация приватного ключа (.key) и выпуск SSL-сертификатов (.crt / .pfx) по IP и домену для Kerio MailServer</div>
     </div>
@@ -1610,8 +1610,13 @@
       if (!d.ok) throw new Error(d.error || 'Не удалось выпустить сертификат');
 
       if (d.pendingDns01 && d.session) {
+        const apiHost = document.getElementById('apiHostInput');
+        if (apiHost && !apiHost.value.trim() && req.domain) {
+          apiHost.value = req.domain.trim();
+        }
         renderDns01Wizard(d.session);
-        showToast('Добавьте TXT-запись в DNS и нажмите «Подтвердить»');
+        document.getElementById('dns01WizardCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        showToast('Готово! Скопируйте TXT-запись справа в DNS вашего домена и нажмите зелёную кнопку выпуска!');
         return;
       }
 
@@ -2075,6 +2080,14 @@
         document.getElementById('kerioPathInput').value = d.kerio.sslCertDir;
         document.getElementById('inlineKerioPathInput').value = d.kerio.sslCertDir;
         renderKerioStatus(d.kerio);
+      }
+      if (!d.kerio || !d.kerio.found) {
+        const sel = document.getElementById('challengeSelect');
+        sel.value = 'dns-01';
+        sel.dispatchEvent(new Event('change'));
+        const km = document.getElementById('kerioMethodSelect');
+        km.value = 'api';
+        km.dispatchEvent(new Event('change'));
       }
       updateAutoRenewBadge(!!d.autoRenewScheduled);
 
