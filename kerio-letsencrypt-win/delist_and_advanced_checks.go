@@ -170,9 +170,13 @@ func checkExpandedDNSBLLists(ip net.IP) []RBLCheckEntry {
 			q := rev + "." + spec.zone
 
 			// Try direct OS DNS first (avoids Spamhaus public-resolver block code 127.255.255.254)
-			ctx, cancel := context.WithTimeout(context.Background(), 2000*time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), 1800*time.Millisecond)
 			ips, err := sysRes.LookupIPAddr(ctx, q)
 			cancel()
+			isNXDomain := false
+			if dnsErr, ok := err.(*net.DNSError); ok && dnsErr.IsNotFound {
+				isNXDomain = true
+			}
 			if err == nil && len(ips) > 0 {
 				for _, hit := range ips {
 					h4 := hit.IP.To4()
@@ -182,8 +186,8 @@ func checkExpandedDNSBLLists(ip net.IP) []RBLCheckEntry {
 						break
 					}
 				}
-			} else if spec.id != "spamhaus" {
-				// Fallback via DoH if corporate DNS is restricted
+			} else if !isNXDomain && spec.id != "spamhaus" {
+				// Fallback via DoH ONLY when UDP/53 timed out or failed (NOT on NXDOMAIN, which already proves clean status!)
 				if ans, _, derr := queryDoH(q, "A"); derr == nil {
 					for _, a := range ans {
 						if a.Type == 1 {
@@ -401,8 +405,11 @@ func checkAdvancedDomainStandards(domain string) (caaRecords []string, caBlocksL
 
 	go func() {
 		defer wg.Done()
-		client := &http.Client{Timeout: 2200 * time.Millisecond}
-		resp, err := client.Get("https://mta-sts." + domain + "/.well-known/mta-sts.txt")
+		req, err := http.NewRequest(http.MethodGet, "https://mta-sts."+domain+"/.well-known/mta-sts.txt", nil)
+		if err != nil {
+			return
+		}
+		resp, err := sharedFastHTTPClient.Do(req)
 		if err == nil {
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()

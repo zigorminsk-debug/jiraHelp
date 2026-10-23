@@ -562,3 +562,145 @@ func TestMailDeliverabilityAuditHelpersAndReport(t *testing.T) {
 		len(rep.Checks), len(rep.Remediations), len(rep.DelistCenter.MajorProviders), rep.Score, rep.Grade)
 }
 
+func TestV4ProSuiteToolsCachePersistenceAndRemoteKerioInspector(t *testing.T) {
+	// 1. Test RAM DNS & WAN Cache + Explicit Flush
+	ClearNetworkDiagnosticCache()
+	setCachedWANIP("178.124.204.98")
+	if got := getCachedWANIP(); got != "178.124.204.98" {
+		t.Fatalf("expected cached WAN IP 178.124.204.98, got %q", got)
+	}
+	setCachedDoH("leend.by|A", []dohAnswer{{Name: "leend.by", Type: 1, Data: "178.124.204.98"}}, 0, 30*time.Second)
+	if ans, status, ok := getCachedDoH("leend.by|A"); !ok || status != 0 || len(ans) != 1 {
+		t.Fatalf("expected cached DoH answer hit, got ok=%v len=%d", ok, len(ans))
+	}
+	ClearNetworkDiagnosticCache()
+	if got := getCachedWANIP(); got != "" {
+		t.Fatalf("expected empty WAN IP after ClearNetworkDiagnosticCache(), got %q", got)
+	}
+
+	// 2. Test Persistent UI Settings & Audit Score Delta ("Было -> Стало")
+	tmpDir := t.TempDir()
+	wantSettings := SavedUISettings{
+		LastDomain:   "mail.leend.by",
+		LastServerIP: "178.124.204.98",
+		LastEmail:    "admin@leend.by",
+		KerioAPIHost: "10.146.100.14",
+		KerioAPIPort: 4040,
+		KerioAPIUser: "admin",
+		AuditDomain:  "leend.by",
+	}
+	if err := SaveUISettings(tmpDir, wantSettings); err != nil {
+		t.Fatalf("SaveUISettings failed: %v", err)
+	}
+	gotSettings := LoadSavedUISettings(tmpDir)
+	if gotSettings.LastDomain != "mail.leend.by" || gotSettings.KerioAPIHost != "10.146.100.14" {
+		t.Fatalf("unexpected loaded settings: %+v", gotSettings)
+	}
+
+	firstDelta := RecordAuditAndComputeDelta(tmpDir, &MailAuditReport{
+		CheckedAt:  "23.10.2026 12:00:00",
+		MailDomain: "leend.by",
+		MailHost:   "mail.leend.by",
+		ServerIP:   "178.124.204.98",
+		Score:      38,
+		Grade:      "F",
+	})
+	if firstDelta.HasPrevious {
+		t.Fatalf("first audit should have HasPrevious=false")
+	}
+	secondDelta := RecordAuditAndComputeDelta(tmpDir, &MailAuditReport{
+		CheckedAt:  "23.10.2026 12:30:00",
+		MailDomain: "leend.by",
+		MailHost:   "mail.leend.by",
+		ServerIP:   "178.124.204.98",
+		Score:      96,
+		Grade:      "A+",
+	})
+	if !secondDelta.HasPrevious || secondDelta.ScoreDiff != 58 {
+		t.Fatalf("expected ScoreDiff=+58, got %+v", secondDelta)
+	}
+	if hist := LoadAuditHistory(tmpDir); len(hist) != 2 {
+		t.Fatalf("expected 2 saved audit history entries, got %d", len(hist))
+	}
+
+	// 3. Test RFC-822 Raw Email Header Analyzer (Timezone-aware hop delay + Auth extraction)
+	sampleHeaders := `Delivered-To: partner@gmail.com
+Authentication-Results: mx.google.com;
+       dkim=fail header.i=@leend.by;
+       spf=softfail smtp.mailfrom=info@leend.by;
+       dmarc=fail (p=NONE) header.from=leend.by
+Return-Path: <info@leend.by>
+Received: from mail.leend.by (unknown [178.124.204.98])
+        by mx.google.com with ESMTPS
+        for <partner@gmail.com>;
+        Fri, 23 Oct 2026 10:14:52 +0000 (UTC)
+Received: from [10.146.100.25] (office-pc.local [10.146.100.25])
+        by mail.leend.by (Kerio Connect) with ESMTPSA
+        for <partner@gmail.com>;
+        Fri, 23 Oct 2026 13:13:04 +0300
+From: info@leend.by
+To: partner@gmail.com
+Subject: Invoice #418
+X-Spam-Status: Yes, score=6.8 required=5.0`
+
+	hRes, err := AnalyzeRawEmailHeaders(sampleHeaders)
+	if err != nil {
+		t.Fatalf("AnalyzeRawEmailHeaders failed: %v", err)
+	}
+	if len(hRes.Hops) != 2 || hRes.TotalDelaySec != 108 || !hRes.Hops[1].SlowHop {
+		t.Fatalf("unexpected header hop latency calculation: %+v", hRes)
+	}
+	if !strings.Contains(strings.ToLower(hRes.SPFStatus), "softfail") || !strings.Contains(strings.ToLower(hRes.DKIMStatus), "fail") {
+		t.Fatalf("unexpected auth status parsing: SPF=%q DKIM=%q", hRes.SPFStatus, hRes.DKIMStatus)
+	}
+
+	// 4. Test Live Kerio Connect (:4040) Remote SSL Certificate Inspector via Mock TLS JSON-RPC Server
+	mockKerio := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var rpcReq struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&rpcReq)
+		switch rpcReq.Method {
+		case "Session.login":
+			http.SetCookie(w, &http.Cookie{Name: "SESSION_CONNECT_WEBADMIN", Value: "sess_v4"})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": rpcReq.ID,
+				"result": map[string]any{"token": "tok_v4"},
+			})
+		case "ConnectCertificate.get":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": rpcReq.ID,
+				"result": map[string]any{
+					"certificates": []map[string]any{
+						{
+							"id":               "cert_active_1",
+							"name":             "mail.leend.by (Let's Encrypt)",
+							"subjectHostNames": []string{"mail.leend.by", "leend.by"},
+							"issuer":           []map[string]string{{"name": "CN", "value": "R11"}},
+							"validPeriod":      map[string]string{"validFromDate": "2026-10-23", "validToDate": "2027-01-21"},
+							"active":           true,
+							"type":             "ActiveCertificate",
+						},
+					},
+				},
+			})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": rpcReq.ID, "result": map[string]any{}})
+		}
+	}))
+	defer mockKerio.Close()
+
+	kHost, kPortStr, _ := net.SplitHostPort(strings.TrimPrefix(mockKerio.URL, "https://"))
+	var kPort int
+	_, _ = fmt.Sscanf(kPortStr, "%d", &kPort)
+	remoteCerts, err := InspectKerioServerCertificates(kHost, kPort, "admin", "secret")
+	if err != nil {
+		t.Fatalf("InspectKerioServerCertificates failed: %v", err)
+	}
+	if len(remoteCerts) != 1 || !remoteCerts[0].Active || remoteCerts[0].IssuerName != "R11" {
+		t.Fatalf("unexpected remote Kerio certs: %+v", remoteCerts)
+	}
+}
+
+

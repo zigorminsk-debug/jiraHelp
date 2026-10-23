@@ -97,6 +97,7 @@ type MailAuditReport struct {
 	Blacklists       []RBLCheckEntry        `json:"blacklists"`
 	DomainBlacklists []RBLCheckEntry        `json:"domainBlacklists"`
 	DelistCenter     DelistCenterData       `json:"delistCenter"`
+	Delta            AuditDeltaComparison   `json:"delta"`
 	Remediations     []MailRemediationGuide `json:"remediations"`
 }
 
@@ -116,13 +117,16 @@ func isGloballyRoutableIPv4(raw string) bool {
 	return true
 }
 
-// DetectPublicIPFast races multiple global echo endpoints in parallel (including raw IP literal 1.1.1.1 so it works even if DNS is broken!).
+// DetectPublicIPFast races multiple global echo endpoints in parallel over a pooled HTTP/2 transport with 90s RAM caching.
 func DetectPublicIPFast() string {
+	if cached := getCachedWANIP(); cached != "" {
+		return cached
+	}
 	type res struct {
 		ip string
 	}
 	ch := make(chan res, 5)
-	ctx, cancel := context.WithTimeout(context.Background(), 2200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2000*time.Millisecond)
 	defer cancel()
 
 	endpoints := []string{
@@ -133,7 +137,6 @@ func DetectPublicIPFast() string {
 		"https://ifconfig.me/ip",
 	}
 
-	client := &http.Client{Timeout: 2000 * time.Millisecond}
 	var wg sync.WaitGroup
 	for _, ep := range endpoints {
 		wg.Add(1)
@@ -143,8 +146,8 @@ func DetectPublicIPFast() string {
 			if err != nil {
 				return
 			}
-			req.Header.Set("User-Agent", "KerioCertManager/2.2")
-			resp, err := client.Do(req)
+			req.Header.Set("User-Agent", "KerioCertManager/4.0")
+			resp, err := sharedFastHTTPClient.Do(req)
 			if err != nil {
 				return
 			}
@@ -187,6 +190,7 @@ func DetectPublicIPFast() string {
 
 	select {
 	case r := <-ch:
+		setCachedWANIP(r.ip)
 		return r.ip
 	case <-done:
 		return ""
@@ -206,9 +210,14 @@ type dohResponse struct {
 	Answer []dohAnswer `json:"Answer"`
 }
 
-// queryDoH queries Google & Cloudflare encrypted DNS-over-HTTPS so corporate Split-DNS (10.x.x.x) or port-53 NAT never hides external records!
+// queryDoH queries Google & Cloudflare encrypted DNS-over-HTTPS over pooled HTTP/2 with in-run deduplication cache!
 func queryDoH(name, qtype string) ([]dohAnswer, int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2000*time.Millisecond)
+	cacheKey := strings.ToLower(strings.TrimSpace(name)) + "|" + strings.ToUpper(strings.TrimSpace(qtype))
+	if ans, st, ok := getCachedDoH(cacheKey); ok {
+		return ans, st, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1800*time.Millisecond)
 	defer cancel()
 
 	urls := []string{
@@ -222,7 +231,6 @@ func queryDoH(name, qtype string) ([]dohAnswer, int, error) {
 		err    error
 	}
 	ch := make(chan dohRes, len(urls))
-	client := &http.Client{Timeout: 1800 * time.Millisecond}
 
 	for _, u := range urls {
 		go func(endpoint string) {
@@ -232,7 +240,7 @@ func queryDoH(name, qtype string) ([]dohAnswer, int, error) {
 				return
 			}
 			req.Header.Set("Accept", "application/dns-json")
-			resp, err := client.Do(req)
+			resp, err := sharedFastHTTPClient.Do(req)
 			if err != nil {
 				ch <- dohRes{err: err}
 				return
@@ -257,6 +265,7 @@ func queryDoH(name, qtype string) ([]dohAnswer, int, error) {
 		r := <-ch
 		if r.err == nil {
 			if len(r.ans) > 0 || r.status == 3 || r.status == 0 {
+				setCachedDoH(cacheKey, r.ans, r.status, 45*time.Second)
 				return r.ans, r.status, nil
 			}
 		} else {
@@ -1096,6 +1105,12 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 	var (
 		ptrs              []string
 		rbls              []RBLCheckEntry
+		domRBLs           []RBLCheckEntry
+		exposedAdmin      []string
+		caaRecs           []string
+		caaBlocksLE       bool
+		mtaStsPolicy      string
+		bimiRecs          []string
 		smtp25            smtpLiveDetails
 		smtp587           smtpLiveDetails
 		port465           PortProbeResult
@@ -1128,7 +1143,22 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 	report.ProbeTargetUsed = probeTargetHost
 
 	var wg sync.WaitGroup
-	wg.Add(10)
+	wg.Add(13)
+
+	go func() {
+		defer wg.Done()
+		domRBLs = checkDomainBlacklists(mailDomain)
+	}()
+
+	go func() {
+		defer wg.Done()
+		exposedAdmin = checkExposedAdminPorts(serverIP)
+	}()
+
+	go func() {
+		defer wg.Done()
+		caaRecs, caaBlocksLE, mtaStsPolicy, bimiRecs = checkAdvancedDomainStandards(mailDomain)
+	}()
 
 	go func() {
 		defer wg.Done()
@@ -1176,37 +1206,61 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 
 	go func() {
 		defer wg.Done()
-		if txts, terr := lookupTXTQuick(mailDomain); terr == nil {
-			for _, t := range txts {
-				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(t)), "v=spf1") {
-					spfRecords = append(spfRecords, strings.TrimSpace(t))
+		var txtWG sync.WaitGroup
+		txtWG.Add(7)
+		go func() {
+			defer txtWG.Done()
+			if txts, terr := lookupTXTQuick(mailDomain); terr == nil {
+				for _, t := range txts {
+					if strings.HasPrefix(strings.ToLower(strings.TrimSpace(t)), "v=spf1") {
+						spfRecords = append(spfRecords, strings.TrimSpace(t))
+					}
 				}
 			}
-		}
-		if mtxts, mterr := lookupTXTQuick("mail." + mailDomain); mterr == nil {
-			for _, t := range mtxts {
-				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(t)), "v=spf1") {
-					strayMailSPF = append(strayMailSPF, strings.TrimSpace(t))
+		}()
+		go func() {
+			defer txtWG.Done()
+			if mtxts, mterr := lookupTXTQuick("mail." + mailDomain); mterr == nil {
+				for _, t := range mtxts {
+					if strings.HasPrefix(strings.ToLower(strings.TrimSpace(t)), "v=spf1") {
+						strayMailSPF = append(strayMailSPF, strings.TrimSpace(t))
+					}
 				}
 			}
-		}
-		if dtxts, derr := lookupTXTQuick("_dmarc." + mailDomain); derr == nil {
-			for _, t := range dtxts {
-				if strings.Contains(strings.ToLower(t), "v=dmarc1") {
-					dmarcRecords = append(dmarcRecords, strings.TrimSpace(t))
+		}()
+		go func() {
+			defer txtWG.Done()
+			if dtxts, derr := lookupTXTQuick("_dmarc." + mailDomain); derr == nil {
+				for _, t := range dtxts {
+					if strings.Contains(strings.ToLower(t), "v=dmarc1") {
+						dmarcRecords = append(dmarcRecords, strings.TrimSpace(t))
+					}
 				}
 			}
-		}
-		if stxts, serr := lookupTXTQuick("_mta-sts." + mailDomain); serr == nil {
-			mtaStsRecords = stxts
-		}
-		if rtxts, rerr := lookupTXTQuick("_smtp._tls." + mailDomain); rerr == nil {
-			tlsRptRecords = rtxts
-		}
-		if aips := lookupPublicIPv4sExternal("autodiscover." + mailDomain); len(aips) > 0 {
-			autodiscoverIPs = aips
-		}
-		autodiscoverSRVs = lookupSRVAutodiscover(mailDomain)
+		}()
+		go func() {
+			defer txtWG.Done()
+			if stxts, serr := lookupTXTQuick("_mta-sts." + mailDomain); serr == nil {
+				mtaStsRecords = stxts
+			}
+		}()
+		go func() {
+			defer txtWG.Done()
+			if rtxts, rerr := lookupTXTQuick("_smtp._tls." + mailDomain); rerr == nil {
+				tlsRptRecords = rtxts
+			}
+		}()
+		go func() {
+			defer txtWG.Done()
+			if aips := lookupPublicIPv4sExternal("autodiscover." + mailDomain); len(aips) > 0 {
+				autodiscoverIPs = aips
+			}
+		}()
+		go func() {
+			defer txtWG.Done()
+			autodiscoverSRVs = lookupSRVAutodiscover(mailDomain)
+		}()
+		txtWG.Wait()
 	}()
 
 	go func() {
@@ -2229,29 +2283,15 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 	}
 
 	// =========================================================================
-	// EXTENDED DEEP SECURITY & DELIVERABILITY CHECKS (v3.0: CHECKS 10..15 + DELIST CENTER)
+	// EXTENDED DEEP SECURITY & DELIVERABILITY CHECKS (v4.0 PARALLEL PIPELINE)
 	// =========================================================================
 	var (
-		domRBLs       []RBLCheckEntry
-		exposedAdmin  []string
 		roleAudit     smtpRoleAuditResult
 		legacyTLS465  bool
 		legacyTLS465V string
-		caaRecs       []string
-		caaBlocksLE   bool
-		mtaStsPolicy  string
-		bimiRecs      []string
 	)
 	var extraWG sync.WaitGroup
-	extraWG.Add(5)
-	go func() {
-		defer extraWG.Done()
-		domRBLs = checkDomainBlacklists(mailDomain)
-	}()
-	go func() {
-		defer extraWG.Done()
-		exposedAdmin = checkExposedAdminPorts(serverIP)
-	}()
+	extraWG.Add(2)
 	go func() {
 		defer extraWG.Done()
 		if smtp25.Reachable {
@@ -2265,10 +2305,6 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 		} else if port443.Open {
 			legacyTLS465, legacyTLS465V = checkLegacyTLSAccepted(probeTargetHost, mailHost, 443)
 		}
-	}()
-	go func() {
-		defer extraWG.Done()
-		caaRecs, caaBlocksLE, mtaStsPolicy, bimiRecs = checkAdvancedDomainStandards(mailDomain)
 	}()
 	extraWG.Wait()
 

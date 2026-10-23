@@ -674,7 +674,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v3.0 • SSL + Почтовый Аудит + Антиспам Delist Центр</span>
+        <span class="brand-badge">Windows Native GUI v4.0 • Турбо-движок • Аудит • Delist • Инструменты Админа</span>
       </div>
       <div class="brand-sub">Генерация приватного ключа (.key) и выпуск SSL-сертификатов (.crt / .pfx) по IP и домену для Kerio MailServer</div>
     </div>
@@ -722,7 +722,18 @@
     📂 Выпущенные сертификаты и Автопродление
     <span class="tab-count" id="certCountBadge">0</span>
   </button>
+  <button type="button" class="nav-tab" data-tab="tools">
+    🧰 Инструменты админа (Заголовки / DNS)
+  </button>
 </nav>
+
+<!-- Global Expiring SSL Warning Banner (auto-shown if any certificate expires within 14 days) -->
+<div id="expiringCertAlertBanner" style="display:none;max-width:1380px;margin:14px auto 0;padding:0 24px;">
+  <div style="background:rgba(239,68,68,0.14);border:1.5px solid #ef4444;border-radius:10px;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div id="expiringCertAlertText" style="font-size:13.5px;color:#fecaca;font-weight:600;"></div>
+    <button type="button" class="btn btn-primary btn-sm" onclick="switchTab('vault')">⏰ Открыть хранилище и продлить →</button>
+  </div>
+</div>
 
 <!-- Main Container -->
 <main class="container">
@@ -1176,6 +1187,12 @@
               <input type="password" id="kerioApiPass" placeholder="Пароль от веб-админки Kerio">
             </div>
           </div>
+          <div style="margin-top:8px;margin-bottom:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <button type="button" class="btn btn-outline btn-sm" id="inspectRemoteKerioCertsBtn" onclick="inspectRemoteKerioCertificates()">
+              🔍 Проверить связь с Kerio (:4040) и показать текущие сертификаты на сервере
+            </button>
+          </div>
+          <div id="kerioRemoteCertsBox" style="display:none;margin-top:10px;"></div>
         </div>
 
         <div class="actions-row">
@@ -1237,12 +1254,15 @@
     </div>
 
     <div class="card">
-      <div class="card-header">
+      <div class="card-header" style="flex-wrap:wrap;gap:10px;">
         <div>
           <div class="card-title">📂 Все выпущенные ключи и SSL-сертификаты</div>
           <div class="card-subtitle">Нажмите «Открыть файлы», чтобы скачать <code>.key</code>, <code>.crt</code>, <code>.pfx</code> или <code>.zip</code> для любого сертификата</div>
         </div>
-        <button type="button" class="btn btn-outline btn-sm" onclick="loadCertificates()">Обновить список</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input type="text" id="vaultSearchInput" placeholder="🔎 Поиск по домену, SAN или IP..." oninput="filterVaultTable()" style="width:250px;padding:7px 11px;font-size:12.5px;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="loadCertificates()">Обновить список</button>
+        </div>
       </div>
 
       <div style="overflow-x:auto;">
@@ -1364,6 +1384,7 @@
               <div style="font-size:17px;font-weight:800;" id="auditVerdictTitle">Результат аудита</div>
               <div style="font-size:13.5px;color:var(--text-secondary);margin-top:4px;" id="auditTargetMeta"></div>
               <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;" id="auditCountersBar"></div>
+              <div id="auditDeltaBanner" style="display:none;margin-top:10px;"></div>
             </div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -1375,14 +1396,20 @@
             </a>
           </div>
         </div>
+        <div id="auditHistoryBarWrap" style="display:none;margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);font-size:12px;color:var(--text-secondary);"></div>
       </div>
 
       <!-- 2. DETAILED DIAGNOSTIC CHECKLIST WITH EMBEDDED STEP-BY-STEP INSTRUCTIONS RIGHT INSIDE EVERY PROBLEM CARD! -->
       <div class="card">
-        <div class="card-header">
+        <div class="card-header" style="flex-wrap:wrap;gap:10px;">
           <div>
             <div class="card-title">📋 Результаты проверки и подробные инструкции по решению каждой проблемы</div>
             <div class="card-subtitle">Под каждым красным 🔴 или оранжевым 🟠 пунктом сразу раскрыта полная пошаговая инструкция (Kerio Connect + панель DNS + роутер + провайдер) с кнопками копирования готовых записей!</div>
+          </div>
+          <div id="auditFilterBtns" style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-primary btn-sm" data-audit-filter="all" onclick="applyAuditChecksFilter('all')">Все проверки</button>
+            <button type="button" class="btn btn-outline btn-sm" data-audit-filter="problems" onclick="applyAuditChecksFilter('problems')">🔴🟠 Только проблемы</button>
+            <button type="button" class="btn btn-outline btn-sm" data-audit-filter="ok" onclick="applyAuditChecksFilter('ok')">✅ Успешные</button>
           </div>
         </div>
         <div id="mailChecksList"></div>
@@ -1685,6 +1712,116 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
         </div>
       </div>
       <div id="allMajorDelistKitsContainer"></div>
+    </div>
+
+  </section>
+
+  <!-- TAB 6: PRO ADMIN TOOLS (EMAIL HEADER ANALYZER + TURNKEY DNS ZONE BUILDER) -->
+  <section id="tab-tools" class="tab-page">
+
+    <!-- TOOL 1: RFC-822 EMAIL HEADER & HOP LATENCY ANALYZER -->
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:10px;">
+        <div>
+          <div class="card-title">⏱ Анализатор заголовков письма (RFC-822) и поиск узла задержки доставки</div>
+          <div class="card-subtitle">
+            Вставьте исходные служебные заголовки письма из <strong>Outlook, Thunderbird, Kerio WebMail, Gmail, Mail.ru или Яндекс</strong> — программа разберёт все транзитные узлы <code>Received:</code> снизу вверх, покажет точное время задержки на каждом сервере, проверит <code>SPF / DKIM / DMARC / SpamScore</code> и назовёт точную причину попадания в «Спам» или долгой доставки!
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="loadSampleRawHeaders()">📋 Вставить пример заголовка</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('rawHeadersInput').value='';document.getElementById('headerAnalysisOutput').style.display='none';">Очистить</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="rawHeadersInput">
+          <span>Служебные заголовки письма (<code>View Source</code> / «Служебные заголовки» / «Показать оригинал»)</span>
+          <span class="label-hint">поддерживаются многострочные заголовки любой длины</span>
+        </label>
+        <textarea id="rawHeadersInput" rows="8" placeholder="Delivered-To: client@gmail.com&#10;Authentication-Results: mx.google.com; spf=pass ...; dkim=pass ...; dmarc=pass&#10;Received: from mail.company.by (mail.company.by. [178.124.204.98]) by mx.google.com ..." style="width:100%;font-family:Consolas,monospace;font-size:12px;line-height:1.45;background:#0b1220;color:#e2e8f0;border:1px solid var(--border);border-radius:8px;padding:12px;"></textarea>
+      </div>
+
+      <div class="actions-row" style="justify-content:flex-end;">
+        <button type="button" class="btn btn-primary btn-lg" id="analyzeHeadersBtn" onclick="analyzeRawHeadersNow()">
+          🔬 Разобрать маршрут письма, задержки и заголовки антиспама
+        </button>
+      </div>
+
+      <div id="headerAnalysisOutput" style="display:none;margin-top:16px;"></div>
+    </div>
+
+    <!-- TOOL 2: INTERACTIVE TURNKEY DNS ZONE BUILDER (SPF + DMARC + AUTODISCOVER + CAA + TLS-RPT) -->
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:10px;">
+        <div>
+          <div class="card-title">🏗 Интерактивный конструктор DNS-зоны для почты (SPF + DMARC + Autodiscover + CAA + TLS-RPT)</div>
+          <div class="card-subtitle">
+            Отметьте галочками все сервисы, которые отправляют письма от имени вашего домена (Kerio Connect, сайт на хостинге, Битрикс24, Яндекс 360, Mail.ru, Google, Microsoft 365, сервисы рассылок) — конструктор мгновенно соберёт безошибочные DNS-записи и проконтролирует жёсткий лимит <strong>RFC 7208 (не более 10 DNS-запросов в SPF)!</strong>
+          </div>
+        </div>
+        <button type="button" class="btn btn-kerio btn-sm" onclick="downloadDnsZonePackTxt()">💾 Скачать готовый пакет DNS-записей (.txt)</button>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="dnsGenDomain">Почтовый домен компании</label>
+          <input type="text" id="dnsGenDomain" value="leend.by" oninput="rebuildDnsConstructor()">
+        </div>
+        <div class="field">
+          <label class="field-label" for="dnsGenMailHost">Хост почтового сервера Kerio</label>
+          <input type="text" id="dnsGenMailHost" value="mail.leend.by" oninput="rebuildDnsConstructor()">
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="dnsGenServerIp">Внешний белый IPv4 Kerio Connect</label>
+          <input type="text" id="dnsGenServerIp" placeholder="например 178.124.204.98" oninput="rebuildDnsConstructor()">
+        </div>
+        <div class="field">
+          <label class="field-label" for="dnsGenWebIp">Доп. IP веб-сайта / CRM (если сайт шлёт формы с другого хостинга)</label>
+          <input type="text" id="dnsGenWebIp" placeholder="необязательно, например 93.125.99.10" oninput="rebuildDnsConstructor()">
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="dnsGenSpfMode">Режим строгости SPF</label>
+          <select id="dnsGenSpfMode" onchange="rebuildDnsConstructor()">
+            <option value="~all" selected>~all (SoftFail — рекомендуется: чужие письма уходят в «Спам», не теряясь при пересылке)</option>
+            <option value="-all">-all (HardFail — жёсткое отклонение любых неразрешённых отправителей)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="dnsGenDmarcPolicy">Политика DMARC + ящик для отчётов</label>
+          <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:8px;">
+            <select id="dnsGenDmarcPolicy" onchange="rebuildDnsConstructor()">
+              <option value="quarantine" selected>p=quarantine (В папку «Спам» — оптимально)</option>
+              <option value="reject">p=reject (Полная блокировка подделок)</option>
+              <option value="none">p=none (Мягкий мониторинг отчётов)</option>
+            </select>
+            <input type="text" id="dnsGenReportEmail" placeholder="postmaster@ваш_домен" oninput="rebuildDnsConstructor()">
+          </div>
+        </div>
+      </div>
+
+      <div style="margin:12px 0;">
+        <div style="font-size:12.5px;font-weight:700;color:var(--text-secondary);margin-bottom:8px;">Отметьте облачные сервисы, которым разрешено отправлять почту от вашего домена:</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;">
+          <label class="check-box"><input type="checkbox" class="dns-inc-chk" data-inc="mx a:{mailHost}" data-lookups="2" checked onchange="rebuildDnsConstructor()"><div><div class="check-box-title">Kerio Connect (MX + {mailHost})</div><div class="check-box-sub">+2 DNS-запроса + прямой ip4 (0 запр.)</div></div></label>
+          <label class="check-box"><input type="checkbox" class="dns-inc-chk" data-inc="include:spf.bitrix24.com" data-lookups="2" onchange="rebuildDnsConstructor()"><div><div class="check-box-title">Битрикс24 CRM (Облако)</div><div class="check-box-sub">include:spf.bitrix24.com (~2 запроса)</div></div></label>
+          <label class="check-box"><input type="checkbox" class="dns-inc-chk" data-inc="include:_spf.yandex.net" data-lookups="1" onchange="rebuildDnsConstructor()"><div><div class="check-box-title">Яндекс 360 для бизнеса</div><div class="check-box-sub">include:_spf.yandex.net (+1 запрос)</div></div></label>
+          <label class="check-box"><input type="checkbox" class="dns-inc-chk" data-inc="include:_spf.mail.ru" data-lookups="1" onchange="rebuildDnsConstructor()"><div><div class="check-box-title">VK WorkSpace / Mail.ru Бизнес</div><div class="check-box-sub">include:_spf.mail.ru (+1 запрос)</div></div></label>
+          <label class="check-box"><input type="checkbox" class="dns-inc-chk" data-inc="include:_spf.google.com" data-lookups="4" onchange="rebuildDnsConstructor()"><div><div class="check-box-title">Google Workspace (Gmail)</div><div class="check-box-sub">include:_spf.google.com (+4 запроса)</div></div></label>
+          <label class="check-box"><input type="checkbox" class="dns-inc-chk" data-inc="include:spf.protection.outlook.com" data-lookups="2" onchange="rebuildDnsConstructor()"><div><div class="check-box-title">Microsoft 365 / Exchange Online</div><div class="check-box-sub">spf.protection.outlook.com (+2 запроса)</div></div></label>
+          <label class="check-box"><input type="checkbox" class="dns-inc-chk" data-inc="include:spf.unisender.com" data-lookups="2" onchange="rebuildDnsConstructor()"><div><div class="check-box-title">UniSender (рассылки)</div><div class="check-box-sub">include:spf.unisender.com (+2 запроса)</div></div></label>
+          <label class="check-box"><input type="checkbox" class="dns-inc-chk" data-inc="include:mx.sendpulse.com" data-lookups="2" onchange="rebuildDnsConstructor()"><div><div class="check-box-title">SendPulse (рассылки)</div><div class="check-box-sub">include:mx.sendpulse.com (+2 запроса)</div></div></label>
+        </div>
+      </div>
+
+      <div id="dnsLookupMeterBox" style="margin:12px 0;"></div>
+      <div id="dnsGeneratedCardsBox"></div>
     </div>
 
   </section>
@@ -2500,7 +2637,17 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
       : '<option value="">— Сначала выпустите сертификат —</option>';
     if (prev && allCerts.some(c => c.id === prev)) sel.value = prev;
 
-    // Populate Vault table
+    // Populate Vault table + Expiring SSL Alert Banner
+    const expSoon = allCerts.filter(c => typeof c.daysRemaining === 'number' && c.daysRemaining <= 14);
+    const expBanner = document.getElementById('expiringCertAlertBanner');
+    if (expSoon.length > 0) {
+      expBanner.style.display = 'block';
+      document.getElementById('expiringCertAlertText').innerHTML =
+        `⚠️ Внимание! Обнаружено сертификатов со скорым истечением срока (≤ 14 дней): <strong>${expSoon.map(c => `${escapeHtml(c.displayDomain || c.slug)} (${c.daysRemaining} дн.)`).join(', ')}</strong>`;
+    } else {
+      expBanner.style.display = 'none';
+    }
+
     const tbody = document.getElementById('vaultTableBody');
     if (!allCerts.length) {
       tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-secondary);text-align:center;padding:24px;">Выпущенных сертификатов пока нет</td></tr>';
@@ -2509,11 +2656,12 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
     tbody.innerHTML = allCerts.map(c => {
       const sans = [...(c.dnsNames || []), ...(c.ipAddresses || []).map(ip => 'IP:' + ip)].join(', ');
       const zipHref = `/api/certs/download?id=${encodeURIComponent(c.id)}&file=zip&dir=${encodeURIComponent(dir)}`;
-      return `<tr>
+      const urgentColor = c.daysRemaining <= 7 ? '#ef4444' : (c.daysRemaining <= 14 ? '#f59e0b' : 'var(--accent)');
+      return `<tr class="vault-cert-row">
         <td><strong>${escapeHtml(c.displayDomain || c.slug)}</strong><br><span style="font-size:11.5px;color:var(--text-secondary)">${escapeHtml(c.keyType)}</span></td>
         <td style="font-size:12px;">${escapeHtml(sans || c.configuredIp || '—')}</td>
         <td style="font-size:12px;">${escapeHtml(c.issuer)}<br><span style="color:var(--text-secondary)">${escapeHtml(c.mode)}</span></td>
-        <td><strong>${new Date(c.notAfter).toLocaleDateString('ru-RU')}</strong><br><span style="font-size:11.5px;color:var(--accent)">Осталось ${c.daysRemaining} дн.</span></td>
+        <td><strong>${new Date(c.notAfter).toLocaleDateString('ru-RU')}</strong><br><span style="font-size:11.5px;font-weight:700;color:${urgentColor}">Осталось ${c.daysRemaining} дн.</span></td>
         <td>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button type="button" class="btn btn-primary btn-sm" onclick="openCertInMainView('${escapeHtml(c.id)}')">Открыть файлы</button>
@@ -2523,6 +2671,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
         </td>
       </tr>`;
     }).join('');
+    filterVaultTable();
   }
 
   async function openCertInMainView(id) {
@@ -2649,6 +2798,15 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
         }
       });
       chipsWrap.innerHTML = chipsHtml;
+
+      // Restore persistent non-secret form settings saved across restarts (v4.0)
+      if (d.uiSettings) {
+        applyLoadedUiSettings(d.uiSettings, d.externalIp || '');
+      }
+      if (Array.isArray(d.auditHistory) && d.auditHistory.length > 0) {
+        renderSavedAuditHistoryBar(d.auditHistory);
+      }
+      rebuildDnsConstructor();
 
       await loadCertificates();
     } catch (e) {
@@ -2850,6 +3008,10 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
       if (!d.ok) throw new Error(d.error || 'Ошибка при выполнении аудита почтового сервера');
       lastMailAuditReport = d.report;
       renderMailAuditReport(d.report);
+      if (Array.isArray(d.auditHistory)) {
+        renderSavedAuditHistoryBar(d.auditHistory);
+      }
+      saveCurrentUiSettingsQuiet();
       showToast(`Готово! Рейтинг: ${d.report.score}/100 (${d.report.grade}) — подробные инструкции раскрыты прямо под замечаниями!`);
     } catch (e) {
       showToast(e.message, true);
@@ -2901,6 +3063,22 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
       <span class="status-pill" style="border-color:${rep.criticalCount ? '#ef4444' : 'var(--border)'};color:${rep.criticalCount ? '#fca5a5' : 'var(--text-secondary)'};">🔴 Критических проблем: <strong>${rep.criticalCount}</strong></span>
     `;
 
+    // v4.0 Score Delta Comparison Banner ("Было -> Стало")
+    const deltaEl = document.getElementById('auditDeltaBanner');
+    if (rep.delta && rep.delta.hasPrevious) {
+      const diff = rep.delta.scoreDiff || 0;
+      const diffColor = diff > 0 ? '#10b981' : (diff < 0 ? '#ef4444' : '#93c5fd');
+      const diffSign = diff > 0 ? `+${diff}` : `${diff}`;
+      deltaEl.style.display = 'block';
+      deltaEl.innerHTML = `
+        <div style="display:inline-flex;align-items:center;gap:10px;padding:7px 13px;border-radius:8px;background:rgba(15,23,42,0.75);border:1px solid ${diffColor};font-size:12.8px;">
+          <span>📈 <strong>Динамика по сравнению с прошлой проверкой (${escapeHtml(rep.delta.previousCheckedAt || '')}):</strong></span>
+          <span>Было <strong>${rep.delta.previousScore}/100 (${escapeHtml(rep.delta.previousGrade || '')})</strong> → Стало <strong style="color:${diffColor};">${rep.score}/100 (${escapeHtml(rep.grade)}) [${diffSign} балл.]</strong></span>
+        </div>`;
+    } else {
+      deltaEl.style.display = 'none';
+    }
+
     // 2. Detailed Checks WITH INLINE FULL STEP-BY-STEP INSTRUCTIONS RIGHT INSIDE EVERY FAILED CARD!
     const iconByStatus = { ok: '✅', warning: '🟠', error: '🔴', info: '💡' };
     const borderByStatus = {
@@ -2910,7 +3088,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
       info: 'rgba(59,130,246,0.45)'
     };
     document.getElementById('mailChecksList').innerHTML = (rep.checks || []).map((ch, idx) => `
-      <div style="background:var(--bg-elevated);border:1.5px solid ${borderByStatus[ch.status] || 'var(--border)'};border-radius:12px;padding:15px 17px;margin-bottom:14px;">
+      <div class="mail-audit-check-card" data-audit-status="${escapeHtml(ch.status)}" style="background:var(--bg-elevated);border:1.5px solid ${borderByStatus[ch.status] || 'var(--border)'};border-radius:12px;padding:15px 17px;margin-bottom:14px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
           <div style="font-weight:800;font-size:15px;">${iconByStatus[ch.status] || '•'} ${escapeHtml(ch.title)}</div>
           <span style="font-size:11.5px;color:var(--text-secondary);font-weight:600;">${escapeHtml(ch.category)}</span>
@@ -3279,6 +3457,334 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
       btn.disabled = false;
       btn.innerHTML = orig;
     }
+  }
+
+  // =========================================================================
+  // v4.0 PRO ADMIN TOOLS, PERSISTENT UI STATE, VAULT SEARCH, KERIO INSPECTOR
+  // =========================================================================
+
+  function applyLoadedUiSettings(s, detectedWanIp) {
+    if (!s) return;
+    if (s.lastDomain && !document.getElementById('domainInput').value.trim()) {
+      document.getElementById('domainInput').value = s.lastDomain;
+    }
+    if (s.lastServerIp && !detectedWanIp && !document.getElementById('ipInput').value.trim()) {
+      document.getElementById('ipInput').value = s.lastServerIp;
+      updateIpHintBadge();
+    }
+    if (s.lastEmail && !document.getElementById('emailInput').value.trim()) {
+      document.getElementById('emailInput').value = s.lastEmail;
+    }
+    if (s.kerioInstallPath) {
+      document.getElementById('kerioPathInput').value = s.kerioInstallPath;
+    }
+    if (s.kerioApiHost) {
+      document.getElementById('kerioApiHost').value = s.kerioApiHost;
+    }
+    if (s.kerioApiPort > 0) {
+      document.getElementById('kerioApiPort').value = String(s.kerioApiPort);
+    }
+    if (s.kerioApiUser) {
+      document.getElementById('kerioApiUser').value = s.kerioApiUser;
+    }
+    if (s.auditDomain && !document.getElementById('auditDomainInput').value.trim()) {
+      document.getElementById('auditDomainInput').value = s.auditDomain;
+      document.getElementById('dnsGenDomain').value = s.auditDomain;
+    }
+    if (s.auditMailHost && !document.getElementById('auditMailHostInput').value.trim()) {
+      document.getElementById('auditMailHostInput').value = s.auditMailHost;
+      document.getElementById('dnsGenMailHost').value = s.auditMailHost;
+    }
+    if (s.auditTargetIp && !document.getElementById('auditTargetIpInput').value.trim()) {
+      document.getElementById('auditTargetIpInput').value = s.auditTargetIp;
+    }
+    if (detectedWanIp && !document.getElementById('dnsGenServerIp').value.trim()) {
+      document.getElementById('dnsGenServerIp').value = detectedWanIp;
+    }
+  }
+
+  let __saveSettingsTimer = null;
+  function saveCurrentUiSettingsQuiet() {
+    clearTimeout(__saveSettingsTimer);
+    __saveSettingsTimer = setTimeout(async () => {
+      try {
+        await fetch('/api/ui-settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lastDomain: document.getElementById('domainInput').value.trim(),
+            lastServerIp: document.getElementById('ipInput').value.trim(),
+            lastEmail: document.getElementById('emailInput').value.trim(),
+            kerioInstallPath: document.getElementById('kerioPathInput').value.trim(),
+            kerioApiHost: document.getElementById('kerioApiHost').value.trim(),
+            kerioApiPort: parseInt(document.getElementById('kerioApiPort').value, 10) || 4040,
+            kerioApiUser: document.getElementById('kerioApiUser').value.trim(),
+            auditDomain: document.getElementById('auditDomainInput').value.trim(),
+            auditMailHost: document.getElementById('auditMailHostInput').value.trim(),
+            auditTargetIp: document.getElementById('auditTargetIpInput').value.trim()
+          })
+        });
+      } catch (_) {}
+    }, 650);
+  }
+
+  ['domainInput', 'ipInput', 'emailInput', 'kerioPathInput', 'kerioApiHost', 'kerioApiPort', 'kerioApiUser',
+   'auditDomainInput', 'auditMailHostInput', 'auditTargetIpInput'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', saveCurrentUiSettingsQuiet);
+  });
+
+  function renderSavedAuditHistoryBar(items) {
+    const wrap = document.getElementById('auditHistoryBarWrap');
+    if (!wrap || !Array.isArray(items) || !items.length) return;
+    wrap.style.display = 'block';
+    const recent = items.slice(0, 6);
+    wrap.innerHTML = `<div style="margin-bottom:6px;font-weight:700;color:var(--text-main);">🕒 История проверок на этом компьютере (кликните для быстрой подстановки домена):</div>` +
+      `<div style="display:flex;gap:7px;flex-wrap:wrap;">` +
+      recent.map(h => {
+        const col = h.score >= 82 ? '#10b981' : (h.score >= 50 ? '#f59e0b' : '#ef4444');
+        return `<button type="button" class="chip" onclick="document.getElementById('auditDomainInput').value='${escapeHtml(h.mailDomain)}';document.getElementById('auditMailHostInput').value='${escapeHtml(h.mailHost || '')}';" style="border-color:${col};">` +
+          `<strong>@${escapeHtml(h.mailDomain)}</strong>: <span style="color:${col};font-weight:800;">${h.score}/100 (${escapeHtml(h.grade)})</span> • ${escapeHtml(h.checkedAt)}</button>`;
+      }).join('') + `</div>`;
+  }
+
+  function applyAuditChecksFilter(mode) {
+    document.querySelectorAll('#auditFilterBtns button').forEach(b => {
+      const active = b.dataset.auditFilter === mode;
+      b.className = active ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
+    });
+    document.querySelectorAll('.mail-audit-check-card').forEach(card => {
+      const st = card.dataset.auditStatus || '';
+      if (mode === 'problems') {
+        card.style.display = (st === 'error' || st === 'warning') ? '' : 'none';
+      } else if (mode === 'ok') {
+        card.style.display = (st === 'ok') ? '' : 'none';
+      } else {
+        card.style.display = '';
+      }
+    });
+  }
+
+  function filterVaultTable() {
+    const q = (document.getElementById('vaultSearchInput')?.value || '').trim().toLowerCase();
+    document.querySelectorAll('#vaultTableBody tr.vault-cert-row').forEach(row => {
+      row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? '' : 'none';
+    });
+  }
+
+  async function inspectRemoteKerioCertificates() {
+    const host = document.getElementById('kerioApiHost').value.trim() || '127.0.0.1';
+    const port = parseInt(document.getElementById('kerioApiPort').value, 10) || 4040;
+    const user = document.getElementById('kerioApiUser').value.trim() || 'admin';
+    const password = document.getElementById('kerioApiPass').value;
+    const box = document.getElementById('kerioRemoteCertsBox');
+    const btn = document.getElementById('inspectRemoteKerioCertsBtn');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Опрос Kerio Admin API (:4040)...';
+    box.style.display = 'block';
+    box.innerHTML = '<div style="font-size:12.5px;color:var(--text-secondary);">Подключение к Kerio Connect JSON-RPC...</div>';
+
+    try {
+      const r = await fetch('/api/kerio/remote-certs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host, port, user, password })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Не удалось получить сертификаты с сервера Kerio');
+      saveCurrentUiSettingsQuiet();
+      const certs = d.certs || [];
+      if (!certs.length) {
+        box.innerHTML = '<div style="padding:10px;border-radius:8px;background:var(--bg-elevated);font-size:13px;">Соединение успешно, но список сертификатов пуст.</div>';
+        return;
+      }
+      box.innerHTML = `<div style="font-size:12.5px;font-weight:700;color:#6ee7b7;margin-bottom:6px;">✅ Связь с Kerio Connect (${escapeHtml(host)}:${port}) установлена! Сертификатов на сервере: ${certs.length}</div>` +
+        certs.map(c => `
+          <div style="padding:9px 12px;border-radius:8px;background:var(--bg-elevated);border:1.5px solid ${c.active ? '#10b981' : 'var(--border)'};margin-bottom:6px;font-size:12.5px;">
+            <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+              <strong>${c.active ? '🟢 [АКТИВЕН] ' : '⚪ '} ${escapeHtml(c.name || c.id)}</strong>
+              <span style="color:var(--text-secondary);">до <strong>${escapeHtml(c.validTo || '—')}</strong></span>
+            </div>
+            <div style="color:var(--text-secondary);margin-top:3px;">Имена SAN: <code>${escapeHtml((c.hostNames || []).join(', ') || '—')}</code> • Издатель: ${escapeHtml(c.issuerName || c.type || '—')}</div>
+          </div>
+        `).join('');
+      showToast('Список SSL-сертификатов с сервера Kerio успешно загружен!');
+    } catch (e) {
+      box.innerHTML = `<div style="padding:10px;border-radius:8px;background:rgba(239,68,68,0.12);border:1px solid #ef4444;color:#fca5a5;font-size:12.5px;">❌ ${escapeHtml(e.message)}</div>`;
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  }
+
+  function loadSampleRawHeaders() {
+    document.getElementById('rawHeadersInput').value =
+`Delivered-To: partner@gmail.com
+Authentication-Results: mx.google.com;
+       dkim=fail header.i=@leend.by;
+       spf=softfail (google.com: domain of transitioning info@leend.by does not designate 178.124.204.98 as permitted sender) smtp.mailfrom=info@leend.by;
+       dmarc=fail (p=NONE sp=NONE dis=NONE) header.from=leend.by
+Return-Path: <info@leend.by>
+Received: from mail.leend.by (unknown [178.124.204.98])
+        by mx.google.com with ESMTPS id g18-20020a05600c
+        for <partner@gmail.com>;
+        Fri, 23 Oct 2026 10:14:52 +0000 (UTC)
+Received: from [10.146.100.25] (office-pc.local [10.146.100.25])
+        by mail.leend.by (Kerio Connect 10.0.5) with ESMTPSA
+        for <partner@gmail.com>;
+        Fri, 23 Oct 2026 13:13:04 +0300
+From: "Отдел продаж" <info@leend.by>
+To: <partner@gmail.com>
+Subject: Счёт и акт сверки №418
+Date: Fri, 23 Oct 2026 13:13:04 +0300
+Message-ID: <20261023101304.88412@mail.leend.by>
+X-Spam-Status: Yes, score=6.8 required=5.0`;
+    analyzeRawHeadersNow();
+  }
+
+  async function analyzeRawHeadersNow() {
+    const headers = document.getElementById('rawHeadersInput').value.trim();
+    if (!headers) {
+      showToast('Сначала вставьте служебные заголовки письма (или нажмите «Вставить пример»)!', true);
+      return;
+    }
+    const out = document.getElementById('headerAnalysisOutput');
+    const btn = document.getElementById('analyzeHeadersBtn');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Анализ маршрута доставки...';
+    try {
+      const r = await fetch('/api/analyze-headers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headers })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Не удалось разобрать заголовки письма');
+      const res = d.result;
+      const badgeColor = (val) => {
+        const low = String(val || '').toLowerCase();
+        if (low.includes('pass')) return '#10b981';
+        if (low.includes('fail') || low.includes('err') || low.includes('temperror') || low.includes('permerror')) return '#ef4444';
+        return '#94a3b8';
+      };
+      out.style.display = 'block';
+      out.innerHTML = `
+        <div style="padding:14px 16px;border-radius:10px;background:var(--bg-elevated);border:1.5px solid var(--accent);margin-bottom:12px;">
+          <div style="font-size:15.5px;font-weight:800;margin-bottom:8px;">${escapeHtml(res.verdict)}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+            <span class="status-pill" style="border-color:${badgeColor(res.spfStatus)};color:${badgeColor(res.spfStatus)};">SPF: <strong>${escapeHtml(res.spfStatus || 'не указан')}</strong></span>
+            <span class="status-pill" style="border-color:${badgeColor(res.dkimStatus)};color:${badgeColor(res.dkimStatus)};">DKIM: <strong>${escapeHtml(res.dkimStatus || 'не указан')}</strong></span>
+            <span class="status-pill" style="border-color:${badgeColor(res.dmarcStatus)};color:${badgeColor(res.dmarcStatus)};">DMARC: <strong>${escapeHtml(res.dmarcStatus || 'не указан')}</strong></span>
+            <span class="status-pill">⏱ Общее время в пути: <strong>${res.totalDelaySec} сек.</strong></span>
+            ${res.spamScoreInfo ? `<span class="status-pill warn">Антиспам-фильтр: <strong>${escapeHtml(res.spamScoreInfo)}</strong></span>` : ''}
+          </div>
+          <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.55;">
+            <strong>От:</strong> ${escapeHtml(res.from || '—')} • <strong>Кому:</strong> ${escapeHtml(res.to || '—')} • <strong>Return-Path:</strong> <code>${escapeHtml(res.returnPath || '—')}</code><br>
+            <strong>Тема:</strong> ${escapeHtml(res.subject || '—')} • <strong>Message-ID:</strong> <code>${escapeHtml(res.messageId || '—')}</code>
+          </div>
+          ${(res.findings && res.findings.length) ? `<ul style="margin:10px 0 0 18px;font-size:13px;line-height:1.55;">${res.findings.map(f => `<li>${escapeHtml(f)}</li>`).join('')}</ul>` : ''}
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="data-table">
+            <thead>
+              <tr><th>Шаг</th><th>Отправитель (From)</th><th>Принял узел (By)</th><th>Протокол</th><th>Время узла (UTC/Local)</th><th>Задержка</th></tr>
+            </thead>
+            <tbody>
+              ${(res.hops || []).map(h => `
+                <tr style="${h.slowHop ? 'background:rgba(239,68,68,0.12);' : ''}">
+                  <td><strong>#${h.hopNumber}</strong></td>
+                  <td style="font-family:Consolas,monospace;font-size:12px;">${escapeHtml(h.fromHost || '—')}</td>
+                  <td style="font-family:Consolas,monospace;font-size:12px;"><strong>${escapeHtml(h.byHost || '—')}</strong></td>
+                  <td><code>${escapeHtml(h.withProto || 'SMTP')}</code></td>
+                  <td style="font-size:12px;">${escapeHtml(h.timestamp || '—')}</td>
+                  <td style="font-weight:800;color:${h.slowHop ? '#f87171' : '#34d399'};">${h.hopNumber === 1 ? 'Старт (0 с)' : `+${h.delaySec} сек.${h.slowHop ? ' ⚠️ ЗАДЕРЖКА' : ''}`}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  }
+
+  let __lastGeneratedDnsPack = '';
+  function rebuildDnsConstructor() {
+    const dom = (document.getElementById('dnsGenDomain')?.value || 'leend.by').trim().replace(/^@/, '') || 'leend.by';
+    const mailHost = (document.getElementById('dnsGenMailHost')?.value || ('mail.' + dom)).trim() || ('mail.' + dom);
+    const srvIp = (document.getElementById('dnsGenServerIp')?.value || '').trim();
+    const webIp = (document.getElementById('dnsGenWebIp')?.value || '').trim();
+    const spfEnd = document.getElementById('dnsGenSpfMode')?.value || '~all';
+    const dmarcPol = document.getElementById('dnsGenDmarcPolicy')?.value || 'quarantine';
+    const repMail = (document.getElementById('dnsGenReportEmail')?.value || '').trim() || ('postmaster@' + dom);
+
+    let spfParts = ['v=spf1'];
+    let totalLookups = 0;
+    document.querySelectorAll('.dns-inc-chk:checked').forEach(chk => {
+      const tok = (chk.dataset.inc || '').replace('{mailHost}', mailHost);
+      if (tok) spfParts.push(tok);
+      totalLookups += parseInt(chk.dataset.lookups || '1', 10);
+    });
+    if (srvIp) spfParts.push('ip4:' + srvIp);
+    if (webIp) spfParts.push('ip4:' + webIp);
+    spfParts.push(spfEnd);
+    const spfVal = spfParts.join(' ');
+    const dmarcVal = `v=DMARC1; p=${dmarcPol}; sp=${dmarcPol}; rua=mailto:${repMail}; adkim=r; aspf=r; pct=100`;
+    const srvVal = `0 1 443 ${mailHost}.`;
+    const caaVal = `0 issue "letsencrypt.org"`;
+    const tlsRptVal = `v=TLSRPTv1; rua=mailto:${repMail}`;
+
+    const overLimit = totalLookups > 10;
+    const meterEl = document.getElementById('dnsLookupMeterBox');
+    if (meterEl) {
+      meterEl.innerHTML = `<div style="padding:10px 14px;border-radius:8px;background:${overLimit ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.12)'};border:1px solid ${overLimit ? '#ef4444' : '#10b981'};font-size:13px;">
+        ${overLimit
+          ? `🚨 <strong>ПРЕВЫШЕН ЛИМИТ СТАНДАРТА RFC 7208: ~${totalLookups} из 10 DNS-запросов!</strong> Почтовики Gmail / Mail.ru / Яндекс отбросят такой SPF с ошибкой <code>PermError</code>! Уберите лишние <code>include:</code> или замените свои серверы на прямые <code>ip4:...</code> (они дают 0 DNS-запросов).`
+          : `✅ <strong>Проверка лимита RFC 7208 пройдена: ~${totalLookups} из 10 допустимых DNS-запросов</strong> (запас: ${10 - totalLookups}). Прямые записи <code>ip4:</code> не расходуют лимит!`}
+      </div>`;
+    }
+
+    const records = [
+      { title: '1. Основная почтовая MX-запись домена', type: 'MX', host: '@ (или ' + dom + ')', val: `10 ${mailHost}` },
+      { title: '2. Прямая A-запись почтового сервера Kerio', type: 'A', host: mailHost.replace('.' + dom, ''), val: srvIp || '<ВАШ_БЕЛЫЙ_IP>' },
+      { title: '3. Запись SPF (защита от подделки отправителя)', type: 'TXT', host: '@ (корень домена ' + dom + ')', val: spfVal },
+      { title: '4. Политика DMARC и отчёты о доставке', type: 'TXT', host: '_dmarc', val: dmarcVal },
+      { title: '5. Автонастройка Outlook и телефонов (Autodiscover SRV)', type: 'SRV', host: '_autodiscover._tcp', val: srvVal },
+      { title: '6. Разрешение выпуска SSL Let\'s Encrypt (CAA)', type: 'CAA', host: '@', val: caaVal },
+      { title: '7. Отчёты об ошибках шифрования почты (SMTP TLS-RPT)', type: 'TXT', host: '_smtp._tls', val: tlsRptVal }
+    ];
+
+    __lastGeneratedDnsPack = `; === ГОТОВЫЙ НАБОР DNS-ЗАПИСЕЙ ДЛЯ ДОМЕНА ${dom} (Kerio SSL & Mail Suite v4.0) ===\n` +
+      records.map(r => `; ${r.title}\n${r.host}\tIN\t${r.type}\t${r.val}\n`).join('\n');
+
+    const cardsBox = document.getElementById('dnsGeneratedCardsBox');
+    if (cardsBox) {
+      cardsBox.innerHTML = records.map((rec, idx) => `
+        <div style="background:#0b1220;border:1px solid var(--border);border-radius:8px;padding:10px 13px;margin-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+            <span style="font-size:12.5px;font-weight:700;color:#93c5fd;">${escapeHtml(rec.title)} — <code class="inline">${escapeHtml(rec.type)}</code> • Имя/Хост: <code class="inline">${escapeHtml(rec.host)}</code></span>
+            <button type="button" class="btn btn-outline btn-sm" onclick="copyTextSafe(document.getElementById('dns_gen_val_${idx}').value, 'Значение записи скопировано!')">📋 Копировать</button>
+          </div>
+          <input type="text" readonly id="dns_gen_val_${idx}" value="${escapeHtml(rec.val)}" onclick="this.select()" style="font-family:Consolas,monospace;font-size:12.5px;color:#6ee7b7;background:#111827;">
+        </div>
+      `).join('');
+    }
+  }
+
+  function downloadDnsZonePackTxt() {
+    rebuildDnsConstructor();
+    const dom = (document.getElementById('dnsGenDomain')?.value || 'domain').trim() || 'domain';
+    const blob = new Blob([__lastGeneratedDnsPack], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `dns-records-${dom}.txt`;
+    a.click();
+    showToast(`Готовый файл dns-records-${dom}.txt скачан!`);
   }
 
   initApp();

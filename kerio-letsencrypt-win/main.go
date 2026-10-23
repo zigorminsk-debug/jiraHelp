@@ -237,19 +237,22 @@ func buildRouter() http.Handler {
 				exeSizeMB = float64(st.Size()) / (1024.0 * 1024.0)
 			}
 		}
+		defDir := DefaultCertsRoot()
 		writeJSON(w, 200, map[string]any{
 			"ok":                  true,
 			"os":                  runtime.GOOS,
 			"arch":                runtime.GOARCH,
 			"isWindows":           runtime.GOOS == "windows",
 			"isAdmin":             IsRunningAsAdmin(),
-			"defaultCertsDir":     DefaultCertsRoot(),
+			"defaultCertsDir":     defDir,
 			"localIps":            ListLocalIPs(),
-			"externalIp":          DetectPublicIP(),
+			"externalIp":          DetectPublicIPFast(),
 			"kerio":               InspectKerioInstallation(""),
 			"autoRenewScheduled":  PlatformQueryAutoRenewTask(),
 			"windowsExeAvailable": exePath != "",
 			"windowsExeSizeMB":    fmt.Sprintf("%.1f МБ", exeSizeMB),
+			"uiSettings":          LoadSavedUISettings(defDir),
+			"auditHistory":        LoadAuditHistory(defDir),
 		})
 	})
 
@@ -384,7 +387,80 @@ func buildRouter() http.Handler {
 		})
 	})
 
+	mux.HandleFunc("/api/ui-settings", func(w http.ResponseWriter, r *http.Request) {
+		defDir := DefaultCertsRoot()
+		if r.Method == http.MethodGet {
+			writeJSON(w, 200, map[string]any{
+				"ok":           true,
+				"uiSettings":   LoadSavedUISettings(defDir),
+				"auditHistory": LoadAuditHistory(defDir),
+			})
+			return
+		}
+		var s SavedUISettings
+		if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		_ = SaveUISettings(defDir, s)
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
+
+	mux.HandleFunc("/api/kerio/remote-certs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, 405, fmt.Errorf("method not allowed"))
+			return
+		}
+		var body struct {
+			Host     string `json:"host"`
+			Port     int    `json:"port"`
+			User     string `json:"user"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		certs, err := InspectKerioServerCertificates(body.Host, body.Port, body.User, body.Password)
+		if err != nil {
+			logHub.Emit("error", err.Error())
+			writeErr(w, 400, err)
+			return
+		}
+		logHub.Emit("success", fmt.Sprintf("Подключение к Kerio Connect (%s:%d) успешно! Найдено сертификатов на сервере: %d", body.Host, body.Port, len(certs)))
+		writeJSON(w, 200, map[string]any{
+			"ok":    true,
+			"certs": certs,
+		})
+	})
+
+	mux.HandleFunc("/api/analyze-headers", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, 405, fmt.Errorf("method not allowed"))
+			return
+		}
+		var body struct {
+			Headers string `json:"headers"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		res, err := AnalyzeRawEmailHeaders(body.Headers)
+		if err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{
+			"ok":     true,
+			"result": res,
+		})
+	})
+
 	mux.HandleFunc("/api/detect-public-ip", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("force") == "1" {
+			ClearNetworkDiagnosticCache()
+		}
 		ip := DetectPublicIPFast()
 		writeJSON(w, 200, map[string]any{
 			"ok":       ip != "",
@@ -442,15 +518,19 @@ func buildRouter() http.Handler {
 			writeErr(w, 400, err)
 			return
 		}
+		ClearNetworkDiagnosticCache()
 		rep, err := RunMailDeliverabilityAudit(req, logHub.Emit)
 		if err != nil {
 			logHub.Emit("error", err.Error())
 			writeErr(w, 400, err)
 			return
 		}
+		defDir := DefaultCertsRoot()
+		rep.Delta = RecordAuditAndComputeDelta(defDir, rep)
 		writeJSON(w, 200, map[string]any{
-			"ok":     true,
-			"report": rep,
+			"ok":           true,
+			"report":       rep,
+			"auditHistory": LoadAuditHistory(defDir),
 		})
 	})
 
