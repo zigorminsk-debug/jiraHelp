@@ -674,7 +674,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.0 • Турбо-движок • Аудит • Delist • Инструменты Админа</span>
+        <span class="brand-badge">Windows Native GUI v4.1 • SSL • Аудит Почты • Delist • Проверка Санкций (Домен + IP)</span>
       </div>
       <div class="brand-sub">Генерация приватного ключа (.key) и выпуск SSL-сертификатов (.crt / .pfx) по IP и домену для Kerio MailServer</div>
     </div>
@@ -717,6 +717,9 @@
   </button>
   <button type="button" class="nav-tab" data-tab="delist">
     🚑 Выход из Блэклистов и Письма <span class="badge" id="delistNavBadge" style="display:none;background:#ef4444;color:#fff;margin-left:5px;">!</span>
+  </button>
+  <button type="button" class="nav-tab" data-tab="sanctions">
+    🌍 Санкции и Гео-блокировки (Домен + IP)
   </button>
   <button type="button" class="nav-tab" data-tab="vault">
     📂 Выпущенные сертификаты и Автопродление
@@ -1388,6 +1391,9 @@
             </div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-outline" style="border-color:#60a5fa;color:#93c5fd;" onclick="switchTab('sanctions')">
+              🌍 Карта санкций и УЦ (Домен + IP) →
+            </button>
             <button type="button" class="btn btn-outline" style="border-color:#f87171;color:#fca5a5;" onclick="openDelistTabFromAudit()">
               🚑 Центр вывода из блэклистов и готовые письма (<span id="activeRblCountBadge">8 шаблонов</span>) →
             </button>
@@ -1714,6 +1720,138 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
       <div id="allMajorDelistKitsContainer"></div>
     </div>
 
+  </section>
+
+  <!-- TAB 5.5: DOMAIN & IP SANCTIONS, OFAC CA POLICY & GEO-BLOCKING CHECKER -->
+  <section id="tab-sanctions" class="tab-page">
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:12px;">
+        <div>
+          <div class="card-title">🌍 Комплексная проверка домена и IP-адреса на санкционные и гео-блокировки (OFAC / УЦ SSL / RIPE / Зарубежный DNS / MX)</div>
+          <div class="card-subtitle">
+            Выполняет <strong>реальную онлайн-проверку вашего домена и IP в санкционном комплаенсе Let's Encrypt (OFAC SDN США)</strong>, определяет страну, автономную систему (ASN) и провайдера в реестре <strong>RIPE WHOIS</strong>, показывает таблицу совместимости всех центров сертификации (<code>Let's Encrypt</code>, <code>Sectigo/ZeroSSL</code>, <code>DigiCert</code>, <code>GlobalSign</code>, <code>ГосСУОК РБ / Минцифры</code>), проверяет <strong>видимость DNS из США и Швейцарии</strong> (ловит случайную гео-блокировку порта 53 в РБ!) и доступность мировых почтовых шлюзов.
+          </div>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="sanctionsDomainInput">
+            <span>Проверяемый домен или сайт *</span>
+            <span class="label-hint">например: <code>leend.by</code>, <code>почта.бел</code>, <code>company.ru</code></span>
+          </label>
+          <input type="text" id="sanctionsDomainInput" placeholder="leend.by" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label class="field-label" for="sanctionsHostInput">
+            <span>Почтовый хост / поддомен SSL (необязательно)</span>
+            <span class="label-hint">автоподстановка <code>mail.ваш_домен</code></span>
+          </label>
+          <input type="text" id="sanctionsHostInput" placeholder="Автоопределение (mail.ваш_домен)" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="sanctionsIpInput">
+            <span>🌐 Внешний белый IPv4 для проверки на санкции и GeoIP</span>
+            <span class="label-hint">оставьте пустым для автоопределения по внешнему DNS / WAN</span>
+          </label>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;">
+            <input type="text" id="sanctionsIpInput" placeholder="Автоопределение внешнего белого IP (например 178.124.204.98)" autocomplete="off" spellcheck="false">
+            <button type="button" class="btn btn-outline" onclick="fillSanctionsWanIp()">🌐 Авто-IP</button>
+          </div>
+        </div>
+        <div class="field" style="display:flex;align-items:flex-end;justify-content:flex-end;">
+          <button type="button" class="btn btn-primary btn-lg" id="runSanctionsCheckBtn" onclick="runSanctionsCheckNow()" style="width:100%;">
+            🌍 Проверить домен и IP на санкционные и гео-блокировки
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="sanctionsResultsWrap" style="display:none;">
+      <!-- Verdict Hero Banner -->
+      <div class="card" id="sanctionsHeroCard" style="border-width:2px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:280px;">
+            <div style="font-size:18px;font-weight:800;" id="sanctionsVerdictTitle"></div>
+            <div style="font-size:13.8px;margin-top:6px;line-height:1.55;" id="sanctionsVerdictSummary"></div>
+            <div style="font-size:12.5px;color:var(--text-secondary);margin-top:8px;" id="sanctionsMetaLine"></div>
+          </div>
+          <div id="sanctionsRiskBadgeBox" style="padding:14px 18px;border-radius:14px;text-align:center;min-width:150px;"></div>
+        </div>
+      </div>
+
+      <!-- 2-Col Deep Cards: Live Let's Encrypt OFAC Check + RIPE Stat IP/ASN Info -->
+      <div class="workspace-grid">
+        <div class="card">
+          <div class="card-title" style="margin-bottom:10px;">🏛 Живая проверка OFAC SDN в Let's Encrypt (Домен + IP)</div>
+          <div id="sanctionsLeProbeBox"></div>
+        </div>
+        <div class="card">
+          <div class="card-title" style="margin-bottom:10px;">🌐 Юрисдикция IP, ASN и провайдер (RIPE WHOIS)</div>
+          <div id="sanctionsIpWhoisBox"></div>
+        </div>
+      </div>
+
+      <!-- SSL Certificate Authorities Compatibility Matrix -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">🔐 Матрица доступности центров сертификации (SSL / TLS) для вашего домена и IP</div>
+            <div class="card-subtitle">Показывает, какие УЦ реально выпустят и продлят сертификат, а какие отклонят заказ по санкциям на доменную зону или страну</div>
+          </div>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Центр сертификации (CA)</th>
+                <th>Юрисдикция</th>
+                <th>Статус для вашего домена / IP</th>
+                <th>Подробности и рекомендация администратору</th>
+              </tr>
+            </thead>
+            <tbody id="sanctionsCaMatrixBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Foreign DNS Visibility + Live Service Reachability Matrix -->
+      <div class="workspace-grid">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">🌎 Видимость вашего DNS из США и Европы</div>
+              <div class="card-subtitle">Проверка отсутствия гео-блокировки порта 53 на ваших NS-серверах</div>
+            </div>
+          </div>
+          <div id="sanctionsForeignDnsBox"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">📡 Доступность мировых УЦ, CDN и почтовых шлюзов с этого сервера</div>
+              <div class="card-subtitle">Прямая проверка кодов HTTP 403/451 и входящих MX :25 (Gmail, Outlook, Mail.ru, Яндекс)</div>
+            </div>
+          </div>
+          <div id="sanctionsServiceMatrixBox"></div>
+        </div>
+      </div>
+
+      <!-- Detailed Findings & Bypass Guides -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">📘 Детальное заключение и рабочие схемы обхода санкционных / гео-блокировок для Kerio Connect</div>
+            <div class="card-subtitle">С учётом требований белорусского законодательства (Указ № 60) и стандартов WebPKI / SMTP</div>
+          </div>
+        </div>
+        <div id="sanctionsFindingsList"></div>
+      </div>
+    </div>
   </section>
 
   <!-- TAB 6: PRO ADMIN TOOLS (EMAIL HEADER ANALYZER + TURNKEY DNS ZONE BUILDER) -->
@@ -3102,6 +3240,11 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
       </div>
     `).join('');
 
+    // Populate Delist Center AND Sanctions Dashboard automatically from unified parallel Mail Audit!
+    if (rep.sanctions) {
+      renderSanctionsReport(rep.sanctions);
+    }
+
     // 3. Ports Matrix
     document.getElementById('mailPortsMatrix').innerHTML = (rep.ports || []).map(p => {
       let stBadge = '<span style="color:#94a3b8;">Закрыт / недоступен</span>';
@@ -3490,10 +3633,12 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
     if (s.auditDomain && !document.getElementById('auditDomainInput').value.trim()) {
       document.getElementById('auditDomainInput').value = s.auditDomain;
       document.getElementById('dnsGenDomain').value = s.auditDomain;
+      document.getElementById('sanctionsDomainInput').value = s.auditDomain;
     }
     if (s.auditMailHost && !document.getElementById('auditMailHostInput').value.trim()) {
       document.getElementById('auditMailHostInput').value = s.auditMailHost;
       document.getElementById('dnsGenMailHost').value = s.auditMailHost;
+      document.getElementById('sanctionsHostInput').value = s.auditMailHost;
     }
     if (s.auditTargetIp && !document.getElementById('auditTargetIpInput').value.trim()) {
       document.getElementById('auditTargetIpInput').value = s.auditTargetIp;
@@ -3785,6 +3930,185 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
     a.download = `dns-records-${dom}.txt`;
     a.click();
     showToast(`Готовый файл dns-records-${dom}.txt скачан!`);
+  }
+
+  async function fillSanctionsWanIp() {
+    try {
+      const r = await fetch('/api/detect-public-ip?force=1');
+      const d = await r.json();
+      if (d.ok && d.publicIp) {
+        document.getElementById('sanctionsIpInput').value = d.publicIp;
+        showToast('Определён внешний белый IP: ' + d.publicIp);
+      } else {
+        showToast('Не удалось определить внешний IP автоматически', true);
+      }
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  }
+
+  async function runSanctionsCheckNow() {
+    let domain = document.getElementById('sanctionsDomainInput').value.trim();
+    const mailHost = document.getElementById('sanctionsHostInput').value.trim();
+    const ipAddress = document.getElementById('sanctionsIpInput').value.trim();
+    if (!domain && !mailHost && !ipAddress) {
+      domain = document.getElementById('auditDomainInput').value.trim() ||
+               extractMailRootDomainHint(document.getElementById('domainInput').value.trim()).domain;
+      if (domain) document.getElementById('sanctionsDomainInput').value = domain;
+    }
+    if (!domain && !mailHost && !ipAddress) {
+      showToast('Введите домен (например, leend.by) и/или IP-адрес для проверки на санкции!', true);
+      document.getElementById('sanctionsDomainInput').focus();
+      return;
+    }
+
+    const btn = document.getElementById('runSanctionsCheckBtn');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Проверка OFAC Let\'s Encrypt, RIPE WHOIS, УЦ SSL, зарубежного DNS и шлюзов...';
+
+    try {
+      const r = await fetch('/api/sanctions-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain, mailHost, ipAddress })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Ошибка проверки на санкционные блокировки');
+      renderSanctionsReport(d.report);
+      showToast(d.report.verdictTitle || 'Проверка на санкционные блокировки завершена!');
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  }
+
+  function renderSanctionsReport(sr) {
+    if (!sr) return;
+    if (sr.targetDomain && !document.getElementById('sanctionsDomainInput').value.trim()) {
+      document.getElementById('sanctionsDomainInput').value = sr.targetDomain;
+    }
+    if (sr.targetMailHost && !document.getElementById('sanctionsHostInput').value.trim()) {
+      document.getElementById('sanctionsHostInput').value = sr.targetMailHost;
+    }
+    if (sr.targetIp && !document.getElementById('sanctionsIpInput').value.trim()) {
+      document.getElementById('sanctionsIpInput').value = sr.targetIp;
+    }
+
+    document.getElementById('sanctionsResultsWrap').style.display = 'block';
+    const hero = document.getElementById('sanctionsHeroCard');
+    let col = '#10b981';
+    let softBg = 'rgba(16,185,129,0.16)';
+    let riskLabel = 'Низкий риск';
+    if (sr.overallStatus === 'blocked') {
+      col = '#ef4444';
+      softBg = 'rgba(239,68,68,0.18)';
+      riskLabel = 'Прямая блокировка';
+    } else if (sr.overallStatus === 'restricted') {
+      col = '#f59e0b';
+      softBg = 'rgba(245,158,11,0.16)';
+      riskLabel = 'Региональные ограничения';
+    }
+    hero.style.borderColor = col;
+    document.getElementById('sanctionsVerdictTitle').textContent = sr.verdictTitle || '';
+    document.getElementById('sanctionsVerdictSummary').textContent = sr.verdictSummary || '';
+    document.getElementById('sanctionsMetaLine').innerHTML =
+      `Домен: <strong>${escapeHtml(sr.targetDomain || '—')}</strong> (${escapeHtml(sr.targetTld || '—')}) • ` +
+      `Почтовый хост: <strong>${escapeHtml(sr.targetMailHost || '—')}</strong> • ` +
+      `Проверенный внешний IP: <strong style="color:#fde68a;">${escapeHtml(sr.targetIp || '—')}</strong>` +
+      (sr.targetIpSource ? ` <span>(${escapeHtml(sr.targetIpSource)})</span>` : '') +
+      (sr.serverEdgeInfo ? `<br>📡 ${escapeHtml(sr.serverEdgeInfo)}` : '');
+
+    const riskBox = document.getElementById('sanctionsRiskBadgeBox');
+    riskBox.style.background = softBg;
+    riskBox.style.border = `2px solid ${col}`;
+    riskBox.style.color = col;
+    riskBox.innerHTML = `<div style="font-size:24px;font-weight:900;">${sr.riskScore}/100</div><div style="font-size:11.5px;font-weight:700;margin-top:3px;">Индекс ограничений<br>(${riskLabel})</div>`;
+
+    // 1. Live Let's Encrypt OFAC Policy Card
+    const lp = sr.lePolicyProbe || {};
+    const lpCol = (lp.domainBlocked || lp.ipBlocked) ? '#ef4444' : (lp.checkedLive ? '#10b981' : '#94a3b8');
+    document.getElementById('sanctionsLeProbeBox').innerHTML = `
+      <div style="padding:12px 14px;border-radius:10px;background:var(--bg-elevated);border:1.5px solid ${lpCol};">
+        <div style="font-weight:800;font-size:14px;color:${lpCol};margin-bottom:6px;">${escapeHtml(lp.statusSummary || '—')}</div>
+        <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.55;">
+          • Прямой контакт с ACME API Let's Encrypt: <strong>${lp.acmeReachable ? '✅ Да' : '⚠️ Нет прямого доступа'}</strong><br>
+          • Проверенные идентификаторы в заказе ACME: <code>${escapeHtml((lp.testedIdentifiers || []).join(', ') || '—')}</code>
+          ${lp.rawAcmeError ? `<br>• Технический ответ сервера ACME: <code style="color:#fca5a5;">${escapeHtml(lp.rawAcmeError)}</code>` : ''}
+        </div>
+      </div>`;
+
+    // 2. RIPE Stat IP / ASN / Country Card
+    const geo = sr.ipGeoInfo || {};
+    const geoCol = geo.isSanctionedGeo ? '#f59e0b' : '#10b981';
+    document.getElementById('sanctionsIpWhoisBox').innerHTML = `
+      <div style="padding:12px 14px;border-radius:10px;background:var(--bg-elevated);border:1.5px solid ${geoCol};font-size:13px;line-height:1.6;">
+        <div><strong>IP-адрес:</strong> <code class="inline">${escapeHtml(geo.ipAddress || sr.targetIp || '—')}</code> • <strong>Страна регистрации:</strong> <strong>${escapeHtml(geo.countryName || '—')}</strong></div>
+        <div><strong>Автономная система (ASN):</strong> <code>${escapeHtml(geo.asn || '—')}</code> • <strong>Подсеть BGP:</strong> <code>${escapeHtml(geo.prefix || '—')}</code></div>
+        <div><strong>Владелец сети / Провайдер:</strong> <strong>${escapeHtml(geo.holderOrg || '—')}</strong> ${geo.rir ? `(${escapeHtml(geo.rir)})` : ''}</div>
+        ${geo.orgWatchlistHit ? `<div style="margin-top:6px;color:#fcd34d;font-weight:700;">⚠️ ${escapeHtml(geo.orgWatchlistHit)}</div>` : ''}
+        ${(geo.riskNotes || []).map(n => `<div style="margin-top:5px;font-size:12px;color:var(--text-secondary);">• ${escapeHtml(n)}</div>`).join('')}
+      </div>`;
+
+    // 3. SSL Certificate Authorities Matrix Table
+    document.getElementById('sanctionsCaMatrixBody').innerHTML = (sr.caMatrix || []).map(ca => {
+      const c = ca.status === 'allowed' ? '#10b981' : (ca.status === 'blocked' ? '#ef4444' : '#f59e0b');
+      return `<tr>
+        <td><strong>${escapeHtml(ca.provider)}</strong></td>
+        <td style="font-size:12px;color:var(--text-secondary);">${escapeHtml(ca.jurisdiction)}</td>
+        <td><span class="status-pill" style="border-color:${c};color:${c};white-space:nowrap;">${escapeHtml(ca.statusBadge)}</span></td>
+        <td style="font-size:12.5px;line-height:1.5;">
+          <div>${escapeHtml(ca.details)}</div>
+          <div style="color:#93c5fd;margin-top:4px;"><strong>💡 Решение:</strong> ${escapeHtml(ca.recommendation)}</div>
+        </td>
+      </tr>`;
+    }).join('');
+
+    // 4. Foreign Global DNS Visibility Box
+    document.getElementById('sanctionsForeignDnsBox').innerHTML = (sr.foreignDns || []).length
+      ? sr.foreignDns.map(fd => {
+          const ok = fd.reachable && (fd.resolvedIps?.length || fd.resolvedMx?.length);
+          const c = ok ? 'rgba(16,185,129,0.45)' : (fd.reachable ? 'rgba(239,68,68,0.65)' : 'var(--border)');
+          return `<div style="padding:10px 12px;border-radius:8px;background:var(--bg-elevated);border:1px solid ${c};margin-bottom:8px;font-size:12.5px;">
+            <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+              <strong>${ok ? '✅' : (fd.reachable ? '🔴' : '⚠️')} ${escapeHtml(fd.resolverName)}</strong>
+              <span style="color:var(--text-secondary);">${escapeHtml(fd.country)}</span>
+            </div>
+            <div style="margin-top:4px;font-family:Consolas,monospace;font-size:12px;color:var(--text-secondary);">
+              ${ok
+                ? `A: ${escapeHtml((fd.resolvedIps || []).join(', ') || '—')} | MX: ${escapeHtml((fd.resolvedMx || []).join(', ') || '—')}`
+                : escapeHtml(fd.errorDetail || 'Нет данных')}
+            </div>
+          </div>`;
+        }).join('')
+      : '<div style="font-size:13px;color:var(--text-secondary);">Укажите доменное имя для проверки международной видимости DNS.</div>';
+
+    // 5. Global Services & Inbound MX Reachability Matrix
+    document.getElementById('sanctionsServiceMatrixBox').innerHTML = (sr.serviceMatrix || []).map(sv => {
+      const c = sv.status === 'ok' ? '#10b981' : (sv.status === 'geoblocked' ? '#ef4444' : '#94a3b8');
+      const icon = sv.status === 'ok' ? '✅' : (sv.status === 'geoblocked' ? '🚫' : '⚪');
+      return `<div style="padding:8px 11px;border-radius:8px;background:var(--bg-elevated);border:1px solid var(--border);margin-bottom:6px;font-size:12.5px;">
+        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <span>${icon} <strong>${escapeHtml(sv.name)}</strong></span>
+          <span style="color:${c};font-weight:700;">${escapeHtml(sv.httpOrSmtp)} (${sv.latencyMs} мс)</span>
+        </div>
+        <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px;">${escapeHtml(sv.explanation)}</div>
+      </div>`;
+    }).join('');
+
+    // 6. Detailed Findings & Step-by-Step Bypass Instructions
+    const iconMap = { ok: '✅', warning: '🟠', error: '🔴', info: '💡' };
+    const borderMap = { ok: 'rgba(16,185,129,0.4)', warning: 'rgba(245,158,11,0.65)', error: 'rgba(239,68,68,0.75)', info: 'rgba(59,130,246,0.45)' };
+    document.getElementById('sanctionsFindingsList').innerHTML = (sr.findings || []).map((f, idx) => `
+      <div style="background:var(--bg-elevated);border:1.5px solid ${borderMap[f.status] || 'var(--border)'};border-radius:12px;padding:14px 16px;margin-bottom:12px;">
+        <div style="font-weight:800;font-size:14.5px;">${iconMap[f.status] || '•'} ${escapeHtml(f.title)}</div>
+        <div style="font-size:13.5px;margin-top:5px;line-height:1.5;">${escapeHtml(f.summary)}</div>
+        ${(f.details && f.details.length) ? `<div style="margin-top:7px;padding-top:7px;border-top:1px dashed var(--border);font-family:Consolas,monospace;font-size:12px;color:var(--text-secondary);">${f.details.map(d => `<div style="margin-bottom:3px;">• ${escapeHtml(d)}</div>`).join('')}</div>` : ''}
+        ${renderSolutionBlockHtml(f.solution, 'sanctions_sol_' + idx, sr.targetMailHost || sr.targetDomain)}
+      </div>
+    `).join('');
   }
 
   initApp();

@@ -92,6 +92,7 @@ type MailAuditReport struct {
 	CriticalCount    int                    `json:"criticalCount"`
 	WarningCount     int                    `json:"warningCount"`
 	PassedCount      int                    `json:"passedCount"`
+	Sanctions        *SanctionsCheckReport  `json:"sanctions,omitempty"`
 	Checks           []MailCheckItem        `json:"checks"`
 	Ports            []PortProbeResult      `json:"ports"`
 	Blacklists       []RBLCheckEntry        `json:"blacklists"`
@@ -1143,7 +1144,20 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 	report.ProbeTargetUsed = probeTargetHost
 
 	var wg sync.WaitGroup
-	wg.Add(13)
+	wg.Add(14)
+
+	var sanctionsRep *SanctionsCheckReport
+	go func() {
+		defer wg.Done()
+		srep, serr := RunSanctionsAndGeoBlockAudit(SanctionsCheckRequest{
+			Domain:    mailDomain,
+			MailHost:  mailHost,
+			IPAddress: serverIP,
+		}, nil)
+		if serr == nil {
+			sanctionsRep = srep
+		}
+	}()
 
 	go func() {
 		defer wg.Done()
@@ -2540,6 +2554,20 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 			Status:   "ok",
 			Summary:  fmt.Sprintf("CAA не блокирует Let's Encrypt (%d зап.) | MTA-STS файл: %v | BIMI логотип: %d зап.", len(caaRecs), mtaStsPolicy != "", len(bimiRecs)),
 		})
+	}
+
+	// CHECK 16: SANCTIONS, OFAC CA POLICY & FOREIGN GEO-BLOCKING AUDIT (DOMAIN + IP)
+	if sanctionsRep != nil {
+		report.Sanctions = sanctionsRep
+		if sanctionsRep.LEPolicyProbe.DomainBlocked || sanctionsRep.LEPolicyProbe.IPBlocked {
+			deduct(20)
+		}
+		for _, sf := range sanctionsRep.Findings {
+			report.Checks = append(report.Checks, sf)
+			if sf.Solution != nil {
+				report.Remediations = append(report.Remediations, *sf.Solution)
+			}
+		}
 	}
 
 	// Build complete Delist Center + Ready-to-Send Letters for all active & private blacklists!

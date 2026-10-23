@@ -703,4 +703,77 @@ X-Spam-Status: Yes, score=6.8 required=5.0`
 	}
 }
 
+func TestSanctionsOFACAndGeoBlockAuditEngine(t *testing.T) {
+	// 1. Verify Punycode Cyrillic .бел / .рф TLD embargo detection
+	belNorm, _, err := NormalizeDomain("почта.компания.бел")
+	if err != nil || !isCommercialCAEmbargoedTLD(belNorm) || !strings.Contains(extractEffectiveTLD(belNorm), ".бел") {
+		t.Fatalf("expected .бел embargo detection, got norm=%q tld=%q", belNorm, extractEffectiveTLD(belNorm))
+	}
+	if isCommercialCAEmbargoedTLD("mail.example.com") {
+		t.Fatalf(".com should NOT be flagged as embargoed TLD")
+	}
+
+	// 2. Mock real RFC 8555 Let's Encrypt ACME server enforcing OFAC `Policy forbids issuing for name`
+	var srvURL string
+	mockACME := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "sanctions-nonce-123")
+		switch r.URL.Path {
+		case "/directory":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"newNonce":   srvURL + "/new-nonce",
+				"newAccount": srvURL + "/new-account",
+				"newOrder":   srvURL + "/new-order",
+			})
+		case "/new-nonce":
+			w.WriteHeader(http.StatusNoContent)
+		case "/new-account":
+			w.Header().Set("Location", srvURL+"/acct/1")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "valid"})
+		case "/new-order":
+			raw, _ := io.ReadAll(r.Body)
+			var jws struct {
+				Payload string `json:"payload"`
+			}
+			_ = json.Unmarshal(raw, &jws)
+			pBytes, _ := base64.RawURLEncoding.DecodeString(jws.Payload)
+			if strings.Contains(string(pBytes), "belarusbank.by") {
+				w.Header().Set("Content-Type", "application/problem+json")
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"type":   "urn:ietf:params:acme:error:rejectedIdentifier",
+					"detail": "Error creating new order :: Policy forbids issuing for name",
+					"status": 400,
+				})
+				return
+			}
+			w.Header().Set("Location", srvURL+"/order/ok")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "pending"})
+		}
+	}))
+	defer mockACME.Close()
+	srvURL = mockACME.URL
+
+	// Case A: Standard commercial .by domain (leend.by) -> Allowed by Let's Encrypt, Restricted on Sectigo/DigiCert
+	allowedProbe := probeLetsEncryptOFACPolicy(srvURL+"/directory", []string{"leend.by", "mail.leend.by"}, "178.124.204.98")
+	if !allowedProbe.CheckedLive || allowedProbe.DomainBlocked || allowedProbe.IPBlocked {
+		t.Fatalf("expected leend.by + 178.124.204.98 to PASS Let's Encrypt OFAC check, got: %+v", allowedProbe)
+	}
+
+	// Case B: Direct OFAC SDN sanctioned domain -> Rejected by Let's Encrypt with `Policy forbids issuing for name`
+	blockedRep, err := RunSanctionsAndGeoBlockAudit(SanctionsCheckRequest{
+		Domain:           "belarusbank.by",
+		IPAddress:        "178.124.204.98",
+		ACMEDirectoryURL: srvURL + "/directory",
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunSanctionsAndGeoBlockAudit failed: %v", err)
+	}
+	if !blockedRep.LEPolicyProbe.DomainBlocked || blockedRep.OverallStatus != "blocked" || len(blockedRep.Remediations) == 0 {
+		t.Fatalf("expected belarusbank.by to be flagged as OFAC blocked with remediation guide, got: %+v", blockedRep)
+	}
+}
+
+
 

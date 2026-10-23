@@ -434,6 +434,29 @@ func buildRouter() http.Handler {
 		})
 	})
 
+	mux.HandleFunc("/api/sanctions-check", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, 405, fmt.Errorf("method not allowed"))
+			return
+		}
+		var req SanctionsCheckRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		ClearNetworkDiagnosticCache()
+		res, err := RunSanctionsAndGeoBlockAudit(req, logHub.Emit)
+		if err != nil {
+			logHub.Emit("error", err.Error())
+			writeErr(w, 400, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{
+			"ok":     true,
+			"report": res,
+		})
+	})
+
 	mux.HandleFunc("/api/analyze-headers", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeErr(w, 405, fmt.Errorf("method not allowed"))

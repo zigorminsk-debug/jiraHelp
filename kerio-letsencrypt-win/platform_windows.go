@@ -246,8 +246,8 @@ func RunDesktopWindow(appURL string) (usedNativeWindow bool) {
 		AutoFocus: true,
 		DataPath:  dataDir,
 		WindowOptions: webview2.WindowOptions{
-			Title:  "Kerio SSL, Mail Audit & Delist Suite (v4.0)",
-			Width:  1340,
+			Title:  "Kerio SSL, Mail Audit, Delist & Sanctions Suite (v4.1)",
+			Width:  1360,
 			Height: 940,
 			IconId: 0,
 			Center: true,
