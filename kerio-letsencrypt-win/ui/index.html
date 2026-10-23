@@ -674,7 +674,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v2.1 • SSL + Почтовый Аудит + Справочник</span>
+        <span class="brand-badge">Windows Native GUI v2.2 • Авто-IP + Почтовый Аудит + SSL</span>
       </div>
       <div class="brand-sub">Генерация приватного ключа (.key) и выпуск SSL-сертификатов (.crt / .pfx) по IP и домену для Kerio MailServer</div>
     </div>
@@ -1296,18 +1296,38 @@
 
       <div class="field-row">
         <div class="field">
-          <label class="field-label" for="auditDkimSelectorInput">
-            <span>Селектор DKIM (необязательно)</span>
-            <span class="label-hint">по умолчанию автопоиск <code>mail</code> (Kerio Connect) + 11 селекторов</span>
+          <label class="field-label" for="auditPublicIpInput">
+            <span>🌐 Внешний белый IP (для PTR, RBL спам-баз и SPF)</span>
+            <span class="label-hint" id="detectedWanBadgeHint">автоопределение (DNS DoH → SPF → WAN IP)</span>
           </label>
-          <input type="text" id="auditDkimSelectorInput" placeholder="mail (автопоиск)" autocomplete="off" spellcheck="false">
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;">
+            <input type="text" id="auditPublicIpInput" placeholder="Автоопределение (внешний DNS DoH → SPF → WAN IP)" autocomplete="off" spellcheck="false">
+            <button type="button" class="btn btn-outline" id="btnAutoDetectWan" onclick="fillCurrentWanIp(true)" title="Определить внешний белый IP текущего интернет-канала">
+              🌐 Авто-IP
+            </button>
+          </div>
         </div>
         <div class="field">
           <label class="field-label" for="auditTargetIpInput">
-            <span>Локальный / VPN IP Kerio для прямой проверки портов (необязательно)</span>
-            <span class="label-hint">укажите <code>10.146.100.14</code>, если ваш домашний провайдер блокирует порт 25</span>
+            <span>🔌 Локальный / VPN IP Kerio (для прямой проверки портов)</span>
+            <span class="label-hint">автопоиск в Split-DNS или укажите напр. <code>10.146.100.14</code></span>
           </label>
-          <input type="text" id="auditTargetIpInput" placeholder="Например: 10.146.100.14 (или пусто для проверки из интернета)" autocomplete="off" spellcheck="false">
+          <input type="text" id="auditTargetIpInput" placeholder="Автоопределение (Split-DNS / внешний IP)" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+
+      <div class="field-row" style="margin-top:4px;">
+        <div class="field">
+          <label class="field-label" for="auditDkimSelectorInput">
+            <span>Селектор DKIM (необязательно)</span>
+            <span class="label-hint">по умолчанию автопоиск <code>mail</code> (Kerio Connect) + ещё 11 стандартных селекторов</span>
+          </label>
+          <input type="text" id="auditDkimSelectorInput" placeholder="mail (автопоиск по 12 селекторам)" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field" style="display:flex;align-items:flex-end;">
+          <div id="wanAutoInfoBanner" style="width:100%;padding:9px 12px;border-radius:8px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);font-size:12.5px;color:#a7f3d0;">
+            🌐 <strong>Умное автоопределение внешнего IP включено:</strong> программа сама обходит локальный офисный Split-DNS (<code>10.x.x.x</code>) через зашифрованный DNS-over-HTTPS и автоматически находит белый IP сервера для PTR, SPF и 11 спам-баз!
+          </div>
         </div>
       </div>
 
@@ -2502,9 +2522,46 @@
         if (audIp && !audIp.value.trim() && apiHost && apiHost !== '127.0.0.1') {
           audIp.value = apiHost;
         }
+        fillCurrentWanIp(false);
       }
     });
   });
+
+  let cachedDetectedWanIp = '';
+  async function fillCurrentWanIp(forceFillInput) {
+    const hint = document.getElementById('detectedWanBadgeHint');
+    const banner = document.getElementById('wanAutoInfoBanner');
+    const btn = document.getElementById('btnAutoDetectWan');
+    if (forceFillInput && btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳...';
+    }
+    try {
+      const r = await fetch('/api/detect-public-ip');
+      const d = await r.json();
+      if (d.ok && d.publicIp) {
+        cachedDetectedWanIp = d.publicIp;
+        if (hint) {
+          hint.innerHTML = `текущий WAN IP этой сети: <code style="color:#6ee7b7;cursor:pointer;" onclick="document.getElementById('auditPublicIpInput').value='${escapeHtml(d.publicIp)}'" title="Нажмите, чтобы подставить">${escapeHtml(d.publicIp)}</code>`;
+        }
+        if (banner) {
+          banner.innerHTML = `🌐 <strong>Автоопределение IP активно:</strong> внешний IP вашего текущего интернета — <strong>${escapeHtml(d.publicIp)}</strong> (при проверке домена внешний IP сервера определится автоматически из глобального DNS DoH, SPF или этого WAN IP!).`;
+        }
+        if (forceFillInput) {
+          document.getElementById('auditPublicIpInput').value = d.publicIp;
+          showToast('Определён и подставлен внешний белый IP: ' + d.publicIp);
+        }
+      } else if (forceFillInput) {
+        showToast('Не удалось определить внешний IP текущего канала (проверьте доступ в интернет)', true);
+      }
+    } catch (_) {
+    } finally {
+      if (forceFillInput && btn) {
+        btn.disabled = false;
+        btn.textContent = '🌐 Авто-IP';
+      }
+    }
+  }
 
   document.getElementById('auditDomainInput').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') {
@@ -2595,6 +2652,7 @@
   async function runFullMailAudit() {
     const domain = document.getElementById('auditDomainInput').value.trim();
     const mailHost = document.getElementById('auditMailHostInput').value.trim();
+    const publicIp = document.getElementById('auditPublicIpInput').value.trim();
     const dkimSelector = document.getElementById('auditDkimSelectorInput').value.trim();
     const serverIp = document.getElementById('auditTargetIpInput').value.trim();
 
@@ -2613,7 +2671,7 @@
       const r = await fetch('/api/mail-audit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain, mailHost, dkimSelector, serverIp })
+        body: JSON.stringify({ domain, mailHost, publicIp, dkimSelector, serverIp })
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'Ошибка при выполнении аудита почтового сервера');
@@ -2658,8 +2716,11 @@
     document.getElementById('auditScoreNum').textContent = `${rep.score}`;
     document.getElementById('auditGradeLetter').textContent = `Оценка ${rep.grade}`;
     document.getElementById('auditVerdictTitle').textContent = rep.verdict;
+    const ipSrcLabel = rep.serverIpSource ? ` <span style="color:#6ee7b7;font-size:12px;">(${escapeHtml(rep.serverIpSource)})</span>` : '';
+    const probeLabel = rep.probeTargetUsed ? ` • Порты проверены через: <strong>${escapeHtml(rep.probeTargetUsed)}</strong>` : '';
     document.getElementById('auditTargetMeta').innerHTML =
-      `Почтовый домен: <strong>@${escapeHtml(rep.mailDomain)}</strong> • Сервер почты: <strong>${escapeHtml(rep.mailHost)}</strong> • Внешний IP: <strong>${escapeHtml(rep.serverIp || 'требуется A-запись')}</strong> • Проверено: ${escapeHtml(rep.checkedAt)}`;
+      `Почтовый домен: <strong>@${escapeHtml(rep.mailDomain)}</strong> • Сервер почты: <strong>${escapeHtml(rep.mailHost)}</strong><br>` +
+      `🌐 Внешний белый IP (для PTR / SPF / RBL): <strong style="color:#fde68a;">${escapeHtml(rep.serverIp || 'не обнаружен')}</strong>${ipSrcLabel}${probeLabel} • ${escapeHtml(rep.checkedAt)}`;
 
     document.getElementById('auditCountersBar').innerHTML = `
       <span class="status-pill ok">✅ В порядке: <strong>${rep.passedCount}</strong></span>

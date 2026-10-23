@@ -384,6 +384,14 @@ func buildRouter() http.Handler {
 		})
 	})
 
+	mux.HandleFunc("/api/detect-public-ip", func(w http.ResponseWriter, r *http.Request) {
+		ip := DetectPublicIPFast()
+		writeJSON(w, 200, map[string]any{
+			"ok":       ip != "",
+			"publicIp": ip,
+		})
+	})
+
 	mux.HandleFunc("/api/mail-audit", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeErr(w, 405, fmt.Errorf("method not allowed"))

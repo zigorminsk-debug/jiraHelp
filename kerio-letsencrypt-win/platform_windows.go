@@ -246,7 +246,7 @@ func RunDesktopWindow(appURL string) (usedNativeWindow bool) {
 		AutoFocus: true,
 		DataPath:  dataDir,
 		WindowOptions: webview2.WindowOptions{
-			Title:  "Kerio SSL & Mail Server Manager (v2.1)",
+			Title:  "Kerio SSL & Mail Server Manager (v2.2)",
 			Width:  1300,
 			Height: 920,
 			IconId: 0,

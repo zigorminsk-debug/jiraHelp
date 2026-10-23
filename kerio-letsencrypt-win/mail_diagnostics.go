@@ -7,8 +7,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -18,7 +22,8 @@ import (
 type MailAuditRequest struct {
 	Domain       string `json:"domain"`
 	MailHost     string `json:"mailHost"`
-	ServerIP     string `json:"serverIp"`
+	PublicIP     string `json:"publicIp"`
+	ServerIP     string `json:"serverIp"` // Optional LAN/VPN IP override for TCP port checks
 	DKIMSelector string `json:"dkimSelector"`
 }
 
@@ -74,34 +79,208 @@ type RBLCheckEntry struct {
 }
 
 type MailAuditReport struct {
-	CheckedAt     string                 `json:"checkedAt"`
-	MailDomain    string                 `json:"mailDomain"`
-	MailHost      string                 `json:"mailHost"`
-	ServerIP      string                 `json:"serverIp"`
-	Score         int                    `json:"score"`
-	Grade         string                 `json:"grade"`
-	Verdict       string                 `json:"verdict"`
-	CriticalCount int                    `json:"criticalCount"`
-	WarningCount  int                    `json:"warningCount"`
-	PassedCount   int                    `json:"passedCount"`
-	Checks        []MailCheckItem        `json:"checks"`
-	Ports         []PortProbeResult      `json:"ports"`
-	Blacklists    []RBLCheckEntry        `json:"blacklists"`
-	Remediations  []MailRemediationGuide `json:"remediations"`
+	CheckedAt       string                 `json:"checkedAt"`
+	MailDomain      string                 `json:"mailDomain"`
+	MailHost        string                 `json:"mailHost"`
+	ServerIP        string                 `json:"serverIp"`
+	ServerIPSource  string                 `json:"serverIpSource,omitempty"`
+	CurrentWANIP    string                 `json:"currentWanIp,omitempty"`
+	ProbeTargetUsed string                 `json:"probeTargetUsed,omitempty"`
+	Score           int                    `json:"score"`
+	Grade           string                 `json:"grade"`
+	Verdict         string                 `json:"verdict"`
+	CriticalCount   int                    `json:"criticalCount"`
+	WarningCount    int                    `json:"warningCount"`
+	PassedCount     int                    `json:"passedCount"`
+	Checks          []MailCheckItem        `json:"checks"`
+	Ports           []PortProbeResult      `json:"ports"`
+	Blacklists      []RBLCheckEntry        `json:"blacklists"`
+	Remediations    []MailRemediationGuide `json:"remediations"`
 }
 
+func isGloballyRoutableIPv4(raw string) bool {
+	p := net.ParseIP(strings.TrimSpace(raw))
+	if p == nil {
+		return false
+	}
+	v4 := p.To4()
+	if v4 == nil || p.IsPrivate() || p.IsLoopback() || p.IsLinkLocalUnicast() || p.IsLinkLocalMulticast() || p.IsUnspecified() {
+		return false
+	}
+	// Exclude CGNAT 100.64.0.0/10
+	if v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 {
+		return false
+	}
+	return true
+}
+
+// DetectPublicIPFast races multiple global echo endpoints in parallel (including raw IP literal 1.1.1.1 so it works even if DNS is broken!).
+func DetectPublicIPFast() string {
+	type res struct {
+		ip string
+	}
+	ch := make(chan res, 5)
+	ctx, cancel := context.WithTimeout(context.Background(), 2200*time.Millisecond)
+	defer cancel()
+
+	endpoints := []string{
+		"https://1.1.1.1/cdn-cgi/trace",
+		"https://api.ipify.org",
+		"https://ipv4.icanhazip.com",
+		"https://checkip.amazonaws.com",
+		"https://ifconfig.me/ip",
+	}
+
+	client := &http.Client{Timeout: 2000 * time.Millisecond}
+	var wg sync.WaitGroup
+	for _, ep := range endpoints {
+		wg.Add(1)
+		go func(u string) {
+			defer wg.Done()
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+			if err != nil {
+				return
+			}
+			req.Header.Set("User-Agent", "KerioCertManager/2.2")
+			resp, err := client.Do(req)
+			if err != nil {
+				return
+			}
+			b, err := io.ReadAll(io.LimitReader(resp.Body, 512))
+			resp.Body.Close()
+			if err != nil || resp.StatusCode != 200 {
+				return
+			}
+			body := string(b)
+			if strings.Contains(u, "/cdn-cgi/trace") {
+				for _, line := range strings.Split(body, "\n") {
+					if strings.HasPrefix(line, "ip=") {
+						cand := strings.TrimSpace(strings.TrimPrefix(line, "ip="))
+						if isGloballyRoutableIPv4(cand) {
+							select {
+							case ch <- res{ip: cand}:
+							default:
+							}
+							return
+						}
+					}
+				}
+				return
+			}
+			cand := strings.TrimSpace(body)
+			if isGloballyRoutableIPv4(cand) {
+				select {
+				case ch <- res{ip: cand}:
+				default:
+				}
+			}
+		}(ep)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case r := <-ch:
+		return r.ip
+	case <-done:
+		return ""
+	case <-ctx.Done():
+		return ""
+	}
+}
+
+type dohAnswer struct {
+	Name string `json:"name"`
+	Type int    `json:"type"`
+	Data string `json:"data"`
+}
+
+type dohResponse struct {
+	Status int         `json:"Status"`
+	Answer []dohAnswer `json:"Answer"`
+}
+
+// queryDoH queries Google & Cloudflare encrypted DNS-over-HTTPS so corporate Split-DNS (10.x.x.x) or port-53 NAT never hides external records!
+func queryDoH(name, qtype string) ([]dohAnswer, int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2000*time.Millisecond)
+	defer cancel()
+
+	urls := []string{
+		"https://cloudflare-dns.com/dns-query?name=" + url.QueryEscape(name) + "&type=" + url.QueryEscape(qtype),
+		"https://dns.google/resolve?name=" + url.QueryEscape(name) + "&type=" + url.QueryEscape(qtype),
+	}
+
+	type dohRes struct {
+		ans    []dohAnswer
+		status int
+		err    error
+	}
+	ch := make(chan dohRes, len(urls))
+	client := &http.Client{Timeout: 1800 * time.Millisecond}
+
+	for _, u := range urls {
+		go func(endpoint string) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+			if err != nil {
+				ch <- dohRes{err: err}
+				return
+			}
+			req.Header.Set("Accept", "application/dns-json")
+			resp, err := client.Do(req)
+			if err != nil {
+				ch <- dohRes{err: err}
+				return
+			}
+			raw, err := io.ReadAll(io.LimitReader(resp.Body, 65536))
+			resp.Body.Close()
+			if err != nil || resp.StatusCode != 200 {
+				ch <- dohRes{err: fmt.Errorf("doh http %d", resp.StatusCode)}
+				return
+			}
+			var parsed dohResponse
+			if err := json.Unmarshal(raw, &parsed); err != nil {
+				ch <- dohRes{err: err}
+				return
+			}
+			ch <- dohRes{ans: parsed.Answer, status: parsed.Status}
+		}(u)
+	}
+
+	var lastErr error
+	for i := 0; i < len(urls); i++ {
+		r := <-ch
+		if r.err == nil {
+			if len(r.ans) > 0 || r.status == 3 || r.status == 0 {
+				return r.ans, r.status, nil
+			}
+		} else {
+			lastErr = r.err
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("doh no response")
+	}
+	return nil, -1, lastErr
+}
+
+// makePublicResolvers queries external public DNS servers FIRST before falling back to OS resolver!
 func makePublicResolvers() []*net.Resolver {
-	out := []*net.Resolver{net.DefaultResolver}
+	out := []*net.Resolver{}
 	for _, srv := range []string{"8.8.8.8:53", "1.1.1.1:53"} {
 		target := srv
 		out = append(out, &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				d := net.Dialer{Timeout: 1800 * time.Millisecond}
+				d := net.Dialer{Timeout: 1500 * time.Millisecond}
 				return d.DialContext(ctx, "udp", target)
 			},
 		})
 	}
+	out = append(out, net.DefaultResolver)
 	return out
 }
 
@@ -115,12 +294,89 @@ func isDNSDefinitiveNotFound(err error) bool {
 	return false
 }
 
+// lookupPublicIPv4sExternal finds ONLY globally routable public IPv4s via encrypted DoH + public DNS (immune to Split-DNS 10.x.x.x!).
+func lookupPublicIPv4sExternal(host string) []string {
+	seen := map[string]bool{}
+	var out []string
+	if ans, _, err := queryDoH(host, "A"); err == nil {
+		for _, a := range ans {
+			if a.Type == 1 && isGloballyRoutableIPv4(a.Data) && !seen[a.Data] {
+				seen[a.Data] = true
+				out = append(out, a.Data)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	for _, r := range makePublicResolvers() {
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		ips, err := r.LookupIPAddr(ctx, host)
+		cancel()
+		if err == nil {
+			for _, ip := range ips {
+				s := ip.IP.String()
+				if isGloballyRoutableIPv4(s) && !seen[s] {
+					seen[s] = true
+					out = append(out, s)
+				}
+			}
+			if len(out) > 0 {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+// lookupLocalSplitDNSIPv4 detects internal LAN/VPN IP (e.g. 10.146.100.14) if local Split-DNS is active on this PC!
+func lookupLocalSplitDNSIPv4(host string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
+	defer cancel()
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return ""
+	}
+	for _, ip := range ips {
+		if v4 := ip.IP.To4(); v4 != nil && ip.IP.IsPrivate() {
+			return v4.String()
+		}
+	}
+	return ""
+}
+
+func cleanDoHTXTData(raw string) string {
+	// DoH JSON wraps TXT strings in quotes, e.g. "\"v=spf1 mx ~all\"" or split chunks "\"part1\" \"part2\""
+	s := strings.TrimSpace(raw)
+	if strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") && len(s) >= 2 {
+		s = s[1 : len(s)-1]
+		s = strings.ReplaceAll(s, "\" \"", "")
+		s = strings.ReplaceAll(s, "\\\"", "\"")
+	}
+	return strings.TrimSpace(s)
+}
+
 func lookupTXTQuick(fqdn string) ([]string, error) {
 	seen := map[string]bool{}
 	var out []string
+	if ans, status, err := queryDoH(fqdn, "TXT"); err == nil {
+		for _, a := range ans {
+			if a.Type == 16 {
+				val := cleanDoHTXTData(a.Data)
+				if val != "" && !seen[val] {
+					seen[val] = true
+					out = append(out, val)
+				}
+			}
+		}
+		if len(out) > 0 || status == 3 || status == 0 {
+			return out, nil
+		}
+	}
+
 	var lastErr error
 	for _, r := range makePublicResolvers() {
-		ctx, cancel := context.WithTimeout(context.Background(), 1800*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 		txts, err := r.LookupTXT(ctx, fqdn)
 		cancel()
 		if err == nil && len(txts) > 0 {
@@ -143,24 +399,43 @@ func lookupTXTQuick(fqdn string) ([]string, error) {
 
 func lookupMXMulti(domain string) ([]*net.MX, error) {
 	seen := map[string]*net.MX{}
-	for _, r := range makePublicResolvers() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		mxs, err := r.LookupMX(ctx, domain)
-		cancel()
-		if err == nil && len(mxs) > 0 {
-			for _, mx := range mxs {
-				host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(mx.Host)), ".")
-				if host != "" {
-					if _, ok := seen[host]; !ok {
-						seen[host] = &net.MX{Host: host, Pref: mx.Pref}
+	if ans, status, err := queryDoH(domain, "MX"); err == nil {
+		for _, a := range ans {
+			if a.Type == 15 {
+				var pref uint16
+				var target string
+				if n, _ := fmt.Sscanf(strings.TrimSpace(a.Data), "%d %s", &pref, &target); n == 2 {
+					host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(target)), ".")
+					if host != "" {
+						seen[host] = &net.MX{Host: host, Pref: pref}
 					}
 				}
 			}
-			if len(seen) > 0 {
+		}
+		if len(seen) == 0 && status == 3 {
+			return nil, fmt.Errorf("MX-записи для %s не найдены", domain)
+		}
+	}
+	if len(seen) == 0 {
+		for _, r := range makePublicResolvers() {
+			ctx, cancel := context.WithTimeout(context.Background(), 1600*time.Millisecond)
+			mxs, err := r.LookupMX(ctx, domain)
+			cancel()
+			if err == nil && len(mxs) > 0 {
+				for _, mx := range mxs {
+					host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(mx.Host)), ".")
+					if host != "" {
+						if _, ok := seen[host]; !ok {
+							seen[host] = &net.MX{Host: host, Pref: mx.Pref}
+						}
+					}
+				}
+				if len(seen) > 0 {
+					break
+				}
+			} else if isDNSDefinitiveNotFound(err) {
 				break
 			}
-		} else if isDNSDefinitiveNotFound(err) {
-			break
 		}
 	}
 	if len(seen) == 0 {
@@ -182,8 +457,27 @@ func lookupMXMulti(domain string) ([]*net.MX, error) {
 func lookupPTRMulti(ipStr string) []string {
 	seen := map[string]bool{}
 	var names []string
+	if parsed := net.ParseIP(ipStr); parsed != nil {
+		if v4 := parsed.To4(); v4 != nil {
+			ptrName := fmt.Sprintf("%d.%d.%d.%d.in-addr.arpa", v4[3], v4[2], v4[1], v4[0])
+			if ans, status, err := queryDoH(ptrName, "PTR"); err == nil {
+				for _, a := range ans {
+					if a.Type == 12 {
+						clean := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(a.Data)), ".")
+						if clean != "" && !seen[clean] {
+							seen[clean] = true
+							names = append(names, clean)
+						}
+					}
+				}
+				if len(names) > 0 || status == 3 {
+					return names
+				}
+			}
+		}
+	}
 	for _, r := range makePublicResolvers() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 1600*time.Millisecond)
 		ptrs, err := r.LookupAddr(ctx, ipStr)
 		cancel()
 		if err == nil {
@@ -207,8 +501,26 @@ func lookupPTRMulti(ipStr string) []string {
 func lookupSRVAutodiscover(domain string) []string {
 	var found []string
 	seen := map[string]bool{}
+	if ans, _, err := queryDoH("_autodiscover._tcp."+domain, "SRV"); err == nil {
+		for _, a := range ans {
+			if a.Type == 33 {
+				var prio, weight, port int
+				var target string
+				if n, _ := fmt.Sscanf(strings.TrimSpace(a.Data), "%d %d %d %s", &prio, &weight, &port, &target); n == 4 {
+					h := fmt.Sprintf("%s:%d (приоритет %d)", strings.TrimSuffix(target, "."), port, prio)
+					if !seen[h] {
+						seen[h] = true
+						found = append(found, h)
+					}
+				}
+			}
+		}
+		if len(found) > 0 {
+			return found
+		}
+	}
 	for _, r := range makePublicResolvers() {
-		ctx, cancel := context.WithTimeout(context.Background(), 1800*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 		_, srvs, err := r.LookupSRV(ctx, "autodiscover", "tcp", domain)
 		cancel()
 		if err == nil && len(srvs) > 0 {
@@ -632,13 +944,22 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 		}
 	}
 
+	// Start live outbound WAN IP detection immediately in background (~60-120ms)
+	var currentWANIP string
+	var wanWG sync.WaitGroup
+	wanWG.Add(1)
+	go func() {
+		defer wanWG.Done()
+		currentWANIP = DetectPublicIPFast()
+	}()
+
 	if mailHost == "" {
 		if len(mxs) > 0 {
-			// Prefer MX host if it actually resolves; otherwise prefer mail.<domain> if that resolves!
+			// Prefer MX host if it resolves to an EXTERNAL PUBLIC IP; otherwise prefer mail.<domain>!
 			mxPrimary := mxs[0].Host
-			if ips, ierr := LookupDomainIPsMultiResolver(mxPrimary); ierr == nil && len(ips) > 0 {
+			if pubIPs := lookupPublicIPv4sExternal(mxPrimary); len(pubIPs) > 0 {
 				mailHost = mxPrimary
-			} else if mips, merr := LookupDomainIPsMultiResolver("mail." + mailDomain); merr == nil && len(mips) > 0 {
+			} else if mailPubIPs := lookupPublicIPv4sExternal("mail." + mailDomain); len(mailPubIPs) > 0 {
 				mailHost = "mail." + mailDomain
 			} else {
 				mailHost = mxPrimary
@@ -688,36 +1009,87 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 		report.Remediations = append(report.Remediations, remCopy)
 	}
 
-	// Resolve real PUBLIC IP from mailHost, falling back to mail.<domain> if MX host was misconfigured!
-	var publicIP string
-	hostIPs, hostLookupErr := LookupDomainIPsMultiResolver(mailHost)
-	if len(hostIPs) == 0 && mailHost != "mail."+mailDomain {
-		if altIPs, aerr := LookupDomainIPsMultiResolver("mail." + mailDomain); aerr == nil && len(altIPs) > 0 {
-			hostIPs = altIPs
-		}
+	// =========================================================================
+	// 5-STAGE AUTOMATIC EXTERNAL PUBLIC IP DETECTION (FOR PTR / RBL / SPF / MX)
+	// =========================================================================
+	var serverIP string
+	var serverIPSource string
+
+	explicitPub := strings.TrimSpace(req.PublicIP)
+	userOverrideHost := strings.TrimSpace(req.ServerIP)
+
+	// Stage 0: Explicit public IP provided by user
+	if explicitPub != "" && isGloballyRoutableIPv4(explicitPub) {
+		serverIP = explicitPub
+		serverIPSource = "указан вручную"
+	} else if userOverrideHost != "" && isGloballyRoutableIPv4(userOverrideHost) {
+		serverIP = userOverrideHost
+		serverIPSource = "указан в параметрах проверки"
 	}
-	if len(hostIPs) > 0 {
-		for _, hip := range hostIPs {
-			if p := net.ParseIP(hip); p != nil && p.To4() != nil {
-				publicIP = hip
-				break
-			}
-		}
-		if publicIP == "" {
-			publicIP = hostIPs[0]
+
+	// Stage 1: Authoritative external public A record of mailHost (via DoH + 8.8.8.8/1.1.1.1 — bypasses Split-DNS!)
+	if serverIP == "" {
+		if pubIPs := lookupPublicIPv4sExternal(mailHost); len(pubIPs) > 0 {
+			serverIP = pubIPs[0]
+			serverIPSource = "автоопределён из внешней A-записи " + mailHost
 		}
 	}
 
-	userOverrideHost := strings.TrimSpace(req.ServerIP)
-	serverIP := publicIP
-	if userOverrideHost != "" {
-		if parsed := net.ParseIP(userOverrideHost); parsed != nil && !parsed.IsPrivate() && !parsed.IsLoopback() {
-			serverIP = userOverrideHost
-		} else if serverIP == "" {
-			serverIP = userOverrideHost
+	// Stage 2: Check candidate hosts in external DNS (mail.<domain>, MX hosts, smtp.<domain>, webmail.<domain>, root <domain>)
+	if serverIP == "" {
+		candidates := []string{"mail." + mailDomain}
+		for _, m := range mxs {
+			candidates = append(candidates, m.Host)
+		}
+		candidates = append(candidates, "smtp."+mailDomain, "webmail."+mailDomain, mailDomain)
+		for _, cand := range candidates {
+			if cand == "" || cand == mailHost {
+				continue
+			}
+			if pubIPs := lookupPublicIPv4sExternal(cand); len(pubIPs) > 0 {
+				serverIP = pubIPs[0]
+				serverIPSource = "автоопределён из внешней A-записи " + cand
+				break
+			}
 		}
 	}
+
+	// Stage 3: Extract public ip4:X.X.X.X from existing SPF TXT record if present
+	if serverIP == "" {
+		if txts, terr := lookupTXTQuick(mailDomain); terr == nil {
+			for _, t := range txts {
+				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(t)), "v=spf1") {
+					for _, tok := range strings.Fields(t) {
+						lowTok := strings.ToLower(tok)
+						if strings.HasPrefix(lowTok, "ip4:") {
+							ipPart := strings.Split(strings.TrimPrefix(lowTok, "ip4:"), "/")[0]
+							if isGloballyRoutableIPv4(ipPart) {
+								serverIP = ipPart
+								serverIPSource = "автоопределён из SPF-записи домена (" + tok + ")"
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Wait for fast background outbound WAN IP detection
+	wanWG.Wait()
+	report.CurrentWANIP = currentWANIP
+
+	// Stage 4: Live outbound WAN IP auto-detection (works even if NO DNS A-records exist yet at all!)
+	if serverIP == "" && isGloballyRoutableIPv4(currentWANIP) {
+		serverIP = currentWANIP
+		serverIPSource = "автоопределён по текущему внешнему выходу в Интернет (WAN IP)"
+	}
+
 	report.ServerIP = serverIP
+	report.ServerIPSource = serverIPSource
+	if serverIP != "" {
+		log("info", fmt.Sprintf("🌐 Внешний белый IP для проверок PTR / RBL / SPF: %s (%s)", serverIP, serverIPSource))
+	}
 
 	var (
 		ptrs              []string
@@ -739,12 +1111,19 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 		autodiscoverSRVs  []string
 	)
 
+	// Detect local Split-DNS LAN/VPN IP automatically (e.g. 10.146.100.14) so if external Hairpin NAT or ISP blocks port 25, we seamlessly check ports internally too!
+	localSplitIP := lookupLocalSplitDNSIPv4(mailHost)
+	if localSplitIP == "" && mailHost != "mail."+mailDomain {
+		localSplitIP = lookupLocalSplitDNSIPv4("mail." + mailDomain)
+	}
+
 	probeTargetHost := mailHost
 	if userOverrideHost != "" {
 		probeTargetHost = userOverrideHost
-	} else if hostLookupErr != nil && publicIP != "" {
-		probeTargetHost = publicIP
+	} else if serverIP != "" {
+		probeTargetHost = serverIP
 	}
+	report.ProbeTargetUsed = probeTargetHost
 
 	var wg sync.WaitGroup
 	wg.Add(10)
@@ -822,7 +1201,7 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 		if rtxts, rerr := lookupTXTQuick("_smtp._tls." + mailDomain); rerr == nil {
 			tlsRptRecords = rtxts
 		}
-		if aips, aerr := LookupDomainIPsMultiResolver("autodiscover." + mailDomain); aerr == nil {
+		if aips := lookupPublicIPv4sExternal("autodiscover." + mailDomain); len(aips) > 0 {
 			autodiscoverIPs = aips
 		}
 		autodiscoverSRVs = lookupSRVAutodiscover(mailDomain)
@@ -871,6 +1250,48 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 	}()
 
 	wg.Wait()
+
+	// Smart Hairpin-NAT / ISP port-25 bypass: if probing via public IP could not connect on TCP :25 AND local Split-DNS resolved an internal LAN IP (e.g. 10.146.100.14), automatically re-probe ports against the internal IP!
+	if !smtp25.Reachable && userOverrideHost == "" && localSplitIP != "" && localSplitIP != probeTargetHost {
+		log("info", fmt.Sprintf("🔌 Внешний порт %s:25 недоступен из вашей сети (Hairpin NAT / фильтр провайдера) — автопереключение проверки портов на локальный Split-DNS IP %s...", probeTargetHost, localSplitIP))
+		var rwg sync.WaitGroup
+		rwg.Add(6)
+		go func() {
+			defer rwg.Done()
+			smtp25 = inspectSMTPPort(net.JoinHostPort(localSplitIP, "25"), mailHost, true)
+		}()
+		go func() {
+			defer rwg.Done()
+			smtp587 = inspectSMTPPort(net.JoinHostPort(localSplitIP, "587"), mailHost, false)
+		}()
+		go func() {
+			defer rwg.Done()
+			if !port465.Open {
+				port465 = probeImplicitTLSPortSNI(localSplitIP, mailHost, 465, "SMTPS (SSL отправка)")
+			}
+		}()
+		go func() {
+			defer rwg.Done()
+			if !port993.Open {
+				port993 = probeImplicitTLSPortSNI(localSplitIP, mailHost, 993, "IMAPS (SSL почта)")
+			}
+		}()
+		go func() {
+			defer rwg.Done()
+			if !port995.Open {
+				port995 = probeImplicitTLSPortSNI(localSplitIP, mailHost, 995, "POP3S (SSL сбор)")
+			}
+		}()
+		go func() {
+			defer rwg.Done()
+			if !port443.Open {
+				port443 = probeImplicitTLSPortSNI(localSplitIP, mailHost, 443, "HTTPS (Kerio WebMail)")
+			}
+		}()
+		rwg.Wait()
+		probeTargetHost = localSplitIP
+		report.ProbeTargetUsed = localSplitIP + " (автоопределён из локального Split-DNS)"
+	}
 
 	// Build port summary slice
 	p25 := PortProbeResult{
@@ -974,7 +1395,7 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 		mxPointsToIP := false
 		mxUnresolvableHost := ""
 		for _, m := range mxs {
-			ips, _ := LookupDomainIPsMultiResolver(m.Host)
+			ips := lookupPublicIPv4sExternal(m.Host)
 			if net.ParseIP(m.Host) != nil {
 				mxPointsToIP = true
 			}
@@ -1148,7 +1569,7 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 					genericISP = true
 				}
 			}
-			if fwdIPs, ferr := LookupDomainIPsMultiResolver(p); ferr == nil {
+			if fwdIPs := lookupPublicIPv4sExternal(p); len(fwdIPs) > 0 {
 				for _, fip := range fwdIPs {
 					if fip == serverIP {
 						fcrdnsOK = true
