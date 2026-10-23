@@ -246,9 +246,9 @@ func RunDesktopWindow(appURL string) (usedNativeWindow bool) {
 		AutoFocus: true,
 		DataPath:  dataDir,
 		WindowOptions: webview2.WindowOptions{
-			Title:  "Kerio SSL & Let's Encrypt Manager (v1.6)",
-			Width:  1260,
-			Height: 880,
+			Title:  "Kerio SSL & Let's Encrypt Manager (v1.7)",
+			Width:  1280,
+			Height: 900,
 			IconId: 0,
 			Center: true,
 		},

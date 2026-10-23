@@ -647,7 +647,14 @@ func ExecuteCertificateIssuance(req IssueRequest, log LogFunc) (*IssuedCertRecor
 		pendingDNS01Mu.Lock()
 		pendingDNS01Sessions[sessID] = sess
 		pendingDNS01Mu.Unlock()
-		log("warning", "Для завершения выпуска добавьте указанную ниже DNS TXT-запись в панели управления вашим доменом и нажмите «Подтвердить TXT-записи и выпустить сертификат».")
+		for _, r := range sess.Records {
+			log("success", fmt.Sprintf("═══ ДАННЫЕ DNS TXT-ЗАПИСИ ДЛЯ %s ═══", r.Domain))
+			log("info", fmt.Sprintf("  • Тип записи: TXT"))
+			log("info", fmt.Sprintf("  • Короткое имя (для hoster.by / Cloudflare / ISPmanager): %s", r.ShortHost))
+			log("info", fmt.Sprintf("  • Полное имя (FQDN): %s", r.Record))
+			log("success", fmt.Sprintf("  • Значение TXT: %s", r.TXTValue))
+		}
+		log("warning", "Добавьте эту TXT-запись в панели управления вашим доменом и нажмите зелёную кнопку «Подтвердить TXT-записи и выпустить сертификат» во всплывающем окне!")
 		return nil, sess, nil
 	}
 

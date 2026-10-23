@@ -674,7 +674,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v1.6 • Kerio Connect</span>
+        <span class="brand-badge">Windows Native GUI v1.7 • Kerio Connect</span>
       </div>
       <div class="brand-sub">Генерация приватного ключа (.key) и выпуск SSL-сертификатов (.crt / .pfx) по IP и домену для Kerio MailServer</div>
     </div>
@@ -937,6 +937,17 @@
             <button type="button" class="btn btn-primary btn-lg" id="issueBtn">
               🔐 Сгенерировать ключ и выпустить сертификат
             </button>
+          </div>
+          <div id="inlineDns01QuickBanner" style="display:none;margin-top:14px;padding:14px;border-radius:10px;border:2px solid #f59e0b;background:rgba(245,158,11,0.10);">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+              <div>
+                <div style="font-weight:800;color:#fbbf24;font-size:14px;">📝 Ожидает добавления DNS TXT-записи для выпуска сертификата</div>
+                <div style="font-size:12.5px;color:var(--text-secondary);margin-top:2px;">Нажмите кнопку справа, чтобы открыть окно со значениями TXT-записи.</div>
+              </div>
+              <button type="button" class="btn btn-primary" onclick="document.getElementById('dns01ModalOverlay').style.display='flex'">
+                📋 Открыть окно с TXT-записью
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1250,6 +1261,27 @@
 </main>
 
 <div class="toast" id="toastBox"></div>
+
+
+<!-- Centered Fullscreen Modal for DNS-01 TXT Record -->
+<div id="dns01ModalOverlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(2,6,23,0.82);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:18px;">
+  <div style="width:100%;max-width:740px;max-height:92vh;overflow-y:auto;background:var(--bg-card);border:2px solid #f59e0b;border-radius:14px;padding:22px;box-shadow:0 24px 64px rgba(0,0,0,0.65);">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">
+      <div>
+        <div style="font-size:17px;font-weight:800;color:#fbbf24;">📝 Шаг подтверждения домена: добавьте DNS TXT-запись</div>
+        <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">Откройте панель управления вашим доменом (<code>hoster.by</code>, <code>active.by</code>, <code>Cloudflare</code> и т.д.) → раздел <strong>DNS-записи</strong> → создайте запись типа <strong>TXT</strong>:</div>
+      </div>
+      <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('dns01ModalOverlay').style.display='none'" title="Свернуть окно">Свернуть ✕</button>
+    </div>
+    <div id="dns01ModalRecordsBody"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+      <button type="button" class="btn btn-outline" onclick="document.getElementById('dns01ModalOverlay').style.display='none'">Свернуть окно</button>
+      <button type="button" class="btn btn-primary btn-lg" id="completeDns01ModalBtn" onclick="document.getElementById('completeDns01Btn').click()">
+        ✅ Подтвердить TXT-записи и выпустить .key + .crt
+      </button>
+    </div>
+  </div>
+</div>
 
 <script>
   let systemState = null;
@@ -1610,8 +1642,8 @@
       if (!d.ok) throw new Error(d.error || 'Не удалось выпустить сертификат');
 
       if (d.pendingDns01 && d.session) {
-        const apiHost = document.getElementById('apiHostInput');
-        if (apiHost && !apiHost.value.trim() && req.domain) {
+        const apiHost = document.getElementById('kerioApiHost');
+        if (apiHost && (!apiHost.value.trim() || apiHost.value.trim() === '127.0.0.1') && req.domain) {
           apiHost.value = req.domain.trim();
         }
         renderDns01Wizard(d.session);
@@ -1649,36 +1681,71 @@
     document.getElementById('issueBtn').click();
   }
 
-  // Interactive DNS-01 Wizard
-  function renderDns01Wizard(sess) {
-    pendingDnsSession = sess;
-    document.getElementById('portInterceptCard').style.display = 'none';
-    const card = document.getElementById('dns01WizardCard');
-    const cont = document.getElementById('dns01RecordsContainer');
-    card.style.display = 'block';
+  function copyTextSafe(txt, label) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = txt;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch (_) {}
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).catch(() => {});
+    }
+    showToast(label || 'Скопировано в буфер обмена!');
+  }
 
-    cont.innerHTML = sess.records.map((rec, idx) => `
-      <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;">
-        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">Домен: <strong>${escapeHtml(rec.domain)}</strong> ${rec.zone ? `(зона <code>${escapeHtml(rec.zone)}</code>)` : ''}</div>
+  function buildDnsRecordCardsHtml(records, prefix) {
+    return (records || []).map((rec, idx) => `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;">
+        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">Домен: <strong style="color:var(--text-main);">${escapeHtml(rec.domain)}</strong> ${rec.zone ? `(зона DNS: <code>${escapeHtml(rec.zone)}</code>)` : ''} • Тип записи: <strong style="color:var(--accent);">TXT</strong></div>
         ${rec.shortHost ? `
-        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-bottom:6px;">
-          <div><span style="color:var(--text-secondary);font-size:12px;">Короткое имя (для <strong>hoster.by / Cloudflare</strong>):</span> <code class="inline" style="color:var(--accent);font-weight:700;">${escapeHtml(rec.shortHost)}</code></div>
-          <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('${escapeHtml(rec.shortHost)}');showToast('Короткое имя скопировано')">Копировать короткое</button>
+        <div style="margin-bottom:8px;">
+          <div style="font-size:12px;color:var(--text-secondary);margin-bottom:3px;">1️⃣ Имя / Субдомен (короткое — для панелей <strong>hoster.by, active.by, Cloudflare, ISPmanager</strong>):</div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;">
+            <input type="text" readonly value="${escapeHtml(rec.shortHost)}" onclick="this.select()" style="font-family:Consolas,monospace;font-weight:700;color:var(--accent);font-size:13.5px;">
+            <button type="button" class="btn btn-outline btn-sm" onclick="copyTextSafe('${escapeHtml(rec.shortHost)}', 'Короткое имя скопировано: ${escapeHtml(rec.shortHost)}')">📋 Копировать</button>
+          </div>
         </div>` : ''}
-        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-bottom:6px;">
-          <div><span style="color:var(--text-secondary);font-size:12px;">Полное имя (FQDN):</span> <code class="inline">${escapeHtml(rec.record)}</code></div>
-          <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('${escapeHtml(rec.record)}');showToast('Полное имя TXT скопировано')">Копировать FQDN</button>
+        <div style="margin-bottom:8px;">
+          <div style="font-size:12px;color:var(--text-secondary);margin-bottom:3px;">Или полное FQDN-имя (если ваша панель требует имя целиком):</div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;">
+            <input type="text" readonly value="${escapeHtml(rec.record)}" onclick="this.select()" style="font-family:Consolas,monospace;font-size:13px;">
+            <button type="button" class="btn btn-outline btn-sm" onclick="copyTextSafe('${escapeHtml(rec.record)}', 'Полное FQDN имя скопировано!')">📋 Копировать</button>
+          </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-bottom:8px;">
-          <div style="word-break:break-all;"><span style="color:var(--text-secondary);font-size:12px;">Значение TXT:</span> <code class="inline">${escapeHtml(rec.txtValue)}</code></div>
-          <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('${escapeHtml(rec.txtValue)}');showToast('Значение TXT скопировано')">Копировать TXT</button>
+        <div style="margin-bottom:10px;">
+          <div style="font-size:12px;color:var(--text-secondary);margin-bottom:3px;">2️⃣ Значение записи (TXT Value):</div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;">
+            <input type="text" readonly value="${escapeHtml(rec.txtValue)}" onclick="this.select()" style="font-family:Consolas,monospace;font-weight:700;color:#fde68a;font-size:13.5px;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="copyTextSafe('${escapeHtml(rec.txtValue)}', 'Значение TXT скопировано!')">📋 Копировать TXT</button>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          <button type="button" class="btn btn-outline btn-sm" onclick="verifyDnsTxtRecord('${escapeHtml(rec.record)}', '${escapeHtml(rec.txtValue)}', 'dnsCheckStatus_${idx}')">🔍 Проверить TXT в публичном DNS (8.8.8.8 / 1.1.1.1)</button>
-          <span id="dnsCheckStatus_${idx}" style="font-size:12px;color:var(--text-secondary);">Добавьте запись в DNS и нажмите кнопку проверки...</span>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="verifyDnsTxtRecord('${escapeHtml(rec.record)}', '${escapeHtml(rec.txtValue)}', '${prefix}_dnsCheckStatus_${idx}')">🔍 Проверить TXT в публичном DNS (Google 8.8.8.8 / Cloudflare 1.1.1.1)</button>
+          <span id="${prefix}_dnsCheckStatus_${idx}" style="font-size:12.5px;font-weight:600;color:var(--text-secondary);">Добавьте запись в DNS и нажмите кнопку проверки...</span>
         </div>
       </div>
     `).join('');
+  }
+
+  // Interactive DNS-01 Wizard (renders in BOTH centered modal AND page card!)
+  function renderDns01Wizard(sess) {
+    pendingDnsSession = sess;
+    document.getElementById('portInterceptCard').style.display = 'none';
+    document.getElementById('inlineDns01QuickBanner').style.display = 'block';
+    const card = document.getElementById('dns01WizardCard');
+    const cont = document.getElementById('dns01RecordsContainer');
+    card.style.display = 'block';
+    cont.innerHTML = buildDnsRecordCardsHtml(sess.records, 'card');
+
+    const modalBody = document.getElementById('dns01ModalRecordsBody');
+    modalBody.innerHTML = buildDnsRecordCardsHtml(sess.records, 'modal');
+    document.getElementById('dns01ModalOverlay').style.display = 'flex';
   }
 
   async function verifyDnsTxtRecord(record, expected, targetElemId) {
@@ -1704,9 +1771,15 @@
   document.getElementById('completeDns01Btn').addEventListener('click', async () => {
     if (!pendingDnsSession) return;
     const btn = document.getElementById('completeDns01Btn');
+    const mbtn = document.getElementById('completeDns01ModalBtn');
     const orig = btn.innerHTML;
+    const morig = mbtn ? mbtn.innerHTML : '';
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Проверка в Let\'s Encrypt и выпуск...';
+    if (mbtn) {
+      mbtn.disabled = true;
+      mbtn.innerHTML = '<span class="spinner"></span> Проверка TXT в Let\'s Encrypt и выпуск...';
+    }
     try {
       const r = await fetch('/api/dns01/complete', {
         method: 'POST',
@@ -1715,15 +1788,22 @@
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'Ошибка проверки DNS-01');
+      document.getElementById('dns01ModalOverlay').style.display = 'none';
+      document.getElementById('inlineDns01QuickBanner').style.display = 'none';
       document.getElementById('dns01WizardCard').style.display = 'none';
       displayCertificateResult(d.certificate);
+      document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
       await loadCertificates();
-      showToast('Сертификат Let\'s Encrypt успешно выпущен!');
+      showToast('Сертификат Let\'s Encrypt (.key + .crt) успешно выпущен!');
     } catch (e) {
       showToast(e.message, true);
     } finally {
       btn.disabled = false;
       btn.innerHTML = orig;
+      if (mbtn) {
+        mbtn.disabled = false;
+        mbtn.innerHTML = morig;
+      }
     }
   });
 
