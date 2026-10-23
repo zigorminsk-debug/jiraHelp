@@ -1370,11 +1370,11 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 				Steps: []string{
 					fmt.Sprintf("Откройте консоль администрирования Kerio Connect (например, https://10.146.100.14:4040/admin/ или https://%s:4040/admin/).", recommendedHost),
 					fmt.Sprintf("В левом меню перейдите в «Конфигурация» (Configuration) → «Домены» (Domains) → дважды кликните на ваш домен «%s».", mailDomain),
-					"В открывшемся окне свойств домена перейдите на вкладку «Дополнительно» (Advanced) — или на вкладку «DomainKeys / DKIM» (в зависимости от версии Kerio Connect 9.x).",
-					"Поставьте галочку «Подписывать исходящие сообщения ключом DomainKeys Identified Mail (Sign outgoing messages with DKIM key)».",
-					"Нажмите кнопку рядом «Показать открытый ключ... (Show public key...)» — откроется окошко с длинным текстом вида: v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA... Скопируйте это значение ЦЕЛИКОМ (начиная с v=DKIM1... до последнего символа)!",
-					fmt.Sprintf("Откройте панель управления DNS вашего домена %s и создайте новую запись: • Тип записи: TXT • Поле «Имя / Субдомен»: mail._domainkey (ВНИМАНИЕ: в hoster.by / active.by / Cloudflare пишите ТОЛЬКО mail._domainkey — НЕ дописывайте .%s в конце, иначе получится ошибка mail._domainkey.%s.%s! А в ISPmanager / BIND пишите с точкой в самом конце: mail._domainkey.%s.) • Поле «Значение»: вставьте скопированную из Kerio строку v=DKIM1; k=rsa; p=...", mailDomain, mailDomain, mailDomain, mailDomain, mailDomain),
-					"Подождите 3–5 минут, вернитесь в окно свойств домена в Kerio Connect и нажмите кнопку «Проверить DNS (Check DNS)» — Kerio покажет зелёное сообщение «Открытый ключ подтверждён в DNS!». Нажмите «ОК» для сохранения!",
+					"В открывшемся окне «Изменить домен» на первой вкладке «Общие» (General) внизу найдите блок DomainKeys (DKIM).",
+					"Поставьте галочку «Подписывать исходящие сообщения этого домена ключом DomainKeys Identified Mail (DKIM)».",
+					"Нажмите единственную кнопку/ссылку под галочкой — «Показать открытый ключ... (Show public key...)» — откроется окошко с готовой записью вида: v=DKIM1; k=rsa; p=MIIBIjANBg... Скопируйте это значение ЦЕЛИКОМ!",
+					fmt.Sprintf("Откройте панель управления DNS вашего домена %s и создайте новую запись: • Тип записи: TXT • Поле «Имя / Субдомен»: mail._domainkey (ВНИМАНИЕ: в hoster.by / active.by / Cloudflare пишите ТОЛЬКО mail._domainkey — НЕ дописывайте .%s! В ISPmanager пишите с точкой в самом конце: mail._domainkey.%s.) • Поле «Значение»: вставьте скопированную строку v=DKIM1; k=rsa; p=...", mailDomain, mailDomain, mailDomain),
+					"Подождите 3–5 минут и нажмите кнопку «ОК» внизу окна «Изменить домен» в Kerio Connect (отдельной кнопки «Проверить DNS» в Kerio нет — Kerio САМ автоматически проверяет DNS прямо в момент нажатия «ОК»! Если окно закрылось без предупреждения об отсутствии записи DNS — значит Kerio увидел ключ и сразу включил подпись писем; затем нажмите «Проверить сервер» здесь в программе — пункт DKIM загорится зелёным ✅!).",
 				},
 				VerifyCmd: fmt.Sprintf("nslookup -type=txt mail._domainkey.%s 8.8.8.8", mailDomain),
 				CopyItems: []CopySnippet{
