@@ -255,12 +255,16 @@ func installViaKerioAdminAPI(rec *IssuedCertRecord, cfg KerioInstallConfig, log 
 	uploadURL := baseURL + "/admin/api/jsonrpc/upload/"
 
 	rpcCall := func(token string, id int, method string, params any) (json.RawMessage, error) {
-		body, _ := json.Marshal(map[string]any{
+		payload := map[string]any{
 			"jsonrpc": "2.0",
 			"id":      id,
 			"method":  method,
 			"params":  params,
-		})
+		}
+		if token != "" {
+			payload["token"] = token
+		}
+		body, _ := json.Marshal(payload)
 		req, err := http.NewRequest("POST", rpcURL, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
@@ -357,6 +361,23 @@ func installViaKerioAdminAPI(rec *IssuedCertRecord, cfg KerioInstallConfig, log 
 		return "", err
 	}
 
+	// Snapshot existing certificates before import so we identify the exact new KId with 100% certainty
+	type kerioCertListResp struct {
+		Certificates []struct {
+			Id   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"certificates"`
+	}
+	beforeIDs := map[string]bool{}
+	if getBefore, gerr := rpcCall(token, 2, "ConnectCertificate.get", map[string]any{}); gerr == nil {
+		var beforeList kerioCertListResp
+		if json.Unmarshal(getBefore, &beforeList) == nil {
+			for _, c := range beforeList.Certificates {
+				beforeIDs[c.Id] = true
+			}
+		}
+	}
+
 	crtUploadID, err := uploadFile(token, "server.crt", crtBytes)
 	if err != nil {
 		return "", err
@@ -366,49 +387,93 @@ func installViaKerioAdminAPI(rec *IssuedCertRecord, cfg KerioInstallConfig, log 
 		return "", err
 	}
 
-	log("info", "Импорт приватного ключа и сертификата через Kerio Connect Admin API...")
+	log("info", "Импорт приватного ключа в Kerio Connect (ConnectCertificate.importPrivateKey)...")
 	var certID string
-	// Official Kerio Connect Admin IDL: Certificates.importPrivateKey -> Certificates.importCertificate -> Certificates.setActive
-	pkRes, pkErr := rpcCall(token, 2, "Certificates.importPrivateKey", map[string]any{
+	pkRes, pkErr := rpcCall(token, 3, "ConnectCertificate.importPrivateKey", map[string]any{
 		"fileId": keyUploadID,
 	})
 	if pkErr == nil {
 		var pkStruct struct {
-			Id string `json:"id"`
+			NeedPassword bool   `json:"needPassword"`
+			Id           string `json:"id"`
 		}
-		if json.Unmarshal(pkRes, &pkStruct) == nil && pkStruct.Id != "" {
-			if _, icErr := rpcCall(token, 3, "Certificates.importCertificate", map[string]any{
+		if uerr := json.Unmarshal(pkRes, &pkStruct); uerr == nil && pkStruct.Id != "" {
+			log("info", fmt.Sprintf("Приватный ключ принят Kerio (temp ID: %s), загрузка цепочки SSL-сертификата...", pkStruct.Id))
+			_, icErr := rpcCall(token, 4, "ConnectCertificate.importCertificate", map[string]any{
 				"id":       pkStruct.Id,
 				"fileId":   crtUploadID,
 				"password": "",
-			}); icErr == nil {
-				certID = pkStruct.Id
+			})
+			// If an older Kerio build prefers leaf-only PEM instead of fullchain PEM, automatically retry with cert-only.crt
+			if icErr != nil {
+				if leafPath, ok := rec.Files["certOnly"]; ok && leafPath != "" {
+					if leafBytes, lerr := os.ReadFile(leafPath); lerr == nil {
+						if leafUploadID, u2err := uploadFile(token, "cert.crt", leafBytes); u2err == nil {
+							log("warning", "Повтор импорта с листовым сертификатом cert-only.crt...")
+							_, icErr = rpcCall(token, 5, "ConnectCertificate.importCertificate", map[string]any{
+								"id":       pkStruct.Id,
+								"fileId":   leafUploadID,
+								"password": "",
+							})
+						}
+					}
+				}
 			}
+			if icErr != nil {
+				return "", icErr
+			}
+			certID = pkStruct.Id
+
+			// Re-query ConnectCertificate.get in case Kerio assigned a new permanent KId after pairing key + cert
+			if getAfter, gaErr := rpcCall(token, 6, "ConnectCertificate.get", map[string]any{}); gaErr == nil {
+				var afterList kerioCertListResp
+				if json.Unmarshal(getAfter, &afterList) == nil {
+					for _, c := range afterList.Certificates {
+						if !beforeIDs[c.Id] && c.Id != "" {
+							certID = c.Id
+						}
+					}
+				}
+			}
+
+			log("info", fmt.Sprintf("Активация нового сертификата в Kerio Connect (ConnectCertificate.setActive, ID: %s)...", certID))
+			if _, saErr := rpcCall(token, 7, "ConnectCertificate.setActive", map[string]any{"id": certID}); saErr != nil {
+				return "", saErr
+			}
+		} else {
+			return "", fmt.Errorf("неожиданный ответ ConnectCertificate.importPrivateKey: %s", string(pkRes))
 		}
-	}
-	// Fallback to single-call Certificates.import if needed
-	if certID == "" {
-		impRes, err := rpcCall(token, 4, "Certificates.import", map[string]any{
-			"keyId":         keyUploadID,
-			"certificateId": crtUploadID,
+	} else {
+		// Fallback for Kerio Control / WebAdmin Certificates interface (port 4081)
+		pk2Res, pk2Err := rpcCall(token, 8, "Certificates.importPrivateKey", map[string]any{
+			"fileId": keyUploadID,
 		})
-		if err != nil {
-			if pkErr != nil {
-				return "", pkErr
-			}
-			return "", err
+		if pk2Err != nil {
+			return "", pkErr
 		}
-		var impStruct struct {
+		var pk2Struct struct {
+			KeyId string `json:"keyId"`
+			Id    string `json:"id"`
+		}
+		_ = json.Unmarshal(pk2Res, &pk2Struct)
+		kid := pk2Struct.KeyId
+		if kid == "" {
+			kid = pk2Struct.Id
+		}
+		imp2Res, imp2Err := rpcCall(token, 9, "Certificates.importCertificate", map[string]any{
+			"keyId":  kid,
+			"fileId": crtUploadID,
+			"name":   rec.Slug,
+			"type":   "InactiveCertificate",
+		})
+		if imp2Err != nil {
+			return "", imp2Err
+		}
+		var imp2Struct struct {
 			Id string `json:"id"`
 		}
-		_ = json.Unmarshal(impRes, &impStruct)
-		certID = impStruct.Id
-	}
-	if certID != "" {
-		log("info", "Активация нового сертификата в Kerio Connect (Certificates.setActive)...")
-		if _, err := rpcCall(token, 5, "Certificates.setActive", map[string]any{"id": certID}); err != nil {
-			return "", err
-		}
+		_ = json.Unmarshal(imp2Res, &imp2Struct)
+		certID = imp2Struct.Id
 	}
 
 	return fmt.Sprintf("Сертификат успешно импортирован и активирован через Kerio Connect Admin API (%s) без остановки почты!", baseURL), nil

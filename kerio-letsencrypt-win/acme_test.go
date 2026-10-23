@@ -429,4 +429,69 @@ func TestEndToEndACMEv2HTTP01AndTLSALPN01AndDNS01(t *testing.T) {
 	if err != nil || recDNS == nil {
 		t.Fatalf("CompletePendingDNS01Session failed: %v", err)
 	}
+
+	// Verify Kerio Connect Admin JSON-RPC 2.0 (ConnectCertificate.*) upload & activation
+	var activatedID string
+	uploadSeq := 0
+	importedDone := false
+	kerioMock := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json-rpc; charset=utf-8")
+		if r.URL.Path == "/admin/api/jsonrpc/upload/" {
+			uploadSeq++
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"jsonrpc":"2.0","result":{"fileUpload":{"id":"upload-%d"}}}`, uploadSeq)))
+			return
+		}
+		var rpcReq struct {
+			ID     int             `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&rpcReq)
+		switch rpcReq.Method {
+		case "Session.login":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"token":"tok-kerio-4040"}}`))
+		case "ConnectCertificate.get":
+			if !importedDone {
+				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"certificates":[{"id":"cert_old","name":"Default"}]}}`))
+			} else {
+				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"certificates":[{"id":"cert_old","name":"Default"},{"id":"cert_new_leend","name":"mail.leend.by"}]}}`))
+			}
+		case "ConnectCertificate.importPrivateKey":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"needPassword":false,"id":"temp_key_1"}}`))
+		case "ConnectCertificate.importCertificate":
+			importedDone = true
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{}}`))
+		case "ConnectCertificate.setActive":
+			var p struct {
+				Id string `json:"id"`
+			}
+			_ = json.Unmarshal(rpcReq.Params, &p)
+			activatedID = p.Id
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{}}`))
+		case "Session.logout":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{}}`))
+		default:
+			t.Fatalf("unexpected RPC method: %s", rpcReq.Method)
+		}
+	}))
+	defer kerioMock.Close()
+
+	mockHost, mockPortStr, _ := net.SplitHostPort(strings.TrimPrefix(kerioMock.URL, "https://"))
+	var mockPort int
+	_, _ = fmt.Sscanf(mockPortStr, "%d", &mockPort)
+	apiNote, err := InstallCertificateToKerio(recDNS, KerioInstallConfig{
+		Enabled:     true,
+		Method:      "api",
+		APIHost:     mockHost,
+		APIPort:     mockPort,
+		APIUser:     "admin",
+		APIPassword: "secret",
+	}, func(lvl, msg string) { t.Logf("[KERIO-API %s] %s", lvl, msg) })
+	if err != nil {
+		t.Fatalf("InstallCertificateToKerio via ConnectCertificate.* failed: %v", err)
+	}
+	if activatedID != "cert_new_leend" {
+		t.Fatalf("expected setActive on cert_new_leend, got %q", activatedID)
+	}
+	t.Logf("Kerio Admin API success: %s", apiNote)
 }
