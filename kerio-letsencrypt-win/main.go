@@ -175,7 +175,8 @@ func buildRouter() http.Handler {
 	mux.HandleFunc("/api/app-shutdown", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 		go func() {
-			time.Sleep(250 * time.Millisecond)
+			CloseDesktopWindow()
+			time.Sleep(150 * time.Millisecond)
 			if serverCancel != nil {
 				serverCancel()
 			}
@@ -620,7 +621,8 @@ func buildRouter() http.Handler {
 		}
 		writeJSON(w, 200, map[string]any{"ok": true})
 		go func() {
-			time.Sleep(600 * time.Millisecond)
+			CloseDesktopWindow()
+			time.Sleep(200 * time.Millisecond)
 			if serverCancel != nil {
 				serverCancel()
 			}
@@ -784,8 +786,16 @@ func main() {
 	waitForLocalHTTPReady(appURL + "api/ping")
 
 	if !*serverOnly && runtime.GOOS == "windows" {
-		LaunchDesktopGUI(appURL)
-		// Keep backend alive continuously while window SSE/heartbeat is connected; exit cleanly 30s after all windows close.
+		// Native Win32 WebView2 window blocks on main OS thread until closed via [X], Alt+F4, or Exit button!
+		usedNative := RunDesktopWindow(appURL)
+		if usedNative {
+			cancel()
+			shutCtx, shutCancel := context.WithTimeout(context.Background(), 1*time.Second)
+			_ = srv.Shutdown(shutCtx)
+			shutCancel()
+			os.Exit(0)
+		}
+		// Fallback idle monitor only when running in external fallback browser on legacy Server 2012/2016
 		go func() {
 			bootTime := time.Now()
 			ticker := time.NewTicker(3 * time.Second)
@@ -801,14 +811,12 @@ func main() {
 					}
 					idle := time.Since(time.Unix(0, lastActivityUnixN.Load()))
 					if !everHadClient.Load() {
-						// Allow up to 3 minutes on cold Windows boot before initial browser window finishes opening
 						if time.Since(bootTime) > 3*time.Minute {
 							cancel()
 							return
 						}
 						continue
 					}
-					// Window was open and has now been closed with zero SSE/ping reconnects for 30s -> exit cleanly!
 					if idle > 30*time.Second {
 						cancel()
 						return

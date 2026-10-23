@@ -69,4 +69,8 @@ func PlatformOpenTempFirewallPort(_ int) func() {
 	return func() {}
 }
 
-func LaunchDesktopGUI(_ string) {}
+func CloseDesktopWindow() {}
+
+func RunDesktopWindow(_ string) bool {
+	return false
+}

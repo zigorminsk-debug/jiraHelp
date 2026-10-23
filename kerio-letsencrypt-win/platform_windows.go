@@ -7,17 +7,24 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
+
+	webview2 "github.com/jchv/go-webview2"
 )
 
 var (
-	shell32DLL          = syscall.NewLazyDLL("shell32.dll")
-	procIsUserAnAdmin   = shell32DLL.NewProc("IsUserAnAdmin")
-	procShellExecuteW   = shell32DLL.NewProc("ShellExecuteW")
-	user32DLL           = syscall.NewLazyDLL("user32.dll")
-	procMessageBoxW     = user32DLL.NewProc("MessageBoxW")
+	shell32DLL        = syscall.NewLazyDLL("shell32.dll")
+	procIsUserAnAdmin = shell32DLL.NewProc("IsUserAnAdmin")
+	procShellExecuteW = shell32DLL.NewProc("ShellExecuteW")
+	user32DLL         = syscall.NewLazyDLL("user32.dll")
+	procMessageBoxW   = user32DLL.NewProc("MessageBoxW")
+
+	activeWebViewMu sync.Mutex
+	activeWebView   webview2.WebView
 )
 
 const scheduledTaskName = "KerioLetsEncryptAutoRenew"
@@ -210,37 +217,63 @@ func PlatformOpenTempFirewallPort(port int) func() {
 	}
 }
 
-// LaunchDesktopGUI opens a frameless native-style Windows app window (Edge App Mode / Chrome App Mode) with automatic fallback to default browser.
-func LaunchDesktopGUI(appURL string) {
-	appBrowsers := []string{
-		filepath.Join(os.Getenv("ProgramFiles(x86)"), `Microsoft\Edge\Application\msedge.exe`),
-		filepath.Join(os.Getenv("ProgramFiles"), `Microsoft\Edge\Application\msedge.exe`),
-		filepath.Join(os.Getenv("ProgramFiles"), `Google\Chrome\Application\chrome.exe`),
-		filepath.Join(os.Getenv("ProgramFiles(x86)"), `Google\Chrome\Application\chrome.exe`),
-		filepath.Join(os.Getenv("LocalAppData"), `Google\Chrome\Application\chrome.exe`),
+func CloseDesktopWindow() {
+	activeWebViewMu.Lock()
+	wv := activeWebView
+	activeWebViewMu.Unlock()
+	if wv != nil {
+		wv.Destroy()
+	}
+}
+
+// RunDesktopWindow creates a true native Win32 window embedding WebView2 (blocking on main thread until window closes),
+// with fallback to explorer.exe browser tab if WebView2 Runtime is missing on old Windows Server 2012/2016.
+func RunDesktopWindow(appURL string) (usedNativeWindow bool) {
+	runtime.LockOSThread()
+
+	roleSuffix := "user"
+	if IsRunningAsAdmin() {
+		roleSuffix = "admin"
+	}
+	dataDir := filepath.Join(os.TempDir(), "KerioCertManagerWV2_"+roleSuffix)
+	_ = os.MkdirAll(dataDir, 0700)
+
+	// Prevent Windows 11 / UAC Admin / RDP GPU compositor freezes and bypass corporate proxy for 127.0.0.1
+	_ = os.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--proxy-bypass-list=<-loopback> --disable-gpu")
+
+	wv := webview2.NewWithOptions(webview2.WebViewOptions{
+		Debug:     false,
+		AutoFocus: true,
+		DataPath:  dataDir,
+		WindowOptions: webview2.WindowOptions{
+			Title:  "Kerio SSL & Let's Encrypt Manager (v1.4)",
+			Width:  1260,
+			Height: 880,
+			IconId: 0,
+			Center: true,
+		},
+	})
+	if wv != nil {
+		activeWebViewMu.Lock()
+		activeWebView = wv
+		activeWebViewMu.Unlock()
+
+		_ = wv.Bind("nativeCloseWindow", func() {
+			wv.Destroy()
+		})
+
+		wv.Navigate(appURL)
+		wv.Run()
+
+		activeWebViewMu.Lock()
+		activeWebView = nil
+		activeWebViewMu.Unlock()
+		return true
 	}
 
-	for _, bin := range appBrowsers {
-		if bin == "" {
-			continue
-		}
-		if st, err := os.Stat(bin); err == nil && !st.IsDir() {
-			cmd := exec.Command(
-				bin,
-				"--app="+appURL,
-				"--window-size=1240,880",
-				"--proxy-bypass-list=<-loopback>",
-				"--disable-features=Translate",
-			)
-			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-			if err := cmd.Start(); err == nil {
-				return
-			}
-		}
-	}
-
-	// Universal Windows fallback (opens default browser even on Server 2012 R2 / 2016 without Chromium)
-	fallback := exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", appURL)
+	// Fallback if WebView2 Runtime is not installed on an older Windows Server: open normal default browser tab via explorer.exe
+	fallback := exec.Command("explorer.exe", appURL)
 	fallback.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	_ = fallback.Start()
+	return false
 }

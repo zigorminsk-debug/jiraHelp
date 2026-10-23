@@ -674,7 +674,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows GUI v1.3 • Kerio Connect</span>
+        <span class="brand-badge">Windows Native GUI v1.4 • Kerio Connect</span>
       </div>
       <div class="brand-sub">Генерация приватного ключа (.key) и выпуск SSL-сертификатов (.crt / .pfx) по IP и домену для Kerio MailServer</div>
     </div>
@@ -2049,6 +2049,9 @@
       if (d.isWindows) {
         document.getElementById('exitAppBtn').style.display = 'inline-flex';
         document.getElementById('exitAppBtn').onclick = async () => {
+          if (typeof window.nativeCloseWindow === 'function') {
+            try { window.nativeCloseWindow(); } catch (_) {}
+          }
           try { await fetch('/api/app-shutdown', { method: 'POST' }); } catch (_) {}
           window.close();
           document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Segoe UI,sans-serif;font-size:16px;color:#94a3b8;">Программа завершена. Можете закрыть это окно.</div>';
