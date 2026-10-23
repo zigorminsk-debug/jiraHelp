@@ -674,7 +674,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v1.4 • Kerio Connect</span>
+        <span class="brand-badge">Windows Native GUI v1.5 • Kerio Connect</span>
       </div>
       <div class="brand-sub">Генерация приватного ключа (.key) и выпуск SSL-сертификатов (.crt / .pfx) по IP и домену для Kerio MailServer</div>
     </div>
@@ -854,10 +854,10 @@
             </div>
 
             <label class="check-box" id="stopKerioTempWrap" for="stopKerioTempCheck">
-              <input type="checkbox" id="stopKerioTempCheck">
+              <input type="checkbox" id="stopKerioTempCheck" checked>
               <div>
-                <div class="check-box-title">Временно остановить службу <code>KerioMailServer</code> на время проверки порта (5–15 сек)</div>
-                <div class="check-box-sub">Включите, если Kerio Connect сам занимает порт 80/443 на сервере Windows. Служба автоматически запустится обратно сразу после ответа Let's Encrypt!</div>
+                <div class="check-box-title">Временно остановить службу <code>KerioMailServer</code> на время проверки порта (5–10 сек)</div>
+                <div class="check-box-sub">Рекомендуется! Если программа запущена прямо на сервере Kerio Connect, служба на 5 секунд освободит порт 80/443 (чтобы Kerio не вернул пустой ответ <code>got ""</code>) и сразу запустится обратно!</div>
               </div>
             </label>
           </div>
@@ -943,6 +943,24 @@
 
       <!-- RIGHT COLUMN: DIAGNOSTICS + ISSUED CERT + LOGS -->
       <div>
+
+        <!-- Smart Recovery Banner when Port 80 is routed to another VM/Kerio server -->
+        <div class="card" id="portInterceptCard" style="display:none;border-color:#f59e0b;">
+          <div class="card-header">
+            <div>
+              <div class="card-title" style="color:#fbbf24;">⚠️ Порт 80 на роутере направлен не на этот компьютер (или перехвачен Kerio)</div>
+              <div class="card-subtitle" id="portInterceptReason">Маршрутизатор направил запрос Let's Encrypt на работающий почтовый сервер Kerio Connect (ответ <code>got ""</code>), а не на этот ПК.</div>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('portInterceptCard').style.display='none'">✕</button>
+          </div>
+          <div style="font-size:13px;line-height:1.55;color:var(--text-primary);margin-bottom:12px;">
+            <div><strong>Вариант 1 (прямо с этого компьютера за 1 минуту — без трогания роутера и портов):</strong> нажмите кнопку ниже, добавьте одну TXT-запись у вашего DNS-провайдера (<code>hoster.by</code> / <code>Cloudflare</code>) и получите готовый комплект <code>server.key</code> + <code>fullchain.crt</code>!</div>
+            <div style="margin-top:6px;color:var(--text-secondary);"><strong>Вариант 2 (полный автомат по порту 80):</strong> запустите <code>KerioCertManager.exe</code> от имени Администратора непосредственно на самом Windows-сервере с Kerio Connect (либо на 1 минуту перенаправьте порт 80 роутера на локальный IP этого ПК).</div>
+          </div>
+          <button type="button" class="btn btn-primary" style="width:100%;" onclick="switchToDns01AndIssue()">
+            🌐 Выпустить сертификат прямо с этого ПК через DNS-01 (без портов 80/443) →
+          </button>
+        </div>
 
         <!-- Interactive DNS-01 Pending Wizard -->
         <div class="card" id="dns01WizardCard" style="display:none;border-color:var(--kerio-orange);">
@@ -1603,34 +1621,56 @@
         showToast('Ключ и SSL-сертификат для Kerio Connect успешно созданы!');
       }
     } catch (e) {
-      showToast(e.message, true);
+      const msg = e.message || String(e);
+      if (msg.includes('got ""') || msg.includes('Connection refused') || msg.includes('Timeout during connect') || msg.includes('не удалось занять порт')) {
+        const ic = document.getElementById('portInterceptCard');
+        document.getElementById('portInterceptReason').textContent = msg;
+        ic.style.display = 'block';
+        ic.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      showToast(msg, true);
     } finally {
       btn.disabled = false;
       btn.innerHTML = orig;
     }
   });
 
+  function switchToDns01AndIssue() {
+    document.getElementById('portInterceptCard').style.display = 'none';
+    document.getElementById('includeIpSanCheck').checked = false;
+    const sel = document.getElementById('challengeSelect');
+    sel.value = 'dns-01';
+    sel.dispatchEvent(new Event('change'));
+    document.getElementById('issueBtn').click();
+  }
+
   // Interactive DNS-01 Wizard
   function renderDns01Wizard(sess) {
     pendingDnsSession = sess;
+    document.getElementById('portInterceptCard').style.display = 'none';
     const card = document.getElementById('dns01WizardCard');
     const cont = document.getElementById('dns01RecordsContainer');
     card.style.display = 'block';
 
     cont.innerHTML = sess.records.map((rec, idx) => `
       <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;">
-        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">Домен: <strong>${escapeHtml(rec.domain)}</strong></div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">Домен: <strong>${escapeHtml(rec.domain)}</strong> ${rec.zone ? `(зона <code>${escapeHtml(rec.zone)}</code>)` : ''}</div>
+        ${rec.shortHost ? `
         <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-bottom:6px;">
-          <div><span style="color:var(--text-secondary);font-size:12px;">Имя записи (Host):</span> <code class="inline">${escapeHtml(rec.record)}</code></div>
-          <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('${escapeHtml(rec.record)}');showToast('Имя TXT скопировано')">Копировать имя</button>
+          <div><span style="color:var(--text-secondary);font-size:12px;">Короткое имя (для <strong>hoster.by / Cloudflare</strong>):</span> <code class="inline" style="color:var(--accent);font-weight:700;">${escapeHtml(rec.shortHost)}</code></div>
+          <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('${escapeHtml(rec.shortHost)}');showToast('Короткое имя скопировано')">Копировать короткое</button>
+        </div>` : ''}
+        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-bottom:6px;">
+          <div><span style="color:var(--text-secondary);font-size:12px;">Полное имя (FQDN):</span> <code class="inline">${escapeHtml(rec.record)}</code></div>
+          <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('${escapeHtml(rec.record)}');showToast('Полное имя TXT скопировано')">Копировать FQDN</button>
         </div>
         <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-bottom:8px;">
           <div style="word-break:break-all;"><span style="color:var(--text-secondary);font-size:12px;">Значение TXT:</span> <code class="inline">${escapeHtml(rec.txtValue)}</code></div>
           <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('${escapeHtml(rec.txtValue)}');showToast('Значение TXT скопировано')">Копировать TXT</button>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <button type="button" class="btn btn-outline btn-sm" onclick="verifyDnsTxtRecord('${escapeHtml(rec.record)}', '${escapeHtml(rec.txtValue)}', 'dnsCheckStatus_${idx}')">🔍 Проверить TXT в DNS</button>
-          <span id="dnsCheckStatus_${idx}" style="font-size:12px;color:var(--text-secondary);">Ожидание добавления записи...</span>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="verifyDnsTxtRecord('${escapeHtml(rec.record)}', '${escapeHtml(rec.txtValue)}', 'dnsCheckStatus_${idx}')">🔍 Проверить TXT в публичном DNS (8.8.8.8 / 1.1.1.1)</button>
+          <span id="dnsCheckStatus_${idx}" style="font-size:12px;color:var(--text-secondary);">Добавьте запись в DNS и нажмите кнопку проверки...</span>
         </div>
       </div>
     `).join('');
@@ -1638,18 +1678,21 @@
 
   async function verifyDnsTxtRecord(record, expected, targetElemId) {
     const el = document.getElementById(targetElemId);
-    el.textContent = 'Проверка DNS...';
+    el.textContent = 'Проверка через Google 8.8.8.8 и Cloudflare 1.1.1.1...';
     const r = await fetch(`/api/check-dns-txt?record=${encodeURIComponent(record)}&expected=${encodeURIComponent(expected)}`);
     const d = await r.json();
     if (d.matched) {
       el.style.color = 'var(--accent)';
-      el.textContent = '✅ TXT-запись найдена и полностью совпадает! Можно выпускать сертификат.';
+      el.textContent = '✅ TXT-запись видна в интернете и совпадает! Нажимайте «Подтвердить TXT-записи и выпустить сертификат»!';
+    } else if (d.doubledZone) {
+      el.style.color = 'var(--kerio-orange)';
+      el.textContent = '⚠ ' + d.message;
     } else if (d.found) {
       el.style.color = 'var(--kerio-orange)';
-      el.textContent = '⚠ Найдена другая TXT-запись: ' + d.records.join(', ');
+      el.textContent = '⚠ Найдена старая TXT-запись (' + d.records.join(', ') + ') — обновите значение и подождите 1 мин.';
     } else {
       el.style.color = 'var(--danger)';
-      el.textContent = '⏳ Пока не видна в публичном DNS (подождите 1–3 минуты)';
+      el.textContent = '⏳ Пока не обновилась в публичном DNS (обычно 30–120 сек после сохранения в панели DNS)';
     }
   }
 

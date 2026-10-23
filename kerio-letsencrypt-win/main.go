@@ -342,6 +342,25 @@ func buildRouter() http.Handler {
 		}
 		records, err := LookupDNSTXTRecords(fqdn)
 		if err != nil {
+			// Check common control panel mistake: accidental doubled domain zone e.g. _acme-challenge.mail.leend.by.leend.by
+			parts := strings.Split(fqdn, ".")
+			if len(parts) >= 3 {
+				zone := strings.Join(parts[len(parts)-2:], ".")
+				shortHost := strings.Join(parts[:len(parts)-2], ".")
+				doubled := fqdn + "." + zone
+				if dupRecs, derr := LookupDNSTXTRecords(doubled); derr == nil && len(dupRecs) > 0 {
+					writeJSON(w, 200, map[string]any{
+						"ok":          true,
+						"found":       false,
+						"matched":     false,
+						"doubledZone": doubled,
+						"shortHost":   shortHost,
+						"records":     dupRecs,
+						"message":     fmt.Sprintf("Запись создалась с задвоенным доменом (%s)! В вашей панели DNS (hoster.by / Cloudflare) укажите в поле Имя только короткую часть: %s", doubled, shortHost),
+					})
+					return
+				}
+			}
 			writeJSON(w, 200, map[string]any{
 				"ok":      true,
 				"found":   false,

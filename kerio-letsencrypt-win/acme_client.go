@@ -92,6 +92,8 @@ func (p *acmeProblem) Error() string {
 type DNS01RecordInstruction struct {
 	Domain    string `json:"domain"`
 	Record    string `json:"record"`
+	ShortHost string `json:"shortHost"`
+	Zone      string `json:"zone"`
 	Type      string `json:"type"`
 	TXTValue  string `json:"txtValue"`
 	AuthURL   string `json:"authUrl"`
@@ -614,14 +616,25 @@ func ExecuteCertificateIssuance(req IssueRequest, log LogFunc) (*IssuedCertRecor
 			ka := client.keyAuthorization(found.Token)
 			digest := sha256.Sum256([]byte(ka))
 			txtVal := base64.RawURLEncoding.EncodeToString(digest[:])
-			recName := "_acme-challenge." + strings.TrimPrefix(auth.Identifier.Value, "*.")
+			cleanDom := strings.TrimPrefix(auth.Identifier.Value, "*.")
+			recName := "_acme-challenge." + cleanDom
+			zone := cleanDom
+			shortHost := "_acme-challenge"
+			parts := strings.Split(cleanDom, ".")
+			if len(parts) >= 3 {
+				zone = strings.Join(parts[len(parts)-2:], ".")
+				sub := strings.Join(parts[:len(parts)-2], ".")
+				shortHost = "_acme-challenge." + sub
+			}
 			sess.Records = append(sess.Records, DNS01RecordInstruction{
-				Domain:   auth.Identifier.Value,
-				Record:   recName,
-				Type:     "TXT",
-				TXTValue: txtVal,
-				AuthURL:  authURL,
-				ChallURL: found.URL,
+				Domain:    auth.Identifier.Value,
+				Record:    recName,
+				ShortHost: shortHost,
+				Zone:      zone,
+				Type:      "TXT",
+				TXTValue:  txtVal,
+				AuthURL:   authURL,
+				ChallURL:  found.URL,
 			})
 		}
 
@@ -695,13 +708,17 @@ func solveAutomatedChallenges(client *ACMEClient, authURLs []string, req IssueRe
 		challType = "http-01"
 	}
 
-	// Optional automatic pause/resume of KerioMailServer service if port 80/443 is occupied by Kerio
-	if req.StopKerioTemp {
-		log("warning", "Временная остановка службы KerioMailServer для освобождения порта проверки...")
+	// Automatically pause/resume local KerioMailServer service if explicitly requested OR if KerioMailServer is currently RUNNING on this Windows server
+	kerioLocal := InspectKerioInstallation(req.KerioInstall.KerioPath)
+	kerioRunningLocally := strings.EqualFold(kerioLocal.ServiceStatus, "RUNNING")
+	if req.StopKerioTemp || kerioRunningLocally {
+		log("warning", "Обнаружена активная служба KerioMailServer (или включена опция остановки) — временная пауза на 5–10 сек для освобождения портов 80/443...")
 		if err := PlatformControlKerioService("stop"); err != nil {
-			log("warning", fmt.Sprintf("Не удалось остановить KerioMailServer (%v) — продолжаем попытку привязки порта...", err))
+			if kerioRunningLocally {
+				log("warning", fmt.Sprintf("Не удалось остановить KerioMailServer (%v) — убедитесь, что программа запущена от Администратора!", err))
+			}
 		} else {
-			log("info", "Служба KerioMailServer временно остановлена (будет автоматически запущена сразу после проверки).")
+			log("info", "Служба KerioMailServer временно приостановлена (автоматически запустится сразу после проверки Let's Encrypt).")
 			defer func() {
 				log("info", "Обратный запуск службы KerioMailServer...")
 				if rerr := PlatformControlKerioService("start"); rerr != nil {
@@ -767,11 +784,13 @@ func solveAutomatedChallenges(client *ACMEClient, authURLs []string, req IssueRe
 			httpMu.RLock()
 			val, ok := httpTokens[tok]
 			httpMu.RUnlock()
-			proto := "HTTP"
-			if r.TLS != nil {
-				proto = "HTTPS"
+			if !strings.HasPrefix(tok, "__selfcheck_") {
+				proto := "HTTP"
+				if r.TLS != nil {
+					proto = "HTTPS"
+				}
+				log("success", fmt.Sprintf("Получен входящий %s запрос проверки от Let's Encrypt (%s) для токена %s...", proto, r.RemoteAddr, tok[:minInt(len(tok), 12)]))
 			}
-			log("success", fmt.Sprintf("Получен входящий %s запрос проверки от Let's Encrypt (%s) для токена %s...", proto, r.RemoteAddr, tok[:minInt(len(tok), 12)]))
 			if !ok {
 				http.NotFound(w, r)
 				return
@@ -787,6 +806,30 @@ func solveAutomatedChallenges(client *ACMEClient, authURLs []string, req IssueRe
 			httpSrv = &http.Server{Handler: mux}
 			go func() { _ = httpSrv.Serve(ln80) }()
 			log("success", fmt.Sprintf("Встроенный HTTP-01 сервер проверки запущен на %s", addr80))
+
+			// Verify on Windows that another process with SO_REUSEADDR / specific NIC IP (e.g. mailserver.exe or IIS) is not hijacking port 80
+			probeTok := fmt.Sprintf("__selfcheck_%d", time.Now().UnixNano())
+			probeVal := "kerio-selfcheck-ok"
+			httpMu.Lock()
+			httpTokens[probeTok] = probeVal
+			httpMu.Unlock()
+			hc := &http.Client{Timeout: 800 * time.Millisecond}
+			for _, nic := range ListLocalIPs() {
+				if nic.IsIPv6 {
+					continue
+				}
+				resp, perr := hc.Get(fmt.Sprintf("http://%s:%d/.well-known/acme-challenge/%s", nic.IP, port, probeTok))
+				if perr == nil {
+					bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+					_ = resp.Body.Close()
+					if string(bodyBytes) != probeVal {
+						log("warning", fmt.Sprintf("Внимание: на локальном интерфейсе %s:%d другой процесс перехватывает HTTP-запросы (вернул %q вместо нашего токена)! Остановите службу веб/почтового сервера или используйте метод DNS-01.", nic.IP, port, string(bodyBytes)))
+					}
+				}
+			}
+			httpMu.Lock()
+			delete(httpTokens, probeTok)
+			httpMu.Unlock()
 		}
 
 		// ALSO start an HTTPS listener on port 443 serving /.well-known/acme-challenge/!
@@ -1004,7 +1047,20 @@ func pollAuthorizationValid(client *ACMEClient, authURL, label string, log LogFu
 					break
 				}
 			}
-			return fmt.Errorf("не удалось подтвердить %s: %s (проверьте, что DNS-запись указывает на введённый IP и порт 80 открыт из интернета)", label, detail)
+			if strings.Contains(detail, `(got "")`) {
+				var myIPs []string
+				for _, nic := range ListLocalIPs() {
+					if !nic.IsIPv6 {
+						myIPs = append(myIPs, nic.IP)
+					}
+				}
+				localIPHint := strings.Join(myIPs, ", ")
+				if localIPHint == "" {
+					localIPHint = "этот ПК"
+				}
+				return fmt.Errorf("не удалось подтвердить %s: %s — ПУСТОЙ ОТВЕТ (got \"\") ОЗНАЧАЕТ, ЧТО ЗАПРОС ПЕРЕХВАТИЛ РАБОТАЮЩИЙ KERIO CONNECT! Ваш маршрутизатор пробрасывает порт 80 НЕ на этот компьютер (%s), а на сервер/ВМ с запущенным Kerio Connect (либо на этом сервере не остановлен KerioMailServer). РЕШЕНИЕ: 1) Нажмите ниже «Выпустить через DNS-01 (без портов и роутера)» прямо с этого ПК, ИЛИ 2) Запустите KerioCertManager.exe от Администратора прямо на самом Windows-сервере с Kerio Connect!", label, detail, localIPHint)
+			}
+			return fmt.Errorf("не удалось подтвердить %s: %s (проверьте проброс порта 80/443 на роутере до этого ПК или выберите метод «DNS-01» без открытия портов)", label, detail)
 		}
 	}
 	return fmt.Errorf("превышено время ожидания проверки %s", label)
