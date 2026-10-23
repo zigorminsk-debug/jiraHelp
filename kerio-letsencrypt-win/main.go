@@ -269,6 +269,69 @@ func buildRouter() http.Handler {
 		})
 	})
 
+	// Parallel DNS probe for common mail subdomains (webmail, autodiscover, smtp, imap, pop3, mail)
+	mux.HandleFunc("/api/discover-subdomains", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Domain    string `json:"domain"`
+			IPAddress string `json:"ipAddress"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		ascii, _, err := NormalizeDomain(body.Domain)
+		if err != nil || ascii == "" {
+			writeErr(w, 400, fmt.Errorf("введите корректное основное доменное имя"))
+			return
+		}
+		parts := strings.Split(ascii, ".")
+		baseDom := ascii
+		if len(parts) >= 3 {
+			first := parts[0]
+			if first == "mail" || first == "mx" || first == "smtp" || first == "imap" || first == "pop" || first == "pop3" || first == "webmail" {
+				baseDom = strings.Join(parts[1:], ".")
+			}
+		}
+		parsedInputIP, _, _, _ := ClassifyIP(body.IPAddress)
+		prefixes := []string{"webmail", "autodiscover", "smtp", "imap", "pop3", "mail"}
+
+		type probeItem struct {
+			Prefix  string   `json:"prefix"`
+			Domain  string   `json:"domain"`
+			Exists  bool     `json:"exists"`
+			Matches bool     `json:"matches"`
+			IPs     []string `json:"ips"`
+		}
+		results := make([]probeItem, len(prefixes))
+		var wg sync.WaitGroup
+		for i, pfx := range prefixes {
+			wg.Add(1)
+			go func(idx int, p string) {
+				defer wg.Done()
+				cand := p + "." + baseDom
+				ips, lerr := LookupDomainIPsMultiResolver(cand)
+				item := probeItem{Prefix: p, Domain: cand}
+				if lerr == nil && len(ips) > 0 {
+					item.Exists = true
+					item.IPs = ips
+					for _, rip := range ips {
+						if parsedInputIP == nil || (net.ParseIP(rip) != nil && net.ParseIP(rip).Equal(parsedInputIP)) {
+							item.Matches = true
+						}
+					}
+				}
+				results[idx] = item
+			}(i, pfx)
+		}
+		wg.Wait()
+		writeJSON(w, 200, map[string]any{
+			"ok":         true,
+			"primary":    ascii,
+			"baseDomain": baseDom,
+			"results":    results,
+		})
+	})
+
 	mux.HandleFunc("/api/check-dns-txt", func(w http.ResponseWriter, r *http.Request) {
 		fqdn := strings.TrimSpace(r.URL.Query().Get("record"))
 		expected := strings.TrimSpace(r.URL.Query().Get("expected"))
@@ -680,20 +743,21 @@ func main() {
 
 	ln, err := net.Listen("tcp", bind)
 	if err != nil && *listenAddr == "" {
-		// Check if another instance of KerioCertManager is already listening on 127.0.0.1:17840!
+		// Replace any older running background instance cleanly so updated .exe always runs latest version!
 		localClient := &http.Client{
 			Timeout:   900 * time.Millisecond,
 			Transport: &http.Transport{Proxy: nil},
 		}
-		resp, herr := localClient.Get("http://127.0.0.1:17840/api/ping")
-		if herr == nil {
-			resp.Body.Close()
-			if !*serverOnly {
-				LaunchDesktopGUI("http://127.0.0.1:17840/")
+		if reqOff, rerr := http.NewRequest("POST", "http://127.0.0.1:17840/api/app-shutdown", nil); rerr == nil {
+			if resp, herr := localClient.Do(reqOff); herr == nil {
+				resp.Body.Close()
+				time.Sleep(450 * time.Millisecond)
 			}
-			return
 		}
-		ln, err = net.Listen("tcp", "127.0.0.1:0")
+		ln, err = net.Listen("tcp", "127.0.0.1:17840")
+		if err != nil {
+			ln, err = net.Listen("tcp", "127.0.0.1:0")
+		}
 	}
 	if err != nil {
 		ShowWindowsMessageBox("Kerio SSL Manager — Ошибка запуска", err.Error())

@@ -415,6 +415,30 @@ func ExecuteCertificateIssuance(req IssueRequest, log LogFunc) (*IssuedCertRecor
 		return nil, nil, fmt.Errorf("укажите хотя бы корректное доменное имя (например, mail.company.by) или IP-адрес")
 	}
 
+	// Smart pre-order DNS filter for real Let's Encrypt orders: skip non-existent (NXDOMAIN) extra SAN aliases automatically!
+	if req.Mode != "selfsigned" && strings.TrimSpace(req.CustomDirectoryURL) == "" && len(asciiDomains) > 0 && req.ChallengeType != "dns-01" {
+		var verifiedDomains []string
+		for idx, dom := range asciiDomains {
+			resolved, lerr := LookupDomainIPsMultiResolver(dom)
+			if lerr != nil || len(resolved) == 0 {
+				if idx == 0 {
+					return nil, nil, fmt.Errorf("основной домен %s не найден в публичном DNS (нет A/AAAA записи). Создайте A-запись %s → %s у регистратора домена и подождите 2–5 минут", dom, dom, req.IPAddress)
+				}
+				log("warning", fmt.Sprintf("⚠ Дополнительный поддомен %s пропущен: в публичном DNS для него нет A/AAAA записи (NXDOMAIN). Выпускаем сертификат без него!", dom))
+				continue
+			}
+			log("info", fmt.Sprintf("Проверка DNS %s → [%s] — запись найдена", dom, strings.Join(resolved, ", ")))
+			verifiedDomains = append(verifiedDomains, dom)
+		}
+		asciiDomains = verifiedDomains
+		req.Domain = asciiDomains[0]
+		if len(asciiDomains) > 1 {
+			req.ExtraDomains = asciiDomains[1:]
+		} else {
+			req.ExtraDomains = nil
+		}
+	}
+
 	// Determine SAN IPs & ACME profile
 	var csrIPs []net.IP
 	useShortlived := false
@@ -722,6 +746,8 @@ func solveAutomatedChallenges(client *ACMEClient, authURLs []string, req IssueRe
 		if port <= 0 {
 			port = 80
 		}
+		closeFW := PlatformOpenTempFirewallPort(port)
+		defer closeFW()
 		addr := net.JoinHostPort(bindIP, fmt.Sprintf("%d", port))
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {
@@ -750,6 +776,8 @@ func solveAutomatedChallenges(client *ACMEClient, authURLs []string, req IssueRe
 		if port <= 0 {
 			port = 443
 		}
+		closeFW := PlatformOpenTempFirewallPort(port)
+		defer closeFW()
 		addr := net.JoinHostPort(bindIP, fmt.Sprintf("%d", port))
 		tlsCfg := &tls.Config{
 			NextProtos: []string{"acme-tls/1"},

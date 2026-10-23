@@ -674,7 +674,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows GUI + Kerio Connect</span>
+        <span class="brand-badge">Windows GUI v1.2 • Kerio Connect</span>
       </div>
       <div class="brand-sub">Генерация приватного ключа (.key) и выпуск SSL-сертификатов (.crt / .pfx) по IP и домену для Kerio MailServer</div>
     </div>
@@ -746,7 +746,7 @@
             </label>
             <input type="text" id="domainInput" placeholder="mail.company.by" autocomplete="off" spellcheck="false">
             <div class="chips-bar" id="sanQuickChips">
-              <span style="font-size:11.5px;color:var(--text-muted);align-self:center;">Быстро добавить поддомены Kerio:</span>
+              <button type="button" class="chip" id="autoDiscoverDnsBtn" style="border-color:var(--accent);color:var(--accent);">✨ Найти существующие поддомены в DNS</button>
               <button type="button" class="chip" data-prefix="webmail">+ webmail</button>
               <button type="button" class="chip" data-prefix="autodiscover">+ autodiscover</button>
               <button type="button" class="chip" data-prefix="smtp">+ smtp</button>
@@ -757,9 +757,10 @@
 
           <div class="field">
             <label class="field-label" for="extraDomainsInput">
-              <span>Дополнительные домены (SAN — через запятую, по желанию)</span>
+              <span>Дополнительные домены (SAN — только те, для которых есть A-запись в DNS)</span>
+              <span class="label-hint" style="cursor:pointer;color:var(--danger);" onclick="clearExtraDomains()">✕ Очистить</span>
             </label>
-            <input type="text" id="extraDomainsInput" placeholder="webmail.company.by, autodiscover.company.by" autocomplete="off" spellcheck="false">
+            <input type="text" id="extraDomainsInput" placeholder="Оставьте пустым, если в DNS создан только основной домен (например, mail.csl.by)" autocomplete="off" spellcheck="false">
           </div>
 
           <div class="field-row">
@@ -1312,16 +1313,20 @@
     document.getElementById('kerioApiBlock').style.display = isApi ? 'block' : 'none';
   });
 
-  // Quick Kerio subdomain SAN chips (+webmail, +autodiscover, +smtp, +imap, +pop3)
-  document.querySelectorAll('#sanQuickChips .chip').forEach(chip => {
+  function clearExtraDomains() {
+    document.getElementById('extraDomainsInput').value = '';
+    document.querySelectorAll('#sanQuickChips .chip[data-prefix]').forEach(c => c.classList.remove('active-san'));
+  }
+
+  // Toggleable Kerio subdomain SAN chips (+webmail, +autodiscover, +smtp, +imap, +pop3)
+  document.querySelectorAll('#sanQuickChips .chip[data-prefix]').forEach(chip => {
     chip.addEventListener('click', () => {
       const dom = document.getElementById('domainInput').value.trim().replace(/^https?:\/\//i, '').split('/')[0];
       if (!dom || !dom.includes('.')) {
-        showToast('Сначала введите основное доменное имя (например, mail.company.by)', true);
+        showToast('Сначала введите основное доменное имя (например, mail.csl.by)', true);
         document.getElementById('domainInput').focus();
         return;
       }
-      // Extract root domain: if domain starts with mail., smtp., mx., webmail., strip first label so autodiscover.company.by is accurate!
       const parts = dom.split('.');
       let baseDom = dom;
       if (parts.length >= 3 && ['mail', 'mx', 'smtp', 'imap', 'pop', 'pop3', 'webmail'].includes(parts[0].toLowerCase())) {
@@ -1333,13 +1338,66 @@
         return;
       }
       const extraEl = document.getElementById('extraDomainsInput');
-      const cur = extraEl.value.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
-      if (!cur.some(x => x.toLowerCase() === candidate.toLowerCase())) {
+      let cur = extraEl.value.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+      const existsIdx = cur.findIndex(x => x.toLowerCase() === candidate.toLowerCase());
+      if (existsIdx >= 0) {
+        cur.splice(existsIdx, 1);
+        chip.classList.remove('active-san');
+      } else {
         cur.push(candidate);
-        extraEl.value = cur.join(', ');
         chip.classList.add('active-san');
       }
+      extraEl.value = cur.join(', ');
     });
+  });
+
+  // Live DNS Subdomain Auto-Discovery button
+  document.getElementById('autoDiscoverDnsBtn').addEventListener('click', async () => {
+    const dom = document.getElementById('domainInput').value.trim();
+    const ip = document.getElementById('ipInput').value.trim();
+    if (!dom || !dom.includes('.')) {
+      showToast('Сначала введите основной домен (например, mail.csl.by)', true);
+      document.getElementById('domainInput').focus();
+      return;
+    }
+    const btn = document.getElementById('autoDiscoverDnsBtn');
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Поиск в DNS...';
+    try {
+      const r = await fetch('/api/discover-subdomains', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: dom, ipAddress: ip })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Ошибка DNS-проверки');
+      const foundExtras = [];
+      document.querySelectorAll('#sanQuickChips .chip[data-prefix]').forEach(c => c.classList.remove('active-san'));
+      (d.results || []).forEach(item => {
+        const chip = document.querySelector(`#sanQuickChips .chip[data-prefix="${item.prefix}"]`);
+        if (item.exists && item.domain.toLowerCase() !== d.primary.toLowerCase()) {
+          foundExtras.push(item.domain);
+          if (chip) {
+            chip.classList.add('active-san');
+            chip.textContent = `✓ ${item.prefix}`;
+          }
+        } else if (chip) {
+          chip.textContent = `${item.exists ? '✓' : '—'} ${item.prefix}`;
+        }
+      });
+      document.getElementById('extraDomainsInput').value = foundExtras.join(', ');
+      if (foundExtras.length > 0) {
+        showToast('Добавлены существующие в DNS поддомены: ' + foundExtras.join(', '));
+      } else {
+        showToast('В DNS найден только основной домен ' + d.primary + ' — лишние поддомены очищены, можно выпускать сертификат!');
+      }
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = orig;
+    }
   });
 
   // Live IP classifier hint
@@ -1487,8 +1545,9 @@
       if (dom.lookupError) {
         html += `<div class="alert alert-warn"><strong>Домен ${escapeHtml(dom.rawDomain)}${puny}:</strong> ${escapeHtml(dom.lookupError)}</div>`;
       } else {
-        const cls = dom.matchesInputIP ? 'alert-ok' : 'alert-warn';
-        const matchNote = dom.matchesInputIP
+        const isMatch = !!(dom.matchesInputIp || dom.matchesInputIP);
+        const cls = isMatch ? 'alert-ok' : 'alert-warn';
+        const matchNote = isMatch
           ? '✅ Полностью совпадает с указанным IP!'
           : '⚠ Отличается от введённого IP';
         html += `<div class="alert ${cls}">

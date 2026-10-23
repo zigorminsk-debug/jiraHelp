@@ -191,6 +191,25 @@ func PlatformQueryAutoRenewTask() bool {
 	return err == nil
 }
 
+func PlatformOpenTempFirewallPort(port int) func() {
+	ruleName := fmt.Sprintf("KerioCertManager_ACME_TCP_%d", port)
+	_, _ = runHiddenCmd("netsh", "advfirewall", "firewall", "delete", "rule", "name="+ruleName)
+	_, err := runHiddenCmd(
+		"netsh", "advfirewall", "firewall", "add", "rule",
+		"name="+ruleName,
+		"dir=in",
+		"action=allow",
+		"protocol=TCP",
+		fmt.Sprintf("localport=%d", port),
+	)
+	if err != nil {
+		return func() {}
+	}
+	return func() {
+		_, _ = runHiddenCmd("netsh", "advfirewall", "firewall", "delete", "rule", "name="+ruleName)
+	}
+}
+
 // LaunchDesktopGUI opens a frameless native-style Windows app window (Edge App Mode / Chrome App Mode) with automatic fallback to default browser.
 func LaunchDesktopGUI(appURL string) {
 	appBrowsers := []string{

@@ -65,4 +65,8 @@ func PlatformQueryAutoRenewTask() bool {
 	return false
 }
 
+func PlatformOpenTempFirewallPort(_ int) func() {
+	return func() {}
+}
+
 func LaunchDesktopGUI(_ string) {}
