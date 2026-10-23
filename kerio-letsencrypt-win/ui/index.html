@@ -674,7 +674,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v2.2 • Авто-IP + Почтовый Аудит + SSL</span>
+        <span class="brand-badge">Windows Native GUI v3.0 • SSL + Почтовый Аудит + Антиспам Delist Центр</span>
       </div>
       <div class="brand-sub">Генерация приватного ключа (.key) и выпуск SSL-сертификатов (.crt / .pfx) по IP и домену для Kerio MailServer</div>
     </div>
@@ -714,6 +714,9 @@
   </button>
   <button type="button" class="nav-tab" data-tab="mailcheck">
     📨 Проверка почты и Антиспам
+  </button>
+  <button type="button" class="nav-tab" data-tab="delist">
+    🚑 Выход из Блэклистов и Письма <span class="badge" id="delistNavBadge" style="display:none;background:#ef4444;color:#fff;margin-left:5px;">!</span>
   </button>
   <button type="button" class="nav-tab" data-tab="vault">
     📂 Выпущенные сертификаты и Автопродление
@@ -1364,8 +1367,11 @@
             </div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-outline" style="border-color:#f87171;color:#fca5a5;" onclick="openDelistTabFromAudit()">
+              🚑 Центр вывода из блэклистов и готовые письма (<span id="activeRblCountBadge">8 шаблонов</span>) →
+            </button>
             <a href="#remediationChecklistAnchor" class="btn btn-kerio" id="jumpToFixesBtn" style="display:none;text-decoration:none;">
-              📘 Сводный пошаговый план устранения (<span id="fixesCountNum">0</span>) ↓
+              📘 Сводный пошаговый план (<span id="fixesCountNum">0</span>) ↓
             </a>
           </div>
         </div>
@@ -1395,12 +1401,16 @@
         </div>
 
         <div class="card">
-          <div class="card-header">
+          <div class="card-header" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
             <div>
-              <div class="card-title">🚫 Репутация внешнего IP по 11 спам-базам (DNSBL / RBL)</div>
-              <div class="card-subtitle">Spamhaus ZEN, Barracuda, SpamCop, SORBS, UCEPROTECT и др.</div>
+              <div class="card-title">🚫 Репутация IP (16 RBL баз) + Репутация Домена (4 DBL базы)</div>
+              <div class="card-subtitle">Spamhaus ZEN/DBL, Barracuda, SpamCop, SORBS, Backscatterer, BlockList.de, SURBL, URIBL</div>
             </div>
+            <button type="button" class="btn btn-primary btn-sm" onclick="openDelistTabFromAudit()">
+              🚑 Готовые письма разблокировки →
+            </button>
           </div>
+          <div id="mailDomainRblMatrix" style="margin-bottom:10px;"></div>
           <div id="mailRblMatrix"></div>
         </div>
       </div>
@@ -1512,6 +1522,169 @@
 
         </div>
       </details>
+    </div>
+
+
+    <!-- 6. LIVE END-TO-END DIAGNOSTIC TEST EMAIL SENDER -->
+    <div class="card" style="border:1px solid rgba(16,185,129,0.4);">
+      <details>
+        <summary style="cursor:pointer;font-size:15.5px;font-weight:800;color:#6ee7b7;list-style:none;display:flex;align-items:center;justify-content:space-between;">
+          <span>✉️ Живая отправка проверочного письма через ваш Kerio SMTP (проверка авторизации, STARTTLS и подписи DKIM на реальном ящике)</span>
+          <span style="font-size:12px;color:var(--text-secondary);">Развернуть инструмент отправки ▾</span>
+        </summary>
+        <div style="margin-top:14px;">
+          <div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">
+            Отправьте реальное тестовое письмо со своего ящика Kerio Connect на свой <code>@gmail.com</code> / <code>@mail.ru</code> / <code>@yandex.by</code> (или на одноразовый адрес с сайта <strong>mail-tester.com</strong> для оценки <strong>10/10</strong>) и посмотрите полный живой протокол SMTP-сессии по миллисекундам!
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label"><span>SMTP сервер (внешний или VPN IP) *</span></label>
+              <input type="text" id="testSmtpHost" placeholder="10.146.100.14 или mail.leend.by">
+            </div>
+            <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div>
+                <label class="field-label"><span>Порт *</span></label>
+                <input type="number" id="testSmtpPort" value="465">
+              </div>
+              <div>
+                <label class="field-label"><span>Шифрование</span></label>
+                <select id="testSmtpSec" onchange="if(this.value==='ssl')document.getElementById('testSmtpPort').value=465; else if(this.value==='starttls')document.getElementById('testSmtpPort').value=587; else document.getElementById('testSmtpPort').value=25;">
+                  <option value="ssl" selected>SSL/TLS сразу (порт 465 — реком. для Kerio)</option>
+                  <option value="starttls">STARTTLS (порт 587 / 25)</option>
+                  <option value="plain">Без шифрования (порт 25)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label"><span>Логин ящика Kerio (email отправителя) *</span></label>
+              <input type="text" id="testSmtpUser" placeholder="admin@leend.by" oninput="if(!document.getElementById('testSmtpFrom').dataset.touched)document.getElementById('testSmtpFrom').value=this.value;">
+            </div>
+            <div class="field">
+              <label class="field-label"><span>Пароль от этого почтового ящика *</span></label>
+              <input type="password" id="testSmtpPass" placeholder="Пароль почтового ящика">
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label"><span>От кого (From) *</span></label>
+              <input type="text" id="testSmtpFrom" placeholder="admin@leend.by" oninput="this.dataset.touched='1'">
+            </div>
+            <div class="field">
+              <label class="field-label"><span>Кому отправить тестовое письмо (To) *</span></label>
+              <input type="text" id="testSmtpTo" placeholder="ваш_ящик@gmail.com или test-xxx@srv1.mail-tester.com">
+            </div>
+          </div>
+          <div class="actions-row" style="justify-content:flex-end;">
+            <button type="button" class="btn btn-primary" id="btnSendTestMail" onclick="sendLiveDiagnosticEmail()">
+              🚀 Отправить контрольное письмо и показать лог SMTP
+            </button>
+          </div>
+          <div id="testMailLogOut" style="display:none;margin-top:12px;padding:12px 14px;border-radius:8px;background:#0b1220;border:1px solid var(--border);font-family:Consolas,monospace;font-size:12.5px;line-height:1.55;"></div>
+        </div>
+      </details>
+    </div>
+
+  </section>
+
+  <!-- TAB 5: DEDICATED BLACKLIST REMOVAL & READY-TO-SEND APPEAL GENERATOR CENTER -->
+  <section id="tab-delist" class="tab-page">
+    <div class="card" style="border:2px solid rgba(239,68,68,0.55);">
+      <div class="card-header">
+        <div>
+          <div class="card-title" style="font-size:17.5px;">
+            <span class="step-num">🚑</span>
+            Центр вывода сервера из чёрных списков (RBL / Спам-фильтров) + Готовые письма и заявки
+          </div>
+          <div class="card-subtitle">
+            Работает как при попадании в <strong>публичные RBL-базы (Spamhaus, Barracuda, SpamCop, SORBS)</strong>, так и при попадании в <strong>закрытые внутренние блэклисты Microsoft Outlook/Office 365 (S3150), Mail.ru, Gmail и Яндекс</strong>! Все письма (на русском и английском), ссылки на порталы удаления и кнопки <code>mailto:</code> заполняются автоматически под ваш сервер.
+          </div>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label"><span>Ваш почтовый домен *</span></label>
+          <input type="text" id="delistDomainInput" placeholder="leend.by">
+        </div>
+        <div class="field">
+          <label class="field-label"><span>Имя SMTP-сервера (HELO / PTR) *</span></label>
+          <input type="text" id="delistHostInput" placeholder="mail.leend.by">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label"><span>Внешний белый IP почтового сервера *</span></label>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;">
+            <input type="text" id="delistIpInput" placeholder="178.124.204.98 (определяется автоматически)">
+            <button type="button" class="btn btn-outline" onclick="autoFillDelistParams()">🔄 Обновить и сгенерировать все письма</button>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label"><span>Вставьте текст ошибки отлупа (550 / 554) из лога Kerio или письма возврата (необязательно)</span></label>
+          <input type="text" id="delistBounceInput" placeholder="Например: 550 5.7.1 Unfortunately, messages from [x.x.x.x] weren't sent (S3150) или 550 spam message rejected">
+        </div>
+      </div>
+
+      <div class="actions-row" style="justify-content:space-between;">
+        <div style="font-size:12.5px;color:var(--text-secondary);">
+          💡 Вставьте ошибку <code>550 / 554</code> из лога Kerio Connect (<em>Логи → Mail / Operations</em>) и нажмите синюю кнопку — программа сама определит чья это блокировка и впишет код ошибки прямо в готовое обращение!
+        </div>
+        <button type="button" class="btn btn-primary btn-lg" id="btnDecodeBounce" onclick="runBounceDecoderAndBuildKits()">
+          🔎 Расшифровать ошибку и сформировать готовые письма разблокировки
+        </button>
+      </div>
+
+      <div id="decodedBounceHighlightBox" style="display:none;margin-top:16px;"></div>
+    </div>
+
+    <!-- GOLDEN RULE #1 BEFORE DELISTING: FIREWALL PORT 25 PROTECTION AGAINST INFECTED LAN PCS! -->
+    <div class="card" style="border:1.5px solid rgba(245,158,11,0.6);">
+      <div class="card-header">
+        <div>
+          <div class="card-title" style="color:#fbbf24;">
+            🛡️ Золотое правило №1 ПЕРЕД снятием блокировки (почему 90% офисов попадают в Spamhaus CBL/XBL снова через 2 часа!)
+          </div>
+          <div class="card-subtitle">
+            Если все компьютеры офиса выходят в интернет через один и тот же белый IP вместе с сервером Kerio Connect — достаточно <strong>одному ноутбуку сотрудника поймать троян</strong>, и вирус начинает слать спам наружу по порту 25, мгновенно загоняя белый IP всего предприятия в бан! <strong>На вашем роутере исходящий TCP порт 25 должен быть разрешён ТОЛЬКО для IP сервера Kerio!</strong>
+          </div>
+        </div>
+      </div>
+      <div id="delistPreChecksArea" style="margin-bottom:12px;"></div>
+      <div style="background:#0b1220;padding:12px 14px;border-radius:8px;border:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:8px;">
+          <span style="font-size:12.5px;font-weight:700;color:#6ee7b7;">Готовое 2-строчное правило защиты для терминала MikroTik RouterOS (подставьте внутренний IP вашего Kerio вместо 10.146.100.14):</span>
+          <button type="button" class="btn btn-primary btn-sm" onclick="copyTextSafe(document.getElementById('mikrotikRuleText').value, 'Правило MikroTik скопировано!')">📋 Копировать команды MikroTik</button>
+        </div>
+        <textarea id="mikrotikRuleText" readonly rows="3" style="width:100%;font-family:Consolas,monospace;font-size:12px;color:#fde68a;background:#111827;border:1px solid var(--border);border-radius:6px;padding:8px;">/ip firewall filter
+add chain=forward protocol=tcp dst-port=25 src-address=10.146.100.14 action=accept comment="Allow ONLY Kerio Mail Server outbound SMTP 25"
+add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log=yes log-prefix="INFECTED-PC-SMTP25:" comment="Block ALL office PCs from sending spam on port 25"</textarea>
+      </div>
+    </div>
+
+    <!-- ACTIVE RBL / DBL DETECTIONS (SHOWN WHEN ANY PUBLIC LIST TRIGGERED!) -->
+    <div class="card" id="activeDelistAlertCard" style="display:none;border:2px solid #ef4444;background:rgba(127,29,29,0.14);">
+      <div class="card-header">
+        <div>
+          <div class="card-title" style="color:#fca5a5;font-size:17px;">
+            🚨 ОБНАРУЖЕНЫ АКТИВНЫЕ БЛОКИРОВКИ В СПАМ-БАЗАХ — СРОЧНО ПОДАЙТЕ ЗАЯВКИ НИЖЕ!
+          </div>
+          <div class="card-subtitle">Для каждого найденного чёрного списка подготовлена прямая ссылка на форму удаления вашего IP и готовый текст обращения:</div>
+        </div>
+      </div>
+      <div id="activeDelistCardsContainer"></div>
+    </div>
+
+    <!-- ALL 8 READY-TO-SEND DELIST KITS FOR MICROSOFT, MAIL.RU, GMAIL, YANDEX, SPAMHAUS, BARRACUDA, SORBS, ISP -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">✉️ Готовые пакеты разблокировки и готовые тексты писем во все почтовые системы и спам-базы (8 сервисов)</div>
+          <div class="card-subtitle">Нажмите на нужную почтовую службу — внутри уже заполнены прямая ссылка на форму разблокировки, email поддержки, тема и полный текст письма под ваш домен и IP!</div>
+        </div>
+      </div>
+      <div id="allMajorDelistKitsContainer"></div>
     </div>
 
   </section>
@@ -2774,6 +2947,43 @@
       `;
     }).join('');
 
+    // 4a. Domain DBL Matrix
+    if (rep.domainBlacklists && rep.domainBlacklists.length > 0) {
+      document.getElementById('mailDomainRblMatrix').innerHTML =
+        `<div style="font-size:12px;font-weight:800;color:#93c5fd;margin-bottom:6px;text-transform:uppercase;">Доменные спам-базы (@${escapeHtml(rep.mailDomain)}):</div>` +
+        rep.domainBlacklists.map(b => `
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-radius:8px;background:var(--bg-elevated);border:1px solid ${b.listed ? '#ef4444' : 'var(--border)'};margin-bottom:6px;font-size:12.8px;">
+            <div><strong>${escapeHtml(b.provider)}</strong> <span style="font-size:11.5px;color:var(--text-secondary);">(${escapeHtml(b.zone)})</span></div>
+            ${b.listed
+              ? `<button type="button" class="btn btn-primary btn-sm" style="background:#ef4444;" onclick="openDelistTabFromAudit()">🔴 ДОМЕН В БАНЕ (${escapeHtml(b.returnCode)}) → Разблокировать</button>`
+              : `<span style="color:#10b981;font-weight:700;">✅ Чисто</span>`}
+          </div>
+        `).join('') +
+        `<div style="font-size:12px;font-weight:800;color:#93c5fd;margin:10px 0 6px;text-transform:uppercase;">Чёрные списки IP-адресов (${escapeHtml(rep.serverIp || '—')}):</div>`;
+    }
+
+    // Update Delist Center data & nav badge from live audit!
+    if (rep.delistCenter) {
+      renderDelistCenterData(rep.delistCenter, rep.mailDomain, rep.mailHost, rep.serverIp);
+      const activeCnt = (rep.delistCenter.activeListings || []).length;
+      const navBadge = document.getElementById('delistNavBadge');
+      const btnBadge = document.getElementById('activeRblCountBadge');
+      if (activeCnt > 0) {
+        navBadge.style.display = 'inline-block';
+        navBadge.textContent = activeCnt;
+        btnBadge.textContent = `🚨 НАЙДЕНО ${activeCnt} БАНОВ!`;
+      } else {
+        navBadge.style.display = 'none';
+        btnBadge.textContent = '8 готовых шаблонов';
+      }
+    }
+
+    // Pre-fill Live Test Email Sender host from audit
+    const tHostInp = document.getElementById('testSmtpHost');
+    if (tHostInp && !tHostInp.value.trim()) {
+      tHostInp.value = document.getElementById('auditTargetIpInput').value.trim() || rep.mailHost;
+    }
+
     // 4. DNSBL Matrix
     if (!rep.blacklists || rep.blacklists.length === 0) {
       document.getElementById('mailRblMatrix').innerHTML = '<div class="hint-text">Сначала настройте A-запись почтового хоста на внешний публичный IPv4 — после этого автоматически проверятся все 11 мировых спам-баз (Spamhaus, Barracuda, SpamCop, SORBS и др.).</div>';
@@ -2854,6 +3064,223 @@
     a.download = `mail-audit-and-guide-${rep.mailDomain}.html`;
     a.click();
   }
+
+  // =========================================================================
+  // DELIST CENTER UI, BOUNCE DECODER & LIVE DIAGNOSTIC TEST EMAIL SENDER (v3.0)
+  // =========================================================================
+  function renderDelistCardItem(item, keyPrefix, forceOpen) {
+    const stepsHtml = (item.steps || []).map((st, idx) => `
+      <div style="display:flex;gap:9px;align-items:flex-start;margin-bottom:6px;font-size:13px;line-height:1.5;">
+        <span style="min-width:22px;height:22px;border-radius:6px;background:rgba(59,130,246,0.2);color:#93c5fd;font-size:11.5px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;">${idx + 1}</span>
+        <div>${escapeHtml(st)}</div>
+      </div>
+    `).join('');
+
+    const subjId = `${keyPrefix}_subj`;
+    const bodyId = `${keyPrefix}_body`;
+    const borderCol = item.isListedNow ? '#ef4444' : 'var(--border)';
+
+    return `
+      <details ${forceOpen ? 'open' : ''} style="background:var(--bg-elevated);border:1.5px solid ${borderCol};border-radius:12px;padding:14px 16px;margin-bottom:12px;">
+        <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:14.8px;font-weight:800;color:${item.isListedNow ? '#fca5a5' : 'var(--text-primary)'};">
+              ${item.isListedNow ? '🔴 АКТИВНЫЙ БАН: ' : '✉️ '}${escapeHtml(item.provider)}
+            </div>
+            <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">${escapeHtml(item.targetType)} ${item.returnCode ? '• Код: ' + escapeHtml(item.returnCode) : ''}</div>
+          </div>
+          <span class="btn btn-outline btn-sm">Открыть инструкцию и готовое письмо ▾</span>
+        </summary>
+
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+          ${item.importantNote ? `
+            <div style="background:rgba(245,158,11,0.12);border-left:3px solid #f59e0b;padding:10px 12px;border-radius:6px;font-size:13px;margin-bottom:12px;line-height:1.5;">
+              <strong>💡 Важный нюанс:</strong> ${escapeHtml(item.importantNote)}
+            </div>` : ''}
+
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+            ${item.portalUrl ? `<a href="${escapeHtml(item.portalUrl)}" target="_blank" class="btn btn-primary">🌐 Открыть официальный портал разблокировки ↗</a>` : ''}
+            ${item.mailtoLink ? `<a href="${escapeHtml(item.mailtoLink)}" class="btn btn-kerio" style="text-decoration:none;">📧 Открыть готовое письмо в почтовой программе (${escapeHtml(item.supportEmail)})</a>` : ''}
+          </div>
+
+          <div style="font-size:12px;font-weight:800;text-transform:uppercase;color:#60a5fa;margin-bottom:8px;">Пошаговый порядок действий:</div>
+          ${stepsHtml}
+
+          <div style="margin-top:12px;background:#0b1220;padding:12px;border-radius:8px;border:1px solid rgba(251,191,36,0.35);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:12px;font-weight:700;color:#cbd5e1;">Тема письма / заголовок тикета (Subject):</span>
+              <button type="button" class="btn btn-outline btn-sm" onclick="copyTextSafe(document.getElementById('${subjId}').value, 'Тема письма скопирована!')">📋 Копировать тему</button>
+            </div>
+            <input type="text" readonly id="${subjId}" value="${escapeHtml(item.subjectLine || '')}" onclick="this.select()" style="font-family:Consolas,monospace;font-size:12.5px;color:#fde68a;background:#111827;margin-bottom:10px;">
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:12px;font-weight:700;color:#6ee7b7;">Готовый текст обращения (уже заполнен под ваш сервер и IP — можно редактировать):</span>
+              <button type="button" class="btn btn-primary btn-sm" onclick="copyTextSafe(document.getElementById('${bodyId}').value, 'Полный текст письма скопирован в буфер обмена!')">📋 Скопировать весь текст письма</button>
+            </div>
+            <textarea id="${bodyId}" rows="9" style="width:100%;font-family:Consolas,monospace;font-size:12.5px;line-height:1.45;color:#f8fafc;background:#111827;border:1px solid var(--border);border-radius:6px;padding:10px;">${escapeHtml(item.letterBody || '')}</textarea>
+          </div>
+        </div>
+      </details>
+    `;
+  }
+
+  function renderDelistCenterData(dc, mailDomain, mailHost, serverIp) {
+    if (mailDomain) document.getElementById('delistDomainInput').value = mailDomain;
+    if (mailHost) document.getElementById('delistHostInput').value = mailHost;
+    if (serverIp) document.getElementById('delistIpInput').value = serverIp;
+
+    if (dc.mikrotikPort25Rule) {
+      document.getElementById('mikrotikRuleText').value = dc.mikrotikPort25Rule;
+    }
+
+    if (dc.preChecks && dc.preChecks.length > 0) {
+      document.getElementById('delistPreChecksArea').innerHTML =
+        `<div style="font-weight:700;margin-bottom:8px;color:${dc.readyForDelist ? '#6ee7b7' : '#fcd34d'};">${escapeHtml(dc.readinessSummary)}</div>` +
+        dc.preChecks.map(pc => `
+          <div style="padding:8px 11px;border-radius:8px;background:var(--bg-elevated);border:1px solid ${pc.passed ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.5)'};margin-bottom:6px;font-size:13px;">
+            <div><strong>${pc.passed ? '✅' : '❌'} ${escapeHtml(pc.label)}</strong></div>
+            <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">${escapeHtml(pc.detail)}</div>
+          </div>
+        `).join('');
+    }
+
+    const activeCard = document.getElementById('activeDelistAlertCard');
+    const activeCont = document.getElementById('activeDelistCardsContainer');
+    if (dc.activeListings && dc.activeListings.length > 0) {
+      activeCard.style.display = 'block';
+      activeCont.innerHTML = dc.activeListings.map((item, i) => renderDelistCardItem(item, 'act_delist_' + i, true)).join('');
+    } else {
+      activeCard.style.display = 'none';
+    }
+
+    document.getElementById('allMajorDelistKitsContainer').innerHTML =
+      (dc.majorProviders || []).map((item, i) => renderDelistCardItem(item, 'maj_delist_' + i, i === 0)).join('');
+  }
+
+  function openDelistTabFromAudit() {
+    document.querySelector('.nav-tab[data-tab="delist"]').click();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function autoFillDelistParams() {
+    let dom = document.getElementById('delistDomainInput').value.trim() ||
+              document.getElementById('auditDomainInput').value.trim() ||
+              extractMailRootDomainHint(document.getElementById('domainInput').value.trim()).domain ||
+              'leend.by';
+    let host = document.getElementById('delistHostInput').value.trim() || ('mail.' + dom);
+    document.getElementById('delistDomainInput').value = dom;
+    document.getElementById('delistHostInput').value = host;
+    if (!document.getElementById('delistIpInput').value.trim()) {
+      try {
+        const r = await fetch('/api/detect-public-ip');
+        const d = await r.json();
+        if (d.ok && d.publicIp) document.getElementById('delistIpInput').value = d.publicIp;
+      } catch (_) {}
+    }
+    await runBounceDecoderAndBuildKits();
+  }
+
+  document.querySelector('.nav-tab[data-tab="delist"]').addEventListener('click', () => {
+    if (!document.getElementById('allMajorDelistKitsContainer').innerHTML.trim()) {
+      autoFillDelistParams();
+    }
+  });
+
+  async function runBounceDecoderAndBuildKits() {
+    const mailDomain = document.getElementById('delistDomainInput').value.trim() || 'leend.by';
+    const mailHost = document.getElementById('delistHostInput').value.trim() || ('mail.' + mailDomain);
+    const serverIp = document.getElementById('delistIpInput').value.trim();
+    const bounceText = document.getElementById('delistBounceInput').value.trim();
+
+    const btn = document.getElementById('btnDecodeBounce');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Генерация готовых писем и расшифровка...';
+    try {
+      // Refresh full kits via /api/mail-audit lightweight or /api/decode-bounce
+      const r = await fetch('/api/decode-bounce', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bounceText, mailDomain, mailHost, serverIp })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Ошибка генерации писем');
+
+      const box = document.getElementById('decodedBounceHighlightBox');
+      if (bounceText) {
+        box.style.display = 'block';
+        box.innerHTML = `
+          <div style="background:rgba(16,185,129,0.1);border:1.5px solid #10b981;border-radius:12px;padding:15px 18px;">
+            <div style="font-size:16px;font-weight:800;color:#6ee7b7;margin-bottom:6px;">${escapeHtml(d.result.detectedTitle)}</div>
+            <div style="font-size:13.5px;line-height:1.5;margin-bottom:12px;">${escapeHtml(d.result.explanation)}</div>
+            ${renderDelistCardItem(d.result.recommendedAction, 'decoded_top', true)}
+          </div>
+        `;
+      } else {
+        box.style.display = 'none';
+      }
+
+      // If full kits container is not rendered yet or domain changed, fetch complete audit kits too!
+      if (!lastMailAuditReport || lastMailAuditReport.mailDomain !== mailDomain) {
+        const ar = await fetch('/api/mail-audit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain: mailDomain, mailHost, publicIp: serverIp })
+        });
+        const ad = await ar.json();
+        if (ad.ok && ad.report && ad.report.delistCenter) {
+          lastMailAuditReport = ad.report;
+          renderDelistCenterData(ad.report.delistCenter, ad.report.mailDomain, ad.report.mailHost, ad.report.serverIp);
+        }
+      }
+      showToast('Готовые письма разблокировки сформированы под ' + mailDomain + '!');
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  }
+
+  async function sendLiveDiagnosticEmail() {
+    const smtpHost = document.getElementById('testSmtpHost').value.trim();
+    const smtpPort = parseInt(document.getElementById('testSmtpPort').value, 10) || 465;
+    const security = document.getElementById('testSmtpSec').value;
+    const username = document.getElementById('testSmtpUser').value.trim();
+    const password = document.getElementById('testSmtpPass').value;
+    const fromEmail = document.getElementById('testSmtpFrom').value.trim() || username;
+    const toEmail = document.getElementById('testSmtpTo').value.trim();
+
+    const out = document.getElementById('testMailLogOut');
+    const btn = document.getElementById('btnSendTestMail');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Отправка через SMTP...';
+    out.style.display = 'block';
+    out.innerHTML = '⏳ Выполняется подключение, STARTTLS/SSL, авторизация и отправка контрольного письма...';
+
+    try {
+      const r = await fetch('/api/mail-send-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ smtpHost, smtpPort, security, username, password, fromEmail, toEmail })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Ошибка отправки письма');
+      const res = d.result;
+      out.innerHTML =
+        `<div style="color:#10b981;font-weight:800;margin-bottom:6px;">✅ ПИСЬМО УСПЕШНО ОТПРАВЛЕНО ЗА ${res.durationMs} мс! (${escapeHtml(res.tlsInfo || 'без TLS')})</div>` +
+        (res.sessionLog || []).map(l => `<div style="color:#cbd5e1;">${escapeHtml(l)}</div>`).join('');
+      showToast('Тестовое письмо успешно отправлено на ' + toEmail + '!');
+    } catch (e) {
+      out.innerHTML = `<div style="color:#f87171;font-weight:800;">❌ Ошибка отправки: ${escapeHtml(e.message)}</div>`;
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  }
+
   initApp();
 </script>
 </body>

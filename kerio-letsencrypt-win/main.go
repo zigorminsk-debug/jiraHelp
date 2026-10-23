@@ -392,6 +392,46 @@ func buildRouter() http.Handler {
 		})
 	})
 
+	mux.HandleFunc("/api/decode-bounce", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, 405, fmt.Errorf("method not allowed"))
+			return
+		}
+		var req BounceDecodeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		out := DecodeSMTPBounceAndBuildLetter(req)
+		writeJSON(w, 200, map[string]any{
+			"ok":     true,
+			"result": out,
+		})
+	})
+
+	mux.HandleFunc("/api/mail-send-test", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, 405, fmt.Errorf("method not allowed"))
+			return
+		}
+		var req TestEmailRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		res, err := SendDiagnosticTestEmail(req)
+		if err != nil {
+			logHub.Emit("error", "Тестовая отправка SMTP: "+err.Error())
+			writeErr(w, 400, err)
+			return
+		}
+		logHub.Emit("success", fmt.Sprintf("Тестовое диагностическое письмо успешно отправлено на %s за %d мс!", req.ToEmail, res.DurationMs))
+		writeJSON(w, 200, map[string]any{
+			"ok":     true,
+			"result": res,
+		})
+	})
+
 	mux.HandleFunc("/api/mail-audit", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeErr(w, 405, fmt.Errorf("method not allowed"))

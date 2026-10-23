@@ -79,23 +79,25 @@ type RBLCheckEntry struct {
 }
 
 type MailAuditReport struct {
-	CheckedAt       string                 `json:"checkedAt"`
-	MailDomain      string                 `json:"mailDomain"`
-	MailHost        string                 `json:"mailHost"`
-	ServerIP        string                 `json:"serverIp"`
-	ServerIPSource  string                 `json:"serverIpSource,omitempty"`
-	CurrentWANIP    string                 `json:"currentWanIp,omitempty"`
-	ProbeTargetUsed string                 `json:"probeTargetUsed,omitempty"`
-	Score           int                    `json:"score"`
-	Grade           string                 `json:"grade"`
-	Verdict         string                 `json:"verdict"`
-	CriticalCount   int                    `json:"criticalCount"`
-	WarningCount    int                    `json:"warningCount"`
-	PassedCount     int                    `json:"passedCount"`
-	Checks          []MailCheckItem        `json:"checks"`
-	Ports           []PortProbeResult      `json:"ports"`
-	Blacklists      []RBLCheckEntry        `json:"blacklists"`
-	Remediations    []MailRemediationGuide `json:"remediations"`
+	CheckedAt        string                 `json:"checkedAt"`
+	MailDomain       string                 `json:"mailDomain"`
+	MailHost         string                 `json:"mailHost"`
+	ServerIP         string                 `json:"serverIp"`
+	ServerIPSource   string                 `json:"serverIpSource,omitempty"`
+	CurrentWANIP     string                 `json:"currentWanIp,omitempty"`
+	ProbeTargetUsed  string                 `json:"probeTargetUsed,omitempty"`
+	Score            int                    `json:"score"`
+	Grade            string                 `json:"grade"`
+	Verdict          string                 `json:"verdict"`
+	CriticalCount    int                    `json:"criticalCount"`
+	WarningCount     int                    `json:"warningCount"`
+	PassedCount      int                    `json:"passedCount"`
+	Checks           []MailCheckItem        `json:"checks"`
+	Ports            []PortProbeResult      `json:"ports"`
+	Blacklists       []RBLCheckEntry        `json:"blacklists"`
+	DomainBlacklists []RBLCheckEntry        `json:"domainBlacklists"`
+	DelistCenter     DelistCenterData       `json:"delistCenter"`
+	Remediations     []MailRemediationGuide `json:"remediations"`
 }
 
 func isGloballyRoutableIPv4(raw string) bool {
@@ -1138,7 +1140,7 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 	go func() {
 		defer wg.Done()
 		if parsed := net.ParseIP(serverIP); parsed != nil {
-			rbls = checkDNSBLLists(parsed)
+			rbls = checkExpandedDNSBLLists(parsed)
 		}
 	}()
 
@@ -2225,6 +2227,306 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 			Details:  append(autodiscoverIPs, autodiscoverSRVs...),
 		})
 	}
+
+	// =========================================================================
+	// EXTENDED DEEP SECURITY & DELIVERABILITY CHECKS (v3.0: CHECKS 10..15 + DELIST CENTER)
+	// =========================================================================
+	var (
+		domRBLs       []RBLCheckEntry
+		exposedAdmin  []string
+		roleAudit     smtpRoleAuditResult
+		legacyTLS465  bool
+		legacyTLS465V string
+		caaRecs       []string
+		caaBlocksLE   bool
+		mtaStsPolicy  string
+		bimiRecs      []string
+	)
+	var extraWG sync.WaitGroup
+	extraWG.Add(5)
+	go func() {
+		defer extraWG.Done()
+		domRBLs = checkDomainBlacklists(mailDomain)
+	}()
+	go func() {
+		defer extraWG.Done()
+		exposedAdmin = checkExposedAdminPorts(serverIP)
+	}()
+	go func() {
+		defer extraWG.Done()
+		if smtp25.Reachable {
+			roleAudit = inspectSMTPRolesAndCapabilities(net.JoinHostPort(probeTargetHost, "25"), mailDomain)
+		}
+	}()
+	go func() {
+		defer extraWG.Done()
+		if port465.Open {
+			legacyTLS465, legacyTLS465V = checkLegacyTLSAccepted(probeTargetHost, mailHost, 465)
+		} else if port443.Open {
+			legacyTLS465, legacyTLS465V = checkLegacyTLSAccepted(probeTargetHost, mailHost, 443)
+		}
+	}()
+	go func() {
+		defer extraWG.Done()
+		caaRecs, caaBlocksLE, mtaStsPolicy, bimiRecs = checkAdvancedDomainStandards(mailDomain)
+	}()
+	extraWG.Wait()
+
+	report.DomainBlacklists = domRBLs
+
+	// CHECK 10: SPF 10-DNS-LOOKUP LIMIT & DEPRECATED MECHANISMS (RFC 7208)
+	if len(spfRecords) == 1 {
+		spfLookups, usedPTR, incDetails := countSPFDNSLookups(mailDomain, spfRecords[0], 0, map[string]bool{mailDomain: true})
+		if spfLookups > 10 || usedPTR {
+			deduct(12)
+			addIssue(
+				MailCheckItem{
+					ID:       "spf_depth",
+					Category: "Глубокий аудит стандартов RFC",
+					Title:    fmt.Sprintf("Лимит вложенных DNS-запросов в SPF (%d из 10 макс. по RFC 7208)", spfLookups),
+					Status:   "error",
+					Summary:  fmt.Sprintf("Превышен лимит 10 DNS-запросов в SPF (%d запросов) или использован запрещённый механизм 'ptr' — Gmail и Outlook возвращают SPF PermError!", spfLookups),
+					Details:  incDetails,
+				},
+				MailRemediationGuide{
+					Severity:     "critical",
+					Category:     "Оптимизация SPF (RFC 7208 Limit <= 10)",
+					Title:        "Сократите количество include:/a/mx в SPF-записи до <= 10 DNS-запросов",
+					WhyItMatters: "По стандарту RFC 7208 принимающий почтовый сервер делает не более 10 рекурсивных DNS-запросов при проверке SPF. На 11-м запросе проверка обрывается со статусом PermError (как будто SPF сломан)!",
+					Steps: []string{
+						"Замените лишние доменные проверки на прямые IPv4-адреса вида ip4:" + ipDisplay + " (механизм ip4: стоит 0 DNS-запросов!).",
+						"Удалите из SPF неиспользуемые старые сервисы рассылок (include:...) и никогда не используйте устаревшее слово ptr.",
+					},
+					CopyItems: []CopySnippet{
+						{Label: "Компактная SPF-запись (всего 2 из 10 DNS-запросов!)", Value: recommendedSPF},
+					},
+				},
+			)
+		} else {
+			report.Checks = append(report.Checks, MailCheckItem{
+				ID:       "spf_depth",
+				Category: "Глубокий аудит стандартов RFC",
+				Title:    fmt.Sprintf("Рекурсивная глубина SPF (%d из 10 допустимых DNS-запросов)", spfLookups),
+				Status:   "ok",
+				Summary:  fmt.Sprintf("Отлично! SPF укладывается в жёсткий лимит RFC 7208 (%d из 10 запросов).", spfLookups),
+				Details:  incDetails,
+			})
+		}
+	}
+
+	// CHECK 11: DOMAIN BLACKLISTS (DBL / SURBL / URIBL / SEM)
+	var listedDom []RBLCheckEntry
+	for _, d := range domRBLs {
+		if d.Listed {
+			listedDom = append(listedDom, d)
+		}
+	}
+	if len(listedDom) > 0 {
+		deduct(20)
+		var dDet, dSteps []string
+		dSteps = append(dSteps, "Проверьте сайт и почтовые подписи на домене "+mailDomain+" на отсутствие взломанных страниц/редиректов.")
+		for _, ld := range listedDom {
+			dDet = append(dDet, fmt.Sprintf("🔴 Домен %s в чёрном списке %s (%s) — код %s", mailDomain, ld.Provider, ld.Zone, ld.ReturnCode))
+			dSteps = append(dSteps, fmt.Sprintf("Откройте портал разблокировки домена %s: %s (готовый текст обращения сформирован в Центре разблокировки ниже!).", ld.Provider, ld.DelistURL))
+		}
+		addIssue(
+			MailCheckItem{
+				ID:       "domain_rbl",
+				Category: "Репутация домена в спам-базах (DBL / URIBL / SURBL)",
+				Title:    fmt.Sprintf("Проверка самого домена @%s по %d доменным чёрным спискам", mailDomain, len(domRBLs)),
+				Status:   "error",
+				Summary:  fmt.Sprintf("ДОМЕН @%s НАЙДЕН В %d ДОМЕННЫХ СПАМ-БАЗАХ! Любое письмо со ссылкой или адресом @%s режется фильтрами!", mailDomain, len(listedDom), mailDomain),
+				Details:  dDet,
+			},
+			MailRemediationGuide{
+				Severity:     "critical",
+				Category:     "Разблокировка домена (Spamhaus DBL / SURBL / URIBL)",
+				Title:        fmt.Sprintf("Срочно подайте заявку на исключение домена %s через Центр разблокировки ниже", mailDomain),
+				WhyItMatters: "Даже при кристально чистом IP попадание самого имени домена в Spamhaus DBL / SURBL / URIBL блокирует все письма компании.",
+				Steps:        dSteps,
+			},
+		)
+	} else {
+		report.Checks = append(report.Checks, MailCheckItem{
+			ID:       "domain_rbl",
+			Category: "Репутация домена в спам-базах (DBL / URIBL / SURBL)",
+			Title:    fmt.Sprintf("Проверка домена @%s по доменным чёрным спискам (Spamhaus DBL, SURBL, URIBL)", mailDomain),
+			Status:   "ok",
+			Summary:  fmt.Sprintf("Чисто! Домен @%s не числится в доменных спам-базах (Spamhaus DBL, SURBL, URIBL, SEM).", mailDomain),
+		})
+	}
+
+	// CHECK 12: EXPOSED DANGEROUS MANAGEMENT PORTS ON PUBLIC INTERNET (3389 RDP / 4040 KERIO ADMIN / 445 SMB)
+	if len(exposedAdmin) > 0 {
+		deduct(18)
+		addIssue(
+			MailCheckItem{
+				ID:       "exposed_admin",
+				Category: "Кибербезопасность почтового сервера и защита от взлома",
+				Title:    "🚨 ОПАСНЫЕ ПОРТЫ АДМИНИСТРИРОВАНИЯ ОТКРЫТЫ В ИНТЕРНЕТ (RDP 3389 / Kerio Admin 4040 / SMB 445)!",
+				Status:   "error",
+				Summary:  fmt.Sprintf("На внешнем IP %s открыты наружу критические порты управления (%d шт.) — главная причина взлома почты и попадания в Spamhaus!", serverIP, len(exposedAdmin)),
+				Details:  exposedAdmin,
+			},
+			MailRemediationGuide{
+				Severity:     "critical",
+				Category:     "Межсетевой экран роутера (Защита от шифровальщиков и брутфорса)",
+				Title:        fmt.Sprintf("НЕМЕДЛЕННО закройте порты %s на внешнем интерфейсе WAN роутера!", strings.Join(exposedAdmin, ", ")),
+				WhyItMatters: "Открытый наружу порт 3389 (Windows RDP) или 4040 (Kerio WebAdmin) сканируется ботами каждую минуту. При подборе пароля или уязвимости сервер взламывают для массовой спам-рассылки или шифрования баз почты!",
+				Steps: []string{
+					"Откройте настройки межсетевого экрана вашего граничного роутера (MikroTik / Kerio Control / Fortigate).",
+					"Отключите (удалите) проброс (DST-NAT) наружу для портов TCP 3389 (RDP), TCP 4040 (Kerio WebAdmin) и TCP 445 (SMB)!",
+					"Оставьте доступ к веб-админке :4040 и удалённому рабочему столу :3389 ТОЛЬКО из локальной сети и через корпоративный VPN (например, 10.146.100.x)!",
+				},
+			},
+		)
+	} else if isGloballyRoutableIPv4(serverIP) {
+		report.Checks = append(report.Checks, MailCheckItem{
+			ID:       "exposed_admin",
+			Category: "Кибербезопасность почтового сервера и защита от взлома",
+			Title:    "Защита опасных портов управления на внешнем IP (RDP 3389, Kerio Admin 4040, SMB 445)",
+			Status:   "ok",
+			Summary:  fmt.Sprintf("Отлично! Порты 3389 (RDP), 4040 (Kerio WebAdmin) и 445 (SMB) надёжно закрыты снаружи на IP %s.", serverIP),
+		})
+	}
+
+	// CHECK 13: RFC 2142 MANDATORY ROLE MAILBOXES (postmaster@ & abuse@) + SMTP SIZE CAPABILITY
+	postmasterReady := true
+	if roleAudit.Checked {
+		sizeInfo := "без явного ограничения"
+		if roleAudit.MaxSizeBytes > 0 {
+			sizeInfo = fmt.Sprintf("%.1f МБ (%d байт)", float64(roleAudit.MaxSizeBytes)/(1024*1024), roleAudit.MaxSizeBytes)
+		}
+		if !roleAudit.PostmasterOK || !roleAudit.AbuseOK {
+			postmasterReady = false
+			deduct(8)
+			addIssue(
+				MailCheckItem{
+					ID:       "postmaster",
+					Category: "Служба SMTP и требования выхода из чёрных списков (RFC 2142)",
+					Title:    fmt.Sprintf("Обязательные служебные адреса postmaster@%s и abuse@%s + лимит вложений", mailDomain, mailDomain),
+					Status:   "warning",
+					Summary:  fmt.Sprintf("Сервер отклоняет письма на служебные адреса (postmaster: %v, abuse: %v)! Службы разблокировки RBL не смогут прислать письмо подтверждения!", roleAudit.PostmasterOK, roleAudit.AbuseOK),
+					Details: []string{
+						"Ответ на RCPT TO:<postmaster@" + mailDomain + ">: " + roleAudit.PostmasterResp,
+						"Ответ на RCPT TO:<abuse@" + mailDomain + ">: " + roleAudit.AbuseResp,
+						fmt.Sprintf("Лимит размера письма (SIZE): %s | 8BITMIME: %v | PIPELINING: %v | SMTPUTF8: %v", sizeInfo, roleAudit.Supports8BitMIME, roleAudit.SupportsPipelining, roleAudit.SupportsSMTPUTF8),
+					},
+				},
+				MailRemediationGuide{
+					Severity:     "warning",
+					Category:     "Kerio Connect — Псевдонимы (Aliases) за 30 секунд",
+					Title:        fmt.Sprintf("Создайте бесплатные псевдонимы postmaster@%s и abuse@%s (не расходуют лицензии Kerio!)", mailDomain, mailDomain),
+					WhyItMatters: "Псевдонимы (Aliases) в Kerio Connect НЕ тратят платные пользовательские лицензии! При этом по стандарту RFC 2142 любой почтовый сервер обязан принимать почту на postmaster@ и abuse@ — именно туда Microsoft SNDS, Spamhaus, Mail.ru Postmaster и Google шлют коды подтверждения разблокировки и отчёты о жалобах!",
+					Steps: []string{
+						"Откройте Kerio Connect WebAdmin (:4040) → раздел «Учётные записи» (Accounts) → «Псевдонимы» (Aliases).",
+						"Нажмите «Добавить» → Псевдоним: postmaster → Доставлять на: выберите ваш рабочий ящик администратора (например, admin@" + mailDomain + ") → ОК.",
+						"Нажмите «Добавить» ещё раз → Псевдоним: abuse → Доставлять на: тот же ящик администратора → ОК!",
+					},
+				},
+			)
+		} else {
+			report.Checks = append(report.Checks, MailCheckItem{
+				ID:       "postmaster",
+				Category: "Служба SMTP и требования выхода из чёрных списков (RFC 2142)",
+				Title:    fmt.Sprintf("Служебные адреса postmaster@ / abuse@ и расширения SMTP (лимит: %s)", sizeInfo),
+				Status:   "ok",
+				Summary:  fmt.Sprintf("Отлично! Адреса postmaster@%s и abuse@%s активны, макс. размер письма: %s.", mailDomain, mailDomain, sizeInfo),
+				Details: []string{
+					fmt.Sprintf("8BITMIME: %v | PIPELINING: %v | SMTPUTF8: %v", roleAudit.Supports8BitMIME, roleAudit.SupportsPipelining, roleAudit.SupportsSMTPUTF8),
+				},
+			})
+		}
+	}
+
+	// CHECK 14: DEPRECATED TLS 1.0 / TLS 1.1 CHECK
+	if legacyTLS465 {
+		deduct(5)
+		addIssue(
+			MailCheckItem{
+				ID:       "tls_legacy",
+				Category: "Шифрование почты (SSL / STARTTLS)",
+				Title:    "Проверка устаревших уязвимых протоколов TLS 1.0 / TLS 1.1",
+				Status:   "warning",
+				Summary:  fmt.Sprintf("Сервер всё ещё разрешает подключение по устаревшему протоколу %s (рекомендуется оставить только TLS 1.2 и TLS 1.3).", legacyTLS465V),
+			},
+			MailRemediationGuide{
+				Severity:     "info",
+				Category:     "Безопасность шифрования Kerio Connect",
+				Title:        "Отключите устаревшие TLS 1.0 и TLS 1.1 (оставьте TLS 1.2 + TLS 1.3)",
+				WhyItMatters: "Протоколы TLS 1.0/1.1 официально признаны уязвимыми (BEAST/POODLE). Если в компании больше нет компьютеров с Windows XP / Outlook 2007, рекомендуется отключить TLS 1.0/1.1 в настройках безопасности Kerio Connect (mailserver.cfg → DisableOlderTLS).",
+				Steps: []string{
+					"Убедитесь, что у сотрудников нет древних клиентов Windows XP / Android 4.",
+					"В современных версиях Kerio Connect 9.4+ в разделе Конфигурация → Безопасность / mailserver.cfg включите использование только современных шифров TLS 1.2 / TLS 1.3.",
+				},
+			},
+		)
+	} else if anyOpenMailPort {
+		report.Checks = append(report.Checks, MailCheckItem{
+			ID:       "tls_legacy",
+			Category: "Шифрование почты (SSL / STARTTLS)",
+			Title:    "Защита от устаревших протоколов шифрования TLS 1.0 / TLS 1.1",
+			Status:   "ok",
+			Summary:  "Отлично! Уязвимые старые протоколы TLS 1.0 / TLS 1.1 отключены (используются только современные TLS 1.2 / 1.3).",
+		})
+	}
+
+	// CHECK 15: DNS CAA + MTA-STS POLICY + BIMI BRAND LOGO
+	if caaBlocksLE {
+		deduct(10)
+		addIssue(
+			MailCheckItem{
+				ID:       "caa_bimi",
+				Category: "Удобство клиентов и расширенные стандарты",
+				Title:    "Записи защиты SSL (DNS CAA), строгий TLS (MTA-STS) и логотип компании в почте (BIMI)",
+				Status:   "warning",
+				Summary:  "ВНИМАНИЕ: в DNS домена " + mailDomain + " прописана чужая запись CAA, которая ЗАПРЕЩАЕТ выпуск бесплатных сертификатов Let's Encrypt!",
+				Details:  caaRecs,
+			},
+			MailRemediationGuide{
+				Severity:     "warning",
+				Category:     "DNS CAA (Разрешение для Let's Encrypt)",
+				Title:        "Добавьте разрешение issue \"letsencrypt.org\" в DNS CAA-запись домена",
+				WhyItMatters: "Если в DNS есть запись CAA только для другого центра сертификации, автоматическое продление сертификата Let's Encrypt на Kerio через 90 дней завершится ошибкой CAA forbidden!",
+				Steps: []string{
+					"В панели DNS домена " + mailDomain + " добавьте запись типа CAA: Имя = @, Флаг = 0, Тег = issue, Значение = letsencrypt.org",
+				},
+				CopyItems: []CopySnippet{
+					{Label: "Запись CAA (Имя @)", Value: `0 issue "letsencrypt.org"`},
+				},
+			},
+		)
+	} else {
+		report.Checks = append(report.Checks, MailCheckItem{
+			ID:       "caa_bimi",
+			Category: "Удобство клиентов и расширенные стандарты",
+			Title:    "Расширенные стандарты доверия: DNS CAA, строгий MTA-STS и логотип BIMI",
+			Status:   "ok",
+			Summary:  fmt.Sprintf("CAA не блокирует Let's Encrypt (%d зап.) | MTA-STS файл: %v | BIMI логотип: %d зап.", len(caaRecs), mtaStsPolicy != "", len(bimiRecs)),
+		})
+	}
+
+	// Build complete Delist Center + Ready-to-Send Letters for all active & private blacklists!
+	ptrIsOK := false
+	spfIsOK := false
+	dkimIsOK := false
+	relayIsSafe := !smtp25.OpenRelay
+	for _, c := range report.Checks {
+		if c.ID == "ptr" && c.Status == "ok" {
+			ptrIsOK = true
+		}
+		if c.ID == "spf" && c.Status == "ok" {
+			spfIsOK = true
+		}
+		if c.ID == "dkim" && c.Status == "ok" {
+			dkimIsOK = true
+		}
+	}
+	report.DelistCenter = buildDelistCenter(
+		mailDomain, recommendedHost, serverIP,
+		ptrIsOK, spfIsOK, dkimIsOK, relayIsSafe, postmasterReady,
+		rbls, domRBLs, "",
+	)
 
 	// Count totals & calculate Grade + Verdict
 	for _, c := range report.Checks {

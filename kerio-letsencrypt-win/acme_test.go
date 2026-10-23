@@ -538,6 +538,27 @@ func TestMailDeliverabilityAuditHelpersAndReport(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("Generated %d checks and %d remediation guides (score=%d, grade=%s)", len(rep.Checks), len(rep.Remediations), rep.Score, rep.Grade)
+	if len(rep.DelistCenter.MajorProviders) < 8 {
+		t.Fatalf("expected 8 major provider delist kits, got %d", len(rep.DelistCenter.MajorProviders))
+	}
+
+	// 4. Test SPF lookup limit counter (>10 lookups + deprecated ptr detection)
+	cnt, hasPTR, _ := countSPFDNSLookups("example.by", "v=spf1 a mx ptr a:s1.example.by a:s2.example.by a:s3.example.by a:s4.example.by a:s5.example.by a:s6.example.by a:s7.example.by a:s8.example.by ~all", 0, map[string]bool{})
+	if cnt != 11 || !hasPTR {
+		t.Fatalf("expected 11 SPF lookups and hasPTR=true, got cnt=%d hasPTR=%v", cnt, hasPTR)
+	}
+
+	// 5. Test SMTP Bounce Decoder (Microsoft S3150 & Mail.ru)
+	msDec := DecodeSMTPBounceAndBuildLetter(BounceDecodeRequest{
+		BounceText: "550 5.7.1 Unfortunately, messages from [178.124.204.98] weren't sent. (S3150)",
+		MailDomain: "leend.by",
+		ServerIP:   "178.124.204.98",
+	})
+	if msDec.DetectedProviderID != "microsoft" || !strings.Contains(msDec.RecommendedAction.LetterBody, "178.124.204.98") {
+		t.Fatalf("unexpected Microsoft bounce decode result: %+v", msDec)
+	}
+
+	t.Logf("Generated %d checks, %d remediation guides, and %d delist kits (score=%d, grade=%s)",
+		len(rep.Checks), len(rep.Remediations), len(rep.DelistCenter.MajorProviders), rep.Score, rep.Grade)
 }
 
