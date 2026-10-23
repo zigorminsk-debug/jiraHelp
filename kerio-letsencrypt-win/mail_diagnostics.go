@@ -27,23 +27,26 @@ type CopySnippet struct {
 	Value string `json:"value"`
 }
 
-type MailCheckItem struct {
-	ID       string   `json:"id"`
-	Category string   `json:"category"`
-	Title    string   `json:"title"`
-	Status   string   `json:"status"` // "ok" | "warning" | "error" | "info"
-	Summary  string   `json:"summary"`
-	Details  []string `json:"details"`
-}
-
 type MailRemediationGuide struct {
+	CheckID      string        `json:"checkId,omitempty"`
 	Severity     string        `json:"severity"` // "critical" | "warning" | "info"
 	Category     string        `json:"category"`
 	Title        string        `json:"title"`
 	WhyItMatters string        `json:"whyItMatters"`
 	Steps        []string      `json:"steps"`
+	VerifyCmd    string        `json:"verifyCmd,omitempty"`
 	CopyItems    []CopySnippet `json:"copyItems,omitempty"`
 	QuickAction  string        `json:"quickAction,omitempty"`
+}
+
+type MailCheckItem struct {
+	ID       string                `json:"id"`
+	Category string                `json:"category"`
+	Title    string                `json:"title"`
+	Status   string                `json:"status"` // "ok" | "warning" | "error" | "info"
+	Summary  string                `json:"summary"`
+	Details  []string              `json:"details"`
+	Solution *MailRemediationGuide `json:"solution,omitempty"`
 }
 
 type PortProbeResult struct {
@@ -226,18 +229,26 @@ func lookupSRVAutodiscover(domain string) []string {
 
 func cleanInputHost(raw string) string {
 	s := strings.TrimSpace(raw)
-	s = strings.TrimPrefix(s, "https://")
+	if idx := strings.Index(s, "@"); idx >= 0 {
+		s = s[idx+1:]
+	}
+	s = strings.TrimPrefix(strings.ToLower(s), "https://")
 	s = strings.TrimPrefix(s, "http://")
 	if idx := strings.Index(s, "/"); idx >= 0 {
 		s = s[:idx]
 	}
-	if at := strings.Index(s, "@"); at >= 0 {
-		s = s[at+1:]
+	if h, _, err := net.SplitHostPort(s); err == nil {
+		s = h
 	}
-	if host, _, err := net.SplitHostPort(s); err == nil && host != "" {
-		s = host
+	return strings.Trim(s, ". ")
+}
+
+func isKnownMailHostPrefix(label string) bool {
+	switch strings.ToLower(label) {
+	case "mail", "smtp", "mx", "mx1", "mx2", "relay", "webmail", "imap", "pop", "pop3", "kerio", "exchange", "pochta", "post":
+		return true
 	}
-	return strings.Trim(strings.ToLower(strings.TrimSpace(s)), ".")
+	return false
 }
 
 func tlsVersionName(v uint16) string {
@@ -262,14 +273,32 @@ type smtpLiveDetails struct {
 	BannerHost      string
 	SupportsSTARTTLS bool
 	SupportsAuth    bool
-	Supports8Bit    bool
-	SupportsSize    string
-	OpenRelay       bool
-	OpenRelayTested bool
 	TLSState        *tls.ConnectionState
 	TLSVerified     bool
 	TLSVerifyErr    string
+	OpenRelay       bool
+	RelayTestLog    string
 	DialErr         string
+}
+
+func readSMTPReply(r *bufio.Reader) (int, string, error) {
+	var lines []string
+	code := 0
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return code, strings.Join(lines, " | "), err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		lines = append(lines, line)
+		if len(line) >= 3 {
+			_, _ = fmt.Sscanf(line[:3], "%d", &code)
+		}
+		if len(line) < 4 || line[3] == ' ' {
+			break
+		}
+	}
+	return code, strings.Join(lines, " | "), nil
 }
 
 func inspectSMTPPort(targetAddr, sniHost string, checkRelay bool) smtpLiveDetails {
@@ -285,88 +314,54 @@ func inspectSMTPPort(targetAddr, sniHost string, checkRelay bool) smtpLiveDetail
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(7 * time.Second))
 
-	reader := bufio.NewReader(conn)
-	readResp := func() (int, []string, error) {
-		var lines []string
-		code := 0
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				return code, lines, err
-			}
-			line = strings.TrimRight(line, "\r\n")
-			lines = append(lines, line)
-			if len(line) >= 3 {
-				_, _ = fmt.Sscanf(line[:3], "%d", &code)
-			}
-			if len(line) < 4 || line[3] != '-' {
-				break
-			}
-		}
-		return code, lines, nil
-	}
-	sendLine := func(cmd string) {
-		_, _ = conn.Write([]byte(cmd + "\r\n"))
-	}
-
-	code, bannerLines, err := readResp()
-	if err != nil || code != 220 {
-		res.DialErr = fmt.Sprintf("неожиданный ответ SMTP: %v %v", code, bannerLines)
+	br := bufio.NewReader(conn)
+	code, banner, err := readSMTPReply(br)
+	if err != nil || code == 0 {
+		res.DialErr = fmt.Sprintf("не получен SMTP-баннер: %v", err)
 		return res
 	}
-	if len(bannerLines) > 0 {
-		res.BannerLine = bannerLines[0]
-		fields := strings.Fields(bannerLines[0])
-		if len(fields) >= 2 {
-			res.BannerHost = strings.Trim(strings.ToLower(fields[1]), ".")
-		}
+	res.BannerLine = banner
+	fields := strings.Fields(banner)
+	if len(fields) >= 2 {
+		res.BannerHost = strings.Trim(fields[1], ".,;<>[]()")
 	}
 
-	parseEHLOLines := func(lines []string) {
-		for _, l := range lines {
-			up := strings.ToUpper(l)
-			if strings.Contains(up, "STARTTLS") {
-				res.SupportsSTARTTLS = true
-			}
-			if strings.Contains(up, "AUTH ") || strings.HasSuffix(up, "AUTH") {
-				res.SupportsAuth = true
-			}
-			if strings.Contains(up, "8BITMIME") {
-				res.Supports8Bit = true
-			}
-			if idx := strings.Index(up, "SIZE"); idx >= 0 {
-				res.SupportsSize = strings.TrimSpace(l[4:])
-			}
-		}
+	_, _ = fmt.Fprintf(conn, "EHLO audit-check.kerio-diagnostic.invalid\r\n")
+	_, ehloLines, _ := readSMTPReply(br)
+	if ehloLines == "" {
+		_, _ = fmt.Fprintf(conn, "HELO kerio-check.local\r\n")
+		_, ehloLines, _ = readSMTPReply(br)
+	}
+	upEhlo := strings.ToUpper(ehloLines)
+	if strings.Contains(upEhlo, "STARTTLS") {
+		res.SupportsSTARTTLS = true
+	}
+	if strings.Contains(upEhlo, "AUTH") {
+		res.SupportsAuth = true
 	}
 
-	sendLine("EHLO audit.kerio-cert-manager.local")
-	_, ehloLines, err := readResp()
-	if err == nil {
-		parseEHLOLines(ehloLines)
-	}
-
-	// Safe non-intrusive Open Relay probe on port 25 BEFORE STARTTLS (never sends DATA — immediately RSETs!)
+	// Non-intrusive Open Relay probe BEFORE STARTTLS (always aborts with RSET, zero email data sent!)
 	if checkRelay {
-		sendLine("MAIL FROM:<check-noreply@example.org>")
-		mCode, _, merr := readResp()
-		if merr == nil && mCode >= 200 && mCode < 300 {
-			sendLine("RCPT TO:<relay-audit-test@gmail.com>")
-			rCode, _, rerr := readResp()
-			res.OpenRelayTested = true
-			if rerr == nil && rCode >= 200 && rCode < 300 {
+		_, _ = fmt.Fprintf(conn, "MAIL FROM:<check-noreply@example.org>\r\n")
+		mCode, mResp, mErr := readSMTPReply(br)
+		if mErr == nil && mCode >= 200 && mCode < 300 {
+			_, _ = fmt.Fprintf(conn, "RCPT TO:<relay-audit-test@gmail.com>\r\n")
+			rCode, rResp, rErr := readSMTPReply(br)
+			res.RelayTestLog = fmt.Sprintf("MAIL=%d (%s) → RCPT=%d (%s)", mCode, mResp, rCode, rResp)
+			if rErr == nil && rCode >= 200 && rCode < 300 {
 				res.OpenRelay = true
 			}
-		} else if merr == nil {
-			res.OpenRelayTested = true
+		} else {
+			res.RelayTestLog = fmt.Sprintf("MAIL=%d (%s)", mCode, mResp)
 		}
-		sendLine("RSET")
-		_, _, _ = readResp()
+		_, _ = fmt.Fprintf(conn, "RSET\r\n")
+		_, _, _ = readSMTPReply(br)
 	}
 
+	// Upgrade to STARTTLS if offered
 	if res.SupportsSTARTTLS {
-		sendLine("STARTTLS")
-		stCode, _, stErr := readResp()
+		_, _ = fmt.Fprintf(conn, "STARTTLS\r\n")
+		stCode, _, stErr := readSMTPReply(br)
 		if stErr == nil && stCode == 220 {
 			tlsConn := tls.Client(conn, &tls.Config{
 				ServerName:         sniHost,
@@ -376,36 +371,31 @@ func inspectSMTPPort(targetAddr, sniHost string, checkRelay bool) smtpLiveDetail
 				st := tlsConn.ConnectionState()
 				res.TLSState = &st
 				verifyTrustedChain(&st, sniHost, &res.TLSVerified, &res.TLSVerifyErr)
-				_, _ = tlsConn.Write([]byte("QUIT\r\n"))
-				_ = tlsConn.Close()
+				_, _ = fmt.Fprintf(tlsConn, "QUIT\r\n")
 				return res
-			} else {
-				res.TLSVerifyErr = herr.Error()
 			}
 		}
 	}
 
-	sendLine("QUIT")
+	_, _ = fmt.Fprintf(conn, "QUIT\r\n")
 	return res
 }
 
 func verifyTrustedChain(st *tls.ConnectionState, sniHost string, okOut *bool, errOut *string) {
-	if st == nil || len(st.PeerCertificates) == 0 {
+	if len(st.PeerCertificates) == 0 {
 		*okOut = false
-		*errOut = "сервер не отдал SSL-сертификат"
+		*errOut = "сервер не отдал ни одного SSL-сертификата"
 		return
 	}
 	leaf := st.PeerCertificates[0]
-	interPool := x509.NewCertPool()
-	for _, ic := range st.PeerCertificates[1:] {
-		interPool.AddCert(ic)
+	inter := x509.NewCertPool()
+	for _, c := range st.PeerCertificates[1:] {
+		inter.AddCert(c)
 	}
-	opts := x509.VerifyOptions{
+	if _, verr := leaf.Verify(x509.VerifyOptions{
 		DNSName:       sniHost,
-		Intermediates: interPool,
-		CurrentTime:   time.Now(),
-	}
-	if _, verr := leaf.Verify(opts); verr != nil {
+		Intermediates: inter,
+	}); verr != nil {
 		*okOut = false
 		*errOut = verr.Error()
 		return
@@ -418,41 +408,61 @@ func probeImplicitTLSPort(host string, port int, protoLabel string) PortProbeRes
 		Port:     port,
 		Protocol: protoLabel,
 	}
-	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+	sniHost := host
 	t0 := time.Now()
-	rawConn, err := net.DialTimeout("tcp", addr, 3800*time.Millisecond)
+	rawConn, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprintf("%d", port)), 4000*time.Millisecond)
 	if err != nil {
 		p.Error = err.Error()
 		return p
 	}
 	p.Open = true
 	p.LatencyMs = time.Since(t0).Milliseconds()
+	defer rawConn.Close()
 	_ = rawConn.SetDeadline(time.Now().Add(5 * time.Second))
 
-	tlsConn := tls.Client(rawConn, &tls.Config{
-		ServerName:         host,
-		InsecureSkipVerify: true,
-	})
-	if herr := tlsConn.Handshake(); herr != nil {
-		p.Error = herr.Error()
-		_ = rawConn.Close()
+	return finishImplicitTLSOnConn(rawConn, p, sniHost)
+}
+
+func probeImplicitTLSPortSNI(connectHost, sniHost string, port int, protoLabel string) PortProbeResult {
+	p := PortProbeResult{
+		Port:     port,
+		Protocol: protoLabel,
+	}
+	t0 := time.Now()
+	rawConn, err := net.DialTimeout("tcp", net.JoinHostPort(connectHost, fmt.Sprintf("%d", port)), 4000*time.Millisecond)
+	if err != nil {
+		p.Error = err.Error()
 		return p
 	}
-	defer tlsConn.Close()
+	p.Open = true
+	p.LatencyMs = time.Since(t0).Milliseconds()
+	defer rawConn.Close()
+	_ = rawConn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	return finishImplicitTLSOnConn(rawConn, p, sniHost)
+}
+
+func finishImplicitTLSOnConn(rawConn net.Conn, p PortProbeResult, sniHost string) PortProbeResult {
+	tlsConn := tls.Client(rawConn, &tls.Config{
+		ServerName:         sniHost,
+		InsecureSkipVerify: true,
+	})
+	if err := tlsConn.Handshake(); err != nil {
+		p.TLSOK = false
+		p.Error = "ошибка TLS-рукопожатия: " + err.Error()
+		return p
+	}
 	st := tlsConn.ConnectionState()
 	p.TLSOK = true
 	p.TLSVersion = tlsVersionName(st.Version)
 	var vErr string
-	verifyTrustedChain(&st, host, &p.TLSTrusted, &vErr)
+	verifyTrustedChain(&st, sniHost, &p.TLSTrusted, &vErr)
 	if !p.TLSTrusted {
 		p.Error = vErr
 	}
 	if len(st.PeerCertificates) > 0 {
 		leaf := st.PeerCertificates[0]
 		p.CertSubject = leaf.Subject.CommonName
-		if p.CertSubject == "" && len(leaf.DNSNames) > 0 {
-			p.CertSubject = leaf.DNSNames[0]
-		}
 		p.CertIssuer = leaf.Issuer.CommonName
 		p.CertExpiry = leaf.NotAfter.Format("02.01.2006")
 		p.CertDays = int(time.Until(leaf.NotAfter).Hours() / 24)
@@ -461,76 +471,63 @@ func probeImplicitTLSPort(host string, port int, protoLabel string) PortProbeRes
 }
 
 func checkDNSBLLists(ip net.IP) []RBLCheckEntry {
-	type rblDef struct {
-		Name   string
-		Zone   string
-		Delist string
+	ip4 := ip.To4()
+	if ip4 == nil || ip.IsPrivate() || ip.IsLoopback() {
+		return nil
 	}
-	defs := []rblDef{
+	rev := fmt.Sprintf("%d.%d.%d.%d", ip4[3], ip4[2], ip4[1], ip4[0])
+
+	providers := []struct {
+		name string
+		zone string
+		url  string
+	}{
 		{"Spamhaus ZEN", "zen.spamhaus.org", "https://check.spamhaus.org/"},
 		{"Barracuda Reputation", "b.barracudacentral.org", "https://www.barracudacentral.org/rbl/removal-request"},
 		{"SpamCop Blocking List", "bl.spamcop.net", "https://www.spamcop.net/bl.shtml"},
 		{"SORBS DNSBL", "dnsbl.sorbs.net", "http://www.sorbs.net/lookup.shtml"},
 		{"UCEPROTECT Level 1", "dnsbl-1.uceprotect.net", "https://www.uceprotect.net/en/rblcheck.php"},
-		{"Passive Spam Block List (PSBL)", "psbl.surriel.com", "https://psbl.org/"},
-		{"WPBL (Weighted Private Block List)", "db.wpbl.info", "http://wpbl.info/cgi-bin/detail.cgi"},
-		{"NiX Spam (heise/manitu)", "ix.dnsbl.manitu.net", "https://www.dnsbl.manitu.net/"},
-		{"SpamRATS NoPTR", "noptr.spamrats.com", "https://www.spamrats.com/lookup.php"},
-		{"SpamRATS Dyna", "dyna.spamrats.com", "https://www.spamrats.com/lookup.php"},
+		{"PSBL (Passive Spam Block)", "psbl.surriel.com", "https://psbl.org/"},
+		{"WPBL (Weighted Private)", "db.wpbl.info", "http://wpbl.info/cgi-bin/detail.cgi"},
+		{"Mailspike BL", "bl.mailspike.net", "https://mailspike.org/iplookup.html"},
+		{"NiX Spam (Heise)", "ix.dnsbl.manitu.net", "https://www.dnsbl.manitu.net/"},
+		{"SpamRATS All", "all.spamrats.com", "https://www.spamrats.com/lookup.php"},
 		{"0SPAM Project", "bl.0spam.org", "https://0spam.org/check"},
 	}
 
-	v4 := ip.To4()
-	if v4 == nil {
-		return nil
-	}
-	revIP := fmt.Sprintf("%d.%d.%d.%d", v4[3], v4[2], v4[1], v4[0])
-
-	results := make([]RBLCheckEntry, len(defs))
+	out := make([]RBLCheckEntry, len(providers))
 	var wg sync.WaitGroup
-	// Important: Use local/ISP resolver first for DNSBLs so Spamhaus doesn't block open Google/Cloudflare resolvers with 127.255.255.254!
-	cloudflareOnly := &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := net.Dialer{Timeout: 2 * time.Second}
-			return d.DialContext(ctx, "udp", "1.1.1.1:53")
-		},
-	}
-
-	for i, d := range defs {
+	// Use system resolver / direct authoritative lookup where possible (8.8.8.8 triggers 127.255.255.254 on Spamhaus)
+	sysRes := net.DefaultResolver
+	for i, prv := range providers {
 		wg.Add(1)
-		go func(idx int, def rblDef) {
+		go func(idx int, name, zone, delist string) {
 			defer wg.Done()
 			entry := RBLCheckEntry{
-				Provider:  def.Name,
-				Zone:      def.Zone,
-				DelistURL: def.Delist,
+				Provider:  name,
+				Zone:      zone,
+				DelistURL: delist,
 			}
-			q := revIP + "." + def.Zone
-			ctx, cancel := context.WithTimeout(context.Background(), 2600*time.Millisecond)
-			addrs, err := net.DefaultResolver.LookupIPAddr(ctx, q)
+			q := rev + "." + zone
+			ctx, cancel := context.WithTimeout(context.Background(), 2200*time.Millisecond)
+			ips, err := sysRes.LookupIPAddr(ctx, q)
 			cancel()
-			if err != nil && def.Zone != "zen.spamhaus.org" {
-				ctx2, cancel2 := context.WithTimeout(context.Background(), 2000*time.Millisecond)
-				addrs, err = cloudflareOnly.LookupIPAddr(ctx2, q)
-				cancel2()
-			}
-			if err == nil {
-				for _, a := range addrs {
-					ip4 := a.IP.To4()
-					// Filter out special error codes 127.255.255.x returned when open DNS resolvers query RBLs!
-					if ip4 != nil && ip4[0] == 127 && ip4[1] < 255 {
+			if err == nil && len(ips) > 0 {
+				for _, hit := range ips {
+					h4 := hit.IP.To4()
+					// Filter 127.255.255.x open-resolver rate-limit / policy codes (NOT actual spam listings!)
+					if h4 != nil && h4[0] == 127 && !(h4[1] == 255 && h4[2] == 255) {
 						entry.Listed = true
-						entry.ReturnCode = ip4.String()
+						entry.ReturnCode = h4.String()
 						break
 					}
 				}
 			}
-			results[idx] = entry
-		}(i, d)
+			out[idx] = entry
+		}(i, prv.name, prv.zone, prv.url)
 	}
 	wg.Wait()
-	return results
+	return out
 }
 
 func parseDKIMPublicKeyBits(txt string) (algo string, bits int) {
@@ -581,7 +578,7 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 		rawInput = rawMailHost
 	}
 
-	asciiInput, dispInput, err := NormalizeDomain(rawInput)
+	asciiInput, _, err := NormalizeDomain(rawInput)
 	if err != nil {
 		return nil, err
 	}
@@ -594,32 +591,76 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 		}
 	}
 
-	// Smart split if user typed "mail.leend.by" directly in Domain field:
-	// check whether asciiInput has MX; if not and parent domain (leend.by) exists, use parent as mailDomain and asciiInput as mailHost!
-	mxs, mxErr := lookupMXMulti(mailDomain)
-	if mxErr != nil {
-		parts := strings.Split(asciiInput, ".")
-		if len(parts) >= 3 {
-			parentCandidate := strings.Join(parts[1:], ".")
-			if parentMXs, perr := lookupMXMulti(parentCandidate); perr == nil && len(parentMXs) > 0 {
-				if mailHost == "" {
-					mailHost = asciiInput
+	// Smart separation of corporate email domain (@leend.by) vs mail server hostname (mail.leend.by)!
+	// Crucial real-world case: user leaves "mail.leend.by" in Domain input AND/OR accidentally created MX/_dmarc on "mail.leend.by" in DNS!
+	var straySubdomainMX []*net.MX
+	var straySubdomainDMARC []string
+	parts := strings.Split(asciiInput, ".")
+	if len(parts) >= 3 && isKnownMailHostPrefix(parts[0]) {
+		parentDomain := strings.Join(parts[1:], ".")
+		if mailHost == "" {
+			mailHost = asciiInput
+		}
+		// Check if user accidentally put stray records on mail.<domain> in their DNS panel!
+		if smx, serr := lookupMXMulti(asciiInput); serr == nil && len(smx) > 0 {
+			straySubdomainMX = smx
+		}
+		if sdt, sderr := lookupTXTQuick("_dmarc." + asciiInput); sderr == nil {
+			for _, t := range sdt {
+				if strings.Contains(strings.ToLower(t), "v=dmarc1") {
+					straySubdomainDMARC = append(straySubdomainDMARC, strings.TrimSpace(t))
 				}
-				mailDomain = parentCandidate
-				mxs = parentMXs
-				mxErr = nil
-				log("info", fmt.Sprintf("Автоопределение: почтовый домен @%s, хост сервера %s", mailDomain, mailHost))
-			} else if mailHost == "" {
+			}
+		}
+		mailDomain = parentDomain
+		log("info", fmt.Sprintf("Распознан адрес сервера %s → проверяем основной почтовый домен @%s и сервер %s", asciiInput, mailDomain, mailHost))
+	}
+
+	mxs, mxErr := lookupMXMulti(mailDomain)
+	if mxErr != nil && len(parts) >= 3 && mailDomain == asciiInput {
+		parentCandidate := strings.Join(parts[1:], ".")
+		if parentMXs, perr := lookupMXMulti(parentCandidate); perr == nil && len(parentMXs) > 0 {
+			if mailHost == "" {
 				mailHost = asciiInput
-				mailDomain = parentCandidate
+			}
+			mailDomain = parentCandidate
+			mxs = parentMXs
+			mxErr = nil
+		} else if mailHost == "" {
+			mailHost = asciiInput
+			mailDomain = parentCandidate
+		}
+	}
+
+	if mailHost == "" {
+		if len(mxs) > 0 {
+			// Prefer MX host if it actually resolves; otherwise prefer mail.<domain> if that resolves!
+			mxPrimary := mxs[0].Host
+			if ips, ierr := LookupDomainIPsMultiResolver(mxPrimary); ierr == nil && len(ips) > 0 {
+				mailHost = mxPrimary
+			} else if mips, merr := LookupDomainIPsMultiResolver("mail." + mailDomain); merr == nil && len(mips) > 0 {
+				mailHost = "mail." + mailDomain
+			} else {
+				mailHost = mxPrimary
+			}
+		} else {
+			mailHost = "mail." + mailDomain
+		}
+	}
+
+	// Also check if stray _dmarc.mail.<domain> exists even when user entered bare domain "leend.by"!
+	if len(straySubdomainDMARC) == 0 {
+		if sdt, sderr := lookupTXTQuick("_dmarc.mail." + mailDomain); sderr == nil {
+			for _, t := range sdt {
+				if strings.Contains(strings.ToLower(t), "v=dmarc1") {
+					straySubdomainDMARC = append(straySubdomainDMARC, strings.TrimSpace(t))
+				}
 			}
 		}
 	}
-	if mailHost == "" {
-		if len(mxs) > 0 {
-			mailHost = mxs[0].Host
-		} else {
-			mailHost = "mail." + mailDomain
+	if len(straySubdomainMX) == 0 {
+		if smx, serr := lookupMXMulti("mail." + mailDomain); serr == nil && len(smx) > 0 {
+			straySubdomainMX = smx
 		}
 	}
 
@@ -639,10 +680,22 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 		}
 	}
 
-	// Always resolve real PUBLIC IP from DNS for PTR, SPF, and RBL checks!
-	// If req.ServerIP is a private/VPN IP (e.g. 10.146.100.14), use it cleanly for TCP port probing when ISP blocks public port 25, while still auditing public IP in PTR/SPF/RBL!
+	addIssue := func(chk MailCheckItem, rem MailRemediationGuide) {
+		rem.CheckID = chk.ID
+		remCopy := rem
+		chk.Solution = &remCopy
+		report.Checks = append(report.Checks, chk)
+		report.Remediations = append(report.Remediations, remCopy)
+	}
+
+	// Resolve real PUBLIC IP from mailHost, falling back to mail.<domain> if MX host was misconfigured!
 	var publicIP string
 	hostIPs, hostLookupErr := LookupDomainIPsMultiResolver(mailHost)
+	if len(hostIPs) == 0 && mailHost != "mail."+mailDomain {
+		if altIPs, aerr := LookupDomainIPsMultiResolver("mail." + mailDomain); aerr == nil && len(altIPs) > 0 {
+			hostIPs = altIPs
+		}
+	}
 	if len(hostIPs) > 0 {
 		for _, hip := range hostIPs {
 			if p := net.ParseIP(hip); p != nil && p.To4() != nil {
@@ -654,6 +707,7 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 			publicIP = hostIPs[0]
 		}
 	}
+
 	userOverrideHost := strings.TrimSpace(req.ServerIP)
 	serverIP := publicIP
 	if userOverrideHost != "" {
@@ -665,25 +719,19 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 	}
 	report.ServerIP = serverIP
 
-	// Run slow network checks in parallel:
-	// 1. PTR check
-	// 2. DNSBL 11 blacklists
-	// 3. Port 25 SMTP + Banner + STARTTLS + Open Relay
-	// 4. Port 587 Submission STARTTLS
-	// 5. Implicit TLS ports: 465 SMTPS, 993 IMAPS, 995 POP3S, 443 WebMail HTTPS
-	// 6. DKIM multi-selector scan
 	var (
-		ptrs     []string
-		rbls     []RBLCheckEntry
-		smtp25   smtpLiveDetails
-		smtp587  smtpLiveDetails
-		port465  PortProbeResult
-		port993  PortProbeResult
-		port995  PortProbeResult
-		port443  PortProbeResult
+		ptrs              []string
+		rbls              []RBLCheckEntry
+		smtp25            smtpLiveDetails
+		smtp587           smtpLiveDetails
+		port465           PortProbeResult
+		port993           PortProbeResult
+		port995           PortProbeResult
+		port443           PortProbeResult
 		dkimFoundSelector string
 		dkimFoundRecord   string
 		spfRecords        []string
+		strayMailSPF      []string
 		dmarcRecords      []string
 		mtaStsRecords     []string
 		tlsRptRecords     []string
@@ -694,8 +742,8 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 	probeTargetHost := mailHost
 	if userOverrideHost != "" {
 		probeTargetHost = userOverrideHost
-	} else if serverIP != "" && hostLookupErr != nil {
-		probeTargetHost = serverIP
+	} else if hostLookupErr != nil && publicIP != "" {
+		probeTargetHost = publicIP
 	}
 
 	var wg sync.WaitGroup
@@ -727,22 +775,22 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 
 	go func() {
 		defer wg.Done()
-		port465 = probeImplicitTLSPort(probeTargetHost, 465, "SMTPS (SSL отправка)")
+		port465 = probeImplicitTLSPortSNI(probeTargetHost, mailHost, 465, "SMTPS (SSL отправка)")
 	}()
 
 	go func() {
 		defer wg.Done()
-		port993 = probeImplicitTLSPort(probeTargetHost, 993, "IMAPS (SSL почта)")
+		port993 = probeImplicitTLSPortSNI(probeTargetHost, mailHost, 993, "IMAPS (SSL почта)")
 	}()
 
 	go func() {
 		defer wg.Done()
-		port995 = probeImplicitTLSPort(probeTargetHost, 995, "POP3S (SSL сбор)")
+		port995 = probeImplicitTLSPortSNI(probeTargetHost, mailHost, 995, "POP3S (SSL сбор)")
 	}()
 
 	go func() {
 		defer wg.Done()
-		port443 = probeImplicitTLSPort(probeTargetHost, 443, "HTTPS (Kerio WebMail)")
+		port443 = probeImplicitTLSPortSNI(probeTargetHost, mailHost, 443, "HTTPS (Kerio WebMail)")
 	}()
 
 	go func() {
@@ -751,6 +799,13 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 			for _, t := range txts {
 				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(t)), "v=spf1") {
 					spfRecords = append(spfRecords, strings.TrimSpace(t))
+				}
+			}
+		}
+		if mtxts, mterr := lookupTXTQuick("mail." + mailDomain); mterr == nil {
+			for _, t := range mtxts {
+				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(t)), "v=spf1") {
+					strayMailSPF = append(strayMailSPF, strings.TrimSpace(t))
 				}
 			}
 		}
@@ -780,7 +835,6 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 			custom = strings.TrimSuffix(custom, "._domainkey")
 			selectors = append(selectors, custom)
 		}
-		// "mail" is Kerio Connect's default built-in DKIM selector!
 		for _, s := range []string{"mail", "default", "dkim", "kerio", "k1", "s1", "selector1", "selector2", "google", "yandex", "mailru", "smtp"} {
 			exists := false
 			for _, ex := range selectors {
@@ -855,6 +909,9 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 		p587.TLSOK = true
 		p587.TLSTrusted = smtp587.TLSVerified
 		p587.TLSVersion = tlsVersionName(smtp587.TLSState.Version)
+		if !smtp587.TLSVerified {
+			p587.Error = smtp587.TLSVerifyErr
+		}
 		if len(smtp587.TLSState.PeerCertificates) > 0 {
 			leaf := smtp587.TLSState.PeerCertificates[0]
 			p587.CertSubject = leaf.Subject.CommonName
@@ -867,124 +924,222 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 	report.Ports = []PortProbeResult{p25, port465, p587, port993, port995, port443}
 	report.Blacklists = rbls
 
+	recommendedHost := "mail." + mailDomain
+	if mailHost != "" && mailHost != mailDomain {
+		recommendedHost = mailHost
+	}
+	ipDisplay := nonEmptyOr(serverIP, "<ВАШ_БЕЛЫЙ_IP>")
+
 	// =========================================================================
-	// CHECK 1: MX RECORDS
+	// CHECK 1: MX RECORDS & A-RECORD RESOLUTION (WITH STRAY SUBDOMAIN DETECTION!)
 	// =========================================================================
 	if len(mxs) == 0 {
 		deduct(20)
-		report.Checks = append(report.Checks, MailCheckItem{
-			ID:       "mx",
-			Category: "DNS Маршрутизация",
-			Title:    "Записи приёма почты (DNS MX)",
-			Status:   "error",
-			Summary:  fmt.Sprintf("У домена %s отсутствует MX-запись — внешние отправители не смогут доставить вам письма!", dispInput),
-			Details:  []string{"Ни один публичный DNS-сервер (8.8.8.8 / 1.1.1.1) не вернул запись типа MX для " + mailDomain},
-		})
-		report.Remediations = append(report.Remediations, MailRemediationGuide{
-			Severity:     "critical",
-			Category:     "DNS Маршрутизация",
-			Title:        "Добавьте MX-запись и A-запись почтового сервера в DNS",
-			WhyItMatters: "Без MX-записи Gmail, Outlook, Yandex и любые внешние серверы не знают, куда доставлять входящие письма для @" + mailDomain + ", а также начисляют штраф при проверке обратного отправителя.",
-			Steps: []string{
-				"Откройте панель управления DNS вашего домена " + mailDomain + " (hoster.by / active.by / Cloudflare).",
-				"Убедитесь, что создана запись типа A: Имя = mail, Значение = " + nonEmptyOr(serverIP, "<белый IP вашего сервера Kerio>") + ".",
-				"Создайте запись типа MX: Имя = @ (пусто / корень домена), Приоритет = 10, Значение (Сервер) = " + mailHost + ".",
+		details := []string{"У корневого почтового домена @" + mailDomain + " в DNS нет записи типа MX."}
+		if len(straySubdomainMX) > 0 {
+			details = append(details, fmt.Sprintf("⚠️ НАЙДЕНА ТИПИЧНАЯ ОШИБКА В ПАНЕЛИ DNS: MX-запись сейчас ошибочно висит на поддомене mail.%s (указывает на %s) вместо корневого домена %s!", mailDomain, straySubdomainMX[0].Host, mailDomain))
+		}
+		addIssue(
+			MailCheckItem{
+				ID:       "mx",
+				Category: "DNS Маршрутизация входящей почты",
+				Title:    "Записи приёма почты (DNS MX и A-запись сервера)",
+				Status:   "error",
+				Summary:  fmt.Sprintf("У домена @%s отсутствует корректная MX-запись — внешние отправители не знают, на какой сервер доставлять вам письма!", mailDomain),
+				Details:  details,
 			},
-			CopyItems: []CopySnippet{
-				{Label: "Запись MX (Имя @, Приоритет 10)", Value: mailHost},
+			MailRemediationGuide{
+				Severity:     "critical",
+				Category:     "DNS Маршрутизация (MX + A)",
+				Title:        fmt.Sprintf("Настройте связку A + MX записей для домена %s в панели управления DNS", mailDomain),
+				WhyItMatters: fmt.Sprintf("Когда клиент пишет письмо на info@%s, почтовые серверы Gmail/Yandex/Mail.ru ищут MX-запись именно у корневого домена «%s» (НЕ у mail.%s!). Если в панели hoster.by / Cloudflare в поле «Имя / Хост» у MX-записи случайно написано «mail» вместо «@», входящая почта на @%s не доставляется!", mailDomain, mailDomain, mailDomain, mailDomain),
+				Steps: []string{
+					fmt.Sprintf("Войдите в личный кабинет вашего регистратора / DNS-хостинга домена %s (hoster.by, active.by, Cloudflare, ISPmanager, reg.ru) → раздел «Управление DNS-записями / Редактор DNS-зоны».", mailDomain),
+					fmt.Sprintf("Проверьте наличие записи типа A для почтового хоста: Тип = A, Имя (Субдомен/Хост) = mail, Значение (IPv4) = %s, TTL = 3600.", ipDisplay),
+					fmt.Sprintf("Если в списке есть ошибочная запись MX с именем «mail» или «mail.%s» — удалите её или исправьте поле «Имя».", mailDomain),
+					fmt.Sprintf("Создайте (или отредактируйте) корневую запись MX: Тип = MX, Имя (Хост) = @ (в некоторых панелях оставляется пустым или пишется %s. с точкой на конце), Приоритет = 10, Значение (Сервер почты) = %s (в ISPmanager / BIND — обязательно с точкой на конце: %s.).", mailDomain, recommendedHost, recommendedHost),
+					"Сохраните изменения DNS-зоны и подождите 5–15 минут обновления кэша.",
+				},
+				VerifyCmd: fmt.Sprintf("nslookup -type=mx %s 8.8.8.8", mailDomain),
+				CopyItems: []CopySnippet{
+					{Label: "1. Запись A — Поле «Имя»", Value: "mail"},
+					{Label: "1. Запись A — Поле «Значение (IP)»", Value: ipDisplay},
+					{Label: "2. Запись MX — Поле «Имя (Хост)»", Value: "@"},
+					{Label: "2. Запись MX — Поле «Значение (Сервер, приоритет 10)»", Value: recommendedHost},
+				},
 			},
-		})
+		)
 	} else {
 		var mxDetails []string
 		mxPointsToIP := false
+		mxUnresolvableHost := ""
 		for _, m := range mxs {
 			ips, _ := LookupDomainIPsMultiResolver(m.Host)
 			if net.ParseIP(m.Host) != nil {
 				mxPointsToIP = true
 			}
-			mxDetails = append(mxDetails, fmt.Sprintf("Приоритет %d → %s (%s)", m.Pref, m.Host, strings.Join(ips, ", ")))
+			if len(ips) == 0 && mxUnresolvableHost == "" {
+				mxUnresolvableHost = m.Host
+			}
+			ipText := strings.Join(ips, ", ")
+			if ipText == "" {
+				ipText = "❌ НЕТ A-ЗАПИСИ (no such host)!"
+			}
+			mxDetails = append(mxDetails, fmt.Sprintf("Приоритет %d → %s (%s)", m.Pref, m.Host, ipText))
 		}
-		if mxPointsToIP {
-			deduct(10)
-			report.Checks = append(report.Checks, MailCheckItem{
-				ID:       "mx",
-				Category: "DNS Маршрутизация",
-				Title:    "Записи приёма почты (DNS MX)",
-				Status:   "warning",
-				Summary:  "MX-запись указывает напрямую на цифру IP вместо доменного имени (нарушение RFC 5321)!",
-				Details:  mxDetails,
-			})
-			report.Remediations = append(report.Remediations, MailRemediationGuide{
-				Severity:     "warning",
-				Category:     "DNS Маршрутизация",
-				Title:        "Исправьте MX-запись: укажите имя хоста (mail." + mailDomain + ") вместо IP-адреса",
-				WhyItMatters: "По стандарту RFC 5321 MX-запись обязана указывать на доменное имя (A-запись), а не на IP-адрес. Многие антиспам-фильтры блокируют такие домены.",
-				Steps: []string{
-					"Создайте A-запись: mail." + mailDomain + " → " + nonEmptyOr(serverIP, "<IP сервера>"),
-					"Измените значение MX-записи с IP-адреса на доменное имя mail." + mailDomain,
+		if len(straySubdomainMX) > 0 {
+			mxDetails = append(mxDetails, fmt.Sprintf("Примечание: на поддомене mail.%s также обнаружена лишняя MX-запись → %s (её лучше удалить, чтобы не путать DNS).", mailDomain, straySubdomainMX[0].Host))
+		}
+
+		if mxUnresolvableHost != "" {
+			deduct(20)
+			addIssue(
+				MailCheckItem{
+					ID:       "mx",
+					Category: "DNS Маршрутизация входящей почты",
+					Title:    "Записи приёма почты (DNS MX и A-запись сервера)",
+					Status:   "error",
+					Summary:  fmt.Sprintf("КРИТИЧЕСКАЯ ОШИБКА DNS: MX-запись указывает на хост «%s», у которого НЕТ A-записи (не резолвится в IP)! Входящие письма не могут быть доставлены!", mxUnresolvableHost),
+					Details:  mxDetails,
 				},
-			})
+				MailRemediationGuide{
+					Severity:     "critical",
+					Category:     "DNS Маршрутизация (MX → A)",
+					Title:        fmt.Sprintf("Исправьте MX-запись домена %s: укажите %s (или добавьте A-запись %s)", mailDomain, recommendedHost, ipDisplay),
+					WhyItMatters: fmt.Sprintf("Сейчас MX-запись домена %s отправляет всю входящую почту на адрес «%s», но у «%s» нет IP-адреса в DNS (lookup %s: no such host), тогда как реальный сервер работает на %s (%s)! Из-за этого внешние отправители получают отказ доставки.", mailDomain, mxUnresolvableHost, mxUnresolvableHost, mxUnresolvableHost, recommendedHost, ipDisplay),
+					Steps: []string{
+						fmt.Sprintf("Откройте панель управления DNS домена %s (hoster.by / active.by / Cloudflare / ISPmanager).", mailDomain),
+						fmt.Sprintf("Найдите запись типа MX для @ (%s) и измените её значение с «%s» на «%s» (Приоритет = 10).", mailDomain, mxUnresolvableHost, recommendedHost),
+						fmt.Sprintf("Убедитесь, что запись типа A с именем «mail» указывает на белый IP вашего Kerio Connect: %s (и по желанию добавьте также корневую A-запись: Имя = @, Значение = %s).", ipDisplay, ipDisplay),
+						fmt.Sprintf("Если в панели есть перевёрнутая запись MX (где Имя = mail, а Значение = %s) — удалите её!", mailDomain),
+					},
+					VerifyCmd: fmt.Sprintf("nslookup -type=mx %s 8.8.8.8", mailDomain),
+					CopyItems: []CopySnippet{
+						{Label: "Исправленная запись MX (Имя = @, Приоритет = 10)", Value: recommendedHost},
+						{Label: "Запись A для сервера (Имя = mail)", Value: ipDisplay},
+					},
+				},
+			)
+		} else if mxPointsToIP {
+			deduct(10)
+			addIssue(
+				MailCheckItem{
+					ID:       "mx",
+					Category: "DNS Маршрутизация входящей почты",
+					Title:    "Записи приёма почты (DNS MX и A-запись сервера)",
+					Status:   "warning",
+					Summary:  "MX-запись указывает напрямую на цифровой IP-адрес вместо доменного имени mail." + mailDomain + " (нарушение RFC 5321)!",
+					Details:  mxDetails,
+				},
+				MailRemediationGuide{
+					Severity:     "warning",
+					Category:     "DNS Маршрутизация (MX)",
+					Title:        fmt.Sprintf("Замените IP-адрес в MX-записи на доменное имя %s", recommendedHost),
+					WhyItMatters: "По стандарту RFC 5321 в значении MX запрещено указывать цифры IP-адреса — многие корпоративные почтовые шлюзы и антиспам-системы отклоняют такие домены.",
+					Steps: []string{
+						fmt.Sprintf("В панели DNS создайте запись типа A: Имя = mail, Значение = %s.", ipDisplay),
+						fmt.Sprintf("Откройте запись MX (Имя = @, Приоритет = 10) и замените IP-адрес на доменное имя: %s.", recommendedHost),
+					},
+					VerifyCmd: fmt.Sprintf("nslookup -type=mx %s 8.8.8.8", mailDomain),
+					CopyItems: []CopySnippet{
+						{Label: "Правильное значение MX (Имя = @, Приоритет = 10)", Value: recommendedHost},
+					},
+				},
+			)
 		} else {
 			report.Checks = append(report.Checks, MailCheckItem{
 				ID:       "mx",
-				Category: "DNS Маршрутизация",
-				Title:    "Записи приёма почты (DNS MX)",
+				Category: "DNS Маршрутизация входящей почты",
+				Title:    "Записи приёма почты (DNS MX и A-запись сервера)",
 				Status:   "ok",
-				Summary:  fmt.Sprintf("Найдено %d MX-записей (основной сервер: %s → %s)", len(mxs), mxs[0].Host, nonEmptyOr(serverIP, "OK")),
+				Summary:  fmt.Sprintf("Отлично! Найдено %d MX-записей (основной сервер: %s → %s)", len(mxs), mxs[0].Host, ipDisplay),
 				Details:  mxDetails,
 			})
 		}
 	}
 
 	// =========================================================================
-	// CHECK 2: REVERSE DNS (PTR) & FCrDNS — #1 SPAM CAUSE IN CIS/BELARUS!
+	// CHECK 2: REVERSE DNS (PTR) & FCrDNS — #1 SPAM / 550 REJECT CAUSE!
 	// =========================================================================
-	if serverIP == "" {
-		deduct(15)
-		report.Checks = append(report.Checks, MailCheckItem{
-			ID:       "ptr",
-			Category: "Обратная зона провайдера (PTR / rDNS)",
-			Title:    "Обратная запись IP-адреса (PTR / FCrDNS)",
-			Status:   "error",
-			Summary:  fmt.Sprintf("Хост почтового сервера %s не резолвится в публичный IP-адрес!", mailHost),
-		})
-	} else if len(ptrs) == 0 {
-		deduct(22)
-		report.Checks = append(report.Checks, MailCheckItem{
-			ID:       "ptr",
-			Category: "Обратная зона провайдера (PTR / rDNS)",
-			Title:    "Обратная запись IP-адреса (PTR / FCrDNS)",
-			Status:   "error",
-			Summary:  fmt.Sprintf("У IP-адреса %s НЕТ обратной записи PTR! Письма на Gmail, Mail.ru, Yandex и многие корп. серверы будут отклоняться с ошибкой 550 5.7.1!", serverIP),
-			Details: []string{
-				"Проверенный IP сервера: " + serverIP,
-				"Ожидаемая PTR-запись: " + mailHost,
-				"Фактический ответ DNS: NXDOMAIN (запись отсутствует у интернет-провайдера)",
-			},
-		})
-		report.Remediations = append(report.Remediations, MailRemediationGuide{
-			Severity:     "critical",
-			Category:     "Обратная зона провайдера (PTR / rDNS)",
-			Title:        fmt.Sprintf("Пропишите обратную запись PTR для IP %s → %s у интернет-провайдера", serverIP, mailHost),
-			WhyItMatters: "Отсутствие PTR — причина №1 мгновенной блокировки писем (ошибка 550 Client host rejected: cannot find your reverse hostname) в Gmail, Mail.ru, Yandex, Rambler и на корпоративных шлюзах. Важно: PTR-запись прописывается НЕ в панели домена hoster.by, а ТОЛЬКО у провайдера интернета, выдавшего статический IP " + serverIP + " (Белтелеком, A1, МТС, Деловая сеть и др.)!",
-			Steps: []string{
-				"Убедитесь, что прямая A-запись в вашей панели DNS уже существует: " + mailHost + " → " + serverIP + ".",
-				"Отправьте заявку в техподдержку вашего интернет-провайдера (Белтелеком: support@belpak.by / кабинет юрлица, A1, МТС или хостинг-провайдер VPS) с текстом ниже.",
-				"Подождите 1–4 часа после ответа провайдера и нажмите «Проверить снова» на этой вкладке.",
-			},
-			CopyItems: []CopySnippet{
-				{
-					Label: "Готовый текст заявки интернет-провайдеру на добавление PTR",
-					Value: fmt.Sprintf("Здравствуйте! Просим прописать обратную DNS-запись (PTR / rDNS) в обратной зоне для нашего статического IP-адреса %s на имя нашего почтового сервера: %s. Прямая A-запись %s -> %s уже настроена. Заранее спасибо!", serverIP, mailHost, mailHost, serverIP),
+	if serverIP == "" || net.ParseIP(serverIP) == nil || net.ParseIP(serverIP).IsPrivate() || net.ParseIP(serverIP).IsLoopback() {
+		deduct(18)
+		addIssue(
+			MailCheckItem{
+				ID:       "ptr",
+				Category: "Обратная зона интернет-провайдера (PTR / rDNS)",
+				Title:    "Обратная запись IP-адреса (PTR / FCrDNS)",
+				Status:   "error",
+				Summary:  fmt.Sprintf("Не удалось определить внешний белый IP-адрес для %s — невозможно проверить обратную запись PTR у провайдера!", recommendedHost),
+				Details: []string{
+					fmt.Sprintf("Проверенный хост почтового сервера: %s", recommendedHost),
+					"Сначала добавьте в DNS запись типа A (mail." + mailDomain + " → внешний статический IP вашего роутера/сервера), чтобы публичный интернет видел IP почтового сервера.",
 				},
 			},
-		})
+			MailRemediationGuide{
+				Severity:     "critical",
+				Category:     "Обратная зона провайдера (A + PTR / rDNS)",
+				Title:        fmt.Sprintf("Шаг 1: Пропишите A-запись %s → белый IP, затем закажите PTR у интернет-провайдера", recommendedHost),
+				WhyItMatters: "Любой почтовый сервер в мире (Gmail, Mail.ru, Yandex, Outlook) при приёме письма от вашего Kerio Connect проверяет две вещи: 1) Прямую A-запись (mail." + mailDomain + " → ваш белый IP) в вашей панели домена, и 2) Обратную PTR-запись (ваш белый IP → mail." + mailDomain + ") на оборудовании вашего интернет-провайдера! Без этой связки письма блокируются с кодом 550 5.7.1 Client host rejected: cannot find your reverse hostname.",
+				Steps: []string{
+					"Узнайте точный внешний статический (белый) IP-адрес, через который Kerio Connect выходит в интернет (посмотрите WAN-интерфейс в Kerio Control / MikroTik или откройте https://ifconfig.me с самого почтового сервера).",
+					fmt.Sprintf("В панели управления доменом %s (hoster.by / Cloudflare / active.by) добавьте запись: Тип = A, Имя = mail, Значение = ваш белый IP.", mailDomain),
+					fmt.Sprintf("Напишите заявку вашему интернет-провайдеру (Белтелеком / A1 / МТС / Деловая сеть / хостер VPS) — ВНИМАНИЕ: запись PTR прописывается ТОЛЬКО интернет-провайдером (владельцем подсети IP), в панели hoster.by её создать нельзя!", ),
+					fmt.Sprintf("Попросите провайдера прописать PTR-запись для вашего белого IP на имя %s, после чего нажмите «Проверить почтовый сервер» ещё раз!", recommendedHost),
+				},
+				VerifyCmd: fmt.Sprintf("nslookup %s 8.8.8.8", recommendedHost),
+				CopyItems: []CopySnippet{
+					{
+						Label: "Готовый шаблон письма в техподдержку интернет-провайдера (вставьте ваш белый IP)",
+						Value: fmt.Sprintf("Здравствуйте! Просим прописать обратную DNS-запись (PTR / rDNS) для нашего статического внешнего IP-адреса [ВСТАВЬТЕ_БЕЛЫЙ_IP] на доменное имя нашего почтового сервера: %s. Прямая A-запись %s -> [ВСТАВЬТЕ_БЕЛЫЙ_IP] в DNS настроена. Спасибо!", recommendedHost, recommendedHost),
+					},
+				},
+			},
+		)
+	} else if len(ptrs) == 0 {
+		deduct(22)
+		addIssue(
+			MailCheckItem{
+				ID:       "ptr",
+				Category: "Обратная зона интернет-провайдера (PTR / rDNS)",
+				Title:    "Обратная запись IP-адреса (PTR / FCrDNS)",
+				Status:   "error",
+				Summary:  fmt.Sprintf("У внешнего IP-адреса %s НЕТ обратной записи PTR! Письма на Gmail, Mail.ru, Yandex и корпоративные серверы отклоняются с ошибкой 550 5.7.1 или падают в СПАМ!", serverIP),
+				Details: []string{
+					"Внешний белый IP вашего сервера: " + serverIP,
+					"Должна возвращаться PTR-запись: " + recommendedHost,
+					"Текущий ответ обратного DNS: ПУСТО (NXDOMAIN)",
+				},
+			},
+			MailRemediationGuide{
+				Severity:     "critical",
+				Category:     "Обратная зона интернет-провайдера (PTR / rDNS)",
+				Title:        fmt.Sprintf("Закажите бесплатное добавление записи PTR у интернет-провайдера: %s → %s", serverIP, recommendedHost),
+				WhyItMatters: fmt.Sprintf("Отсутствие PTR — ПРИЧИНА №1 в Беларуси и СНГ, по которой почта с нового сервера Kerio Connect не доходит или попадает в СПАМ! ВАЖНО ЗНАТЬ: запись PTR хранится НЕ у регистратора домена (НЕ в hoster.by / Cloudflare), а на DNS-серверах интернет-провайдера, который выдал вам статический IP %s (Белтелеком / ByFly Бизнес, A1, МТС, Деловая сеть или VPS-хостер)!", serverIP),
+				Steps: []string{
+					fmt.Sprintf("Убедитесь, что прямая A-запись уже работает: %s → %s (многие провайдеры проверяют наличие A-записи перед прописыванием PTR).", recommendedHost, serverIP),
+					"Скопируйте готовый текст заявки кнопкой «Копировать» ниже (в него уже подставлены ваш IP и имя сервера!).",
+					"Отправьте заявку вашему интернет-провайдеру: • Для Белтелеком (юрлица): через кабинет юрлица или на email техподдержки вашего филиала (support@belpak.by / support@mgts.by, указав номер договора и лицевой счёт). • Для A1 / МТС / Деловая сеть: на email корпоративной техподдержки с указанием договора. • Для облачного VPS: прямо в панели управления виртуальным сервером в разделе «Сеть / IP-адреса → Обратная запись (rDNS / PTR)».",
+					"После ответа провайдера (обычно от 15 минут до 2–4 часов) нажмите «Проверить почтовый сервер» на этой вкладке — пункт загорится зелёным!",
+				},
+				VerifyCmd: fmt.Sprintf("nslookup %s 8.8.8.8", serverIP),
+				CopyItems: []CopySnippet{
+					{
+						Label: "Готовый текст письма провайдеру интернета (Белтелеком / A1 / МТС)",
+						Value: fmt.Sprintf("Здравствуйте! Договор № [УКАЖИТЕ_НОМЕР_ДОГОВОРА]. Просим прописать обратную DNS-запись (PTR / rDNS) для нашего статического IP-адреса %s на доменное имя почтового сервера: %s. Прямая A-запись %s -> %s настроена. Заранее спасибо!", serverIP, recommendedHost, recommendedHost, serverIP),
+					},
+					{
+						Label: "Точное значение PTR (если заполняете в панели VPS сами)",
+						Value: recommendedHost,
+					},
+				},
+			},
+		)
 	} else {
 		exactMatch := false
 		fcrdnsOK := false
 		genericISP := false
 		for _, p := range ptrs {
-			if strings.EqualFold(p, mailHost) {
+			if strings.EqualFold(p, recommendedHost) {
 				exactMatch = true
 			}
 			low := strings.ToLower(p)
@@ -1004,7 +1159,7 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 		if exactMatch && fcrdnsOK {
 			report.Checks = append(report.Checks, MailCheckItem{
 				ID:       "ptr",
-				Category: "Обратная зона провайдера (PTR / rDNS)",
+				Category: "Обратная зона интернет-провайдера (PTR / rDNS)",
 				Title:    "Обратная запись IP-адреса (PTR / FCrDNS)",
 				Status:   "ok",
 				Summary:  fmt.Sprintf("Идеально! IP %s имеет PTR-запись %s, полностью совпадающую с прямой A-записью (FCrDNS OK)", serverIP, ptrs[0]),
@@ -1012,151 +1167,179 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 			})
 		} else {
 			deduct(10)
-			report.Checks = append(report.Checks, MailCheckItem{
-				ID:       "ptr",
-				Category: "Обратная зона провайдера (PTR / rDNS)",
-				Title:    "Обратная запись IP-адреса (PTR / FCrDNS)",
-				Status:   "warning",
-				Summary:  fmt.Sprintf("PTR-запись есть (%s), но НЕ совпадает с именем почтового сервера (%s)", strings.Join(ptrs, ", "), mailHost),
-				Details: []string{
-					"Текущая PTR-запись у провайдера: " + strings.Join(ptrs, ", "),
-					"Имя почтового сервера (MX / SSL): " + mailHost,
-					fmt.Sprintf("Проверка FCrDNS (PTR → A → %s): %v, Похоже на пул провайдера: %v", serverIP, fcrdnsOK, genericISP),
-				},
-			})
-			report.Remediations = append(report.Remediations, MailRemediationGuide{
-				Severity:     "warning",
-				Category:     "Обратная зона провайдера (PTR / rDNS)",
-				Title:        fmt.Sprintf("Согласуйте обратную запись PTR (%s → %s) с именем сервера Kerio", ptrs[0], mailHost),
-				WhyItMatters: "Когда PTR-запись IP-адреса (" + ptrs[0] + ") выглядит как техническое имя провайдера или не совпадает с именем SMTP-сервера (" + mailHost + "), спам-фильтры Gmail/Yandex снижают репутацию отправителя.",
-				Steps: []string{
-					"Попросите интернет-провайдера заменить текущую PTR-запись " + ptrs[0] + " для IP " + serverIP + " на " + mailHost + ".",
-				},
-				CopyItems: []CopySnippet{
-					{
-						Label: "Готовый текст заявки провайдеру на изменение PTR",
-						Value: fmt.Sprintf("Здравствуйте! Просим изменить обратную запись PTR для нашего статического IP-адреса %s с текущего значения %s на имя почтового сервера: %s. Прямая A-запись %s -> %s настроена.", serverIP, ptrs[0], mailHost, mailHost, serverIP),
+			addIssue(
+				MailCheckItem{
+					ID:       "ptr",
+					Category: "Обратная зона интернет-провайдера (PTR / rDNS)",
+					Title:    "Обратная запись IP-адреса (PTR / FCrDNS)",
+					Status:   "warning",
+					Summary:  fmt.Sprintf("PTR-запись у IP %s есть («%s»), но НЕ совпадает с именем почтового сервера «%s»!", serverIP, strings.Join(ptrs, ", "), recommendedHost),
+					Details: []string{
+						"Текущая PTR-запись провайдера: " + strings.Join(ptrs, ", "),
+						"Ожидаемое имя почтового сервера: " + recommendedHost,
+						fmt.Sprintf("Проверка FCrDNS (PTR → A → %s): %v | Похоже на дефолтный пул провайдера: %v", serverIP, fcrdnsOK, genericISP),
 					},
 				},
-			})
+				MailRemediationGuide{
+					Severity:     "warning",
+					Category:     "Обратная зона интернет-провайдера (PTR / rDNS)",
+					Title:        fmt.Sprintf("Попросите провайдера изменить PTR-запись IP %s с «%s» на «%s»", serverIP, ptrs[0], recommendedHost),
+					WhyItMatters: fmt.Sprintf("Сейчас обратная запись вашего IP выглядит как технический адрес провайдера («%s»), особенно если в ней есть слова pool / dynamic / static / byfly. Антиспам-фильтры Gmail, Outlook и SpamAssassin начисляют за это штрафные баллы RDNS_DYNAMIC / FCrDNS mismatch.", ptrs[0]),
+					Steps: []string{
+						fmt.Sprintf("Убедитесь, что в вашей панели DNS есть прямая A-запись: %s → %s.", recommendedHost, serverIP),
+						fmt.Sprintf("Отправьте интернет-провайдеру (или измените в панели VPS) заявку на смену PTR для IP %s на %s (готовый текст ниже):", serverIP, recommendedHost),
+					},
+					VerifyCmd: fmt.Sprintf("nslookup %s 8.8.8.8", serverIP),
+					CopyItems: []CopySnippet{
+						{
+							Label: "Готовый текст заявки провайдеру на замену PTR",
+							Value: fmt.Sprintf("Здравствуйте! Просим изменить обратную запись PTR (rDNS) для нашего статического IP-адреса %s с текущего значения %s на имя нашего почтового сервера: %s. Прямая A-запись %s -> %s настроена. Спасибо!", serverIP, ptrs[0], recommendedHost, recommendedHost, serverIP),
+						},
+					},
+				},
+			)
 		}
 	}
 
 	// =========================================================================
 	// CHECK 3: SPF RECORD (v=spf1)
 	// =========================================================================
-	recommendedSPF := fmt.Sprintf("v=spf1 mx a:%s ~all", mailHost)
-	if serverIP != "" {
-		recommendedSPF = fmt.Sprintf("v=spf1 mx a:%s ip4:%s ~all", mailHost, serverIP)
+	recommendedSPF := fmt.Sprintf("v=spf1 mx a:%s ~all", recommendedHost)
+	if serverIP != "" && net.ParseIP(serverIP) != nil && !net.ParseIP(serverIP).IsPrivate() {
+		recommendedSPF = fmt.Sprintf("v=spf1 mx a:%s ip4:%s ~all", recommendedHost, serverIP)
 	}
 	if len(spfRecords) == 0 {
 		deduct(18)
-		report.Checks = append(report.Checks, MailCheckItem{
-			ID:       "spf",
-			Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
-			Title:    "Запись SPF (защита от подделки отправителя)",
-			Status:   "error",
-			Summary:  fmt.Sprintf("У домена %s НЕТ SPF-записи! Письма на Gmail, Yahoo, Mail.ru и корпоративную почту почти гарантированно попадут в СПАМ или будут отклонены (550 5.7.26)!", mailDomain),
-		})
-		report.Remediations = append(report.Remediations, MailRemediationGuide{
-			Severity:     "critical",
-			Category:     "Аутентификация отправителя (SPF)",
-			Title:        "Добавьте TXT-запись SPF для домена " + mailDomain,
-			WhyItMatters: "С 2024–2026 гг. Google (Gmail), Yahoo, Microsoft Outlook и Mail.ru официально отклоняют или отправляют в СПАМ все письма с доменов без корректной SPF-записи.",
-			Steps: []string{
-				"Откройте панель управления DNS домена " + mailDomain + " (hoster.by / active.by / Cloudflare).",
-				"Создайте новую запись типа TXT.",
-				"В поле Имя (Хост / Субдомен) укажите @ (или оставьте пустым, если панель обозначает корень домена пустым полем).",
-				"В поле Значение вставьте готовую строку ниже (она уже включает ваш MX-сервер " + mailHost + " и внешний IP " + nonEmptyOr(serverIP, "") + ").",
+		spfDetails := []string{
+			"Проверенный домен отправителя (после @ в email): " + mailDomain,
+			"Рекомендуемая готовая запись: " + recommendedSPF,
+		}
+		if len(strayMailSPF) > 0 {
+			spfDetails = append(spfDetails, fmt.Sprintf("⚠️ ВНИМАНИЕ: Обнаружена SPF-запись на поддомене mail.%s (%s) вместо корневого домена %s! Её нужно перенести на @ (%s)!", mailDomain, strayMailSPF[0], mailDomain, mailDomain))
+		}
+		addIssue(
+			MailCheckItem{
+				ID:       "spf",
+				Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
+				Title:    "Запись SPF (разрешённые серверы отправки для @" + mailDomain + ")",
+				Status:   "error",
+				Summary:  fmt.Sprintf("У домена %s НЕТ SPF-записи! Письма на Gmail, Yahoo, Outlook и Mail.ru попадают в СПАМ или отклоняются с ошибкой 550 5.7.26!", mailDomain),
+				Details:  spfDetails,
 			},
-			CopyItems: []CopySnippet{
-				{Label: "Имя записи (Host)", Value: "@"},
-				{Label: "Готовое значение TXT (SPF)", Value: recommendedSPF},
+			MailRemediationGuide{
+				Severity:     "critical",
+				Category:     "Аутентификация отправителя (DNS TXT — SPF)",
+				Title:        fmt.Sprintf("Добавьте готовую TXT-запись SPF для домена %s (займёт 1 минуту)", mailDomain),
+				WhyItMatters: fmt.Sprintf("Запись SPF официально сообщает всем почтовым сервисам мира, что отправлять письма от имени @%s имеет право именно ваш сервер %s (%s). Без SPF Google Gmail и Mail.ru с 2024 года блокируют письма с ошибкой «550-5.7.26 This mail has been blocked because the sender is unauthenticated».", mailDomain, recommendedHost, ipDisplay),
+				Steps: []string{
+					fmt.Sprintf("Войдите в панель управления DNS домена %s (hoster.by, active.by, Cloudflare, ISPmanager).", mailDomain),
+					"Нажмите «Добавить запись» → выберите Тип записи: TXT.",
+					fmt.Sprintf("В поле «Имя / Субдомен / Хост» укажите символ @ (или оставьте поле пустым, если в вашей панели корень домена %s обозначается пустым полем; НЕ пишите слово mail!).", mailDomain),
+					"Скопируйте кнопкой ниже готовую строку SPF и вставьте её в поле «Значение / Текст» (без лишних кавычек по краям — панель добавит их сама).",
+					"Примечание: если ваш корпоративный сайт на хостинге (например, Bitrix / WordPress) тоже отправляет уведомления о заказах от имени @" + mailDomain + ", добавьте перед ~all также ip4:IP_САЙТА (например: " + strings.Replace(recommendedSPF, "~all", "ip4:IP_ВАШЕГО_САЙТА ~all", 1) + ").",
+					"Нажмите «Сохранить» — запись начнёт действовать в течение 5–10 минут!",
+				},
+				VerifyCmd: fmt.Sprintf("nslookup -type=txt %s 8.8.8.8", mailDomain),
+				CopyItems: []CopySnippet{
+					{Label: "Тип записи: TXT  |  Поле «Имя / Хост»", Value: "@"},
+					{Label: "Поле «Значение TXT» (готовая строка под ваш сервер)", Value: recommendedSPF},
+				},
 			},
-		})
+		)
 	} else if len(spfRecords) > 1 {
 		deduct(16)
-		report.Checks = append(report.Checks, MailCheckItem{
-			ID:       "spf",
-			Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
-			Title:    "Запись SPF (защита от подделки отправителя)",
-			Status:   "error",
-			Summary:  fmt.Sprintf("КРИТИЧЕСКАЯ ОШИБКА: обнаружено сразу %d разных SPF-записей! По стандарту RFC 7208 это даёт статус PermError (SPF полностью сломан)!", len(spfRecords)),
-			Details:  spfRecords,
-		})
-		report.Remediations = append(report.Remediations, MailRemediationGuide{
-			Severity:     "critical",
-			Category:     "Аутентификация отправителя (SPF)",
-			Title:        "Объедините несколько SPF-записей в одну-единственную TXT-запись",
-			WhyItMatters: "Если у домена больше одной записи v=spf1, любой почтовый сервер обязан вернуть ошибку PermError и отправить письмо в СПАМ.",
-			Steps: []string{
-				"Удалите дублирующиеся записи v=spf1 в панели DNS домена " + mailDomain + ", объединив все разрешённые include:/ip4: в одну строку.",
+		addIssue(
+			MailCheckItem{
+				ID:       "spf",
+				Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
+				Title:    "Запись SPF (разрешённые серверы отправки для @" + mailDomain + ")",
+				Status:   "error",
+				Summary:  fmt.Sprintf("КРИТИЧЕСКАЯ ОШИБКА: у домена %s найдено сразу %d разных SPF-записей! По стандарту RFC 7208 это аннулирует обе записи (SPF PermError)!", mailDomain, len(spfRecords)),
+				Details:  spfRecords,
 			},
-			CopyItems: []CopySnippet{
-				{Label: "Единая рекомендуемая SPF-запись", Value: recommendedSPF},
+			MailRemediationGuide{
+				Severity:     "critical",
+				Category:     "Аутентификация отправителя (DNS TXT — SPF)",
+				Title:        fmt.Sprintf("Объедините %d записи v=spf1 в ОДНУ запись TXT в панели DNS", len(spfRecords)),
+				WhyItMatters: "По стандарту RFC 7208 у домена может существовать строго ОДНА запись, начинающаяся с v=spf1. Когда админы добавляют вторую строку v=spf1 (например, одну для хостинга сайта и вторую для Kerio), все почтовые серверы возвращают статус PermError (постоянная ошибка SPF)!",
+				Steps: []string{
+					fmt.Sprintf("Откройте панель DNS домена %s и найдите все TXT-записи, начинающиеся с v=spf1.", mailDomain),
+					"Удалите дубликаты и оставьте только ОДНУ запись TXT (Имя = @), объединив в ней все ваши серверы (ip4:... и include:...) перед завершающим ~all.",
+				},
+				VerifyCmd: fmt.Sprintf("nslookup -type=txt %s 8.8.8.8", mailDomain),
+				CopyItems: []CopySnippet{
+					{Label: "Единая базовая запись SPF для вашего Kerio Connect", Value: recommendedSPF},
+				},
 			},
-		})
+		)
 	} else {
 		spf := spfRecords[0]
 		lowSPF := strings.ToLower(spf)
 		hasPlusAll := strings.Contains(lowSPF, "+all")
 		coversServer := strings.Contains(lowSPF, "mx") ||
 			(serverIP != "" && strings.Contains(lowSPF, serverIP)) ||
-			strings.Contains(lowSPF, mailHost)
+			strings.Contains(lowSPF, recommendedHost)
 		if hasPlusAll {
 			deduct(20)
-			report.Checks = append(report.Checks, MailCheckItem{
-				ID:       "spf",
-				Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
-				Title:    "Запись SPF (защита от подделки отправителя)",
-				Status:   "error",
-				Summary:  "ОПАСНО: в SPF-записи указано '+all' — это разрешает ЛЮБОМУ спамеру в мире рассылать письма от вашего имени!",
-				Details:  []string{spf},
-			})
-			report.Remediations = append(report.Remediations, MailRemediationGuide{
-				Severity:     "critical",
-				Category:     "Аутентификация отправителя (SPF)",
-				Title:        "Немедленно замените '+all' на '~all' или '-all' в SPF-записи",
-				WhyItMatters: "Механизм +all отключает защиту домена и приводит к попаданию домена в чёрные списки.",
-				Steps: []string{
-					"Замените текущую TXT-запись SPF в панели DNS на безопасный вариант ниже:",
+			addIssue(
+				MailCheckItem{
+					ID:       "spf",
+					Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
+					Title:    "Запись SPF (разрешённые серверы отправки для @" + mailDomain + ")",
+					Status:   "error",
+					Summary:  "ОПАСНО: в SPF-записи стоит '+all' — вы официально разрешили ЛЮБОМУ спамеру мира слать поддельные письма от @" + mailDomain + "!",
+					Details:  []string{"Текущая опасная запись: " + spf},
 				},
-				CopyItems: []CopySnippet{
-					{Label: "Исправленное значение TXT (SPF)", Value: recommendedSPF},
+				MailRemediationGuide{
+					Severity:     "critical",
+					Category:     "Аутентификация отправителя (DNS TXT — SPF)",
+					Title:        "Срочно замените '+all' на '~all' в вашей TXT-записи SPF",
+					WhyItMatters: "Знак '+all' в конце SPF означает «разрешить отправку с любого IP-адреса в интернете». Большинство спам-фильтров отправляют домены с +all прямиком в Спам.",
+					Steps: []string{
+						fmt.Sprintf("В панели DNS домена %s откройте TXT-запись «%s» и замените её на безопасную строку ниже:", mailDomain, spf),
+					},
+					VerifyCmd: fmt.Sprintf("nslookup -type=txt %s 8.8.8.8", mailDomain),
+					CopyItems: []CopySnippet{
+						{Label: "Исправленное значение TXT (SPF)", Value: recommendedSPF},
+					},
 				},
-			})
+			)
 		} else if !coversServer {
 			deduct(14)
-			report.Checks = append(report.Checks, MailCheckItem{
-				ID:       "spf",
-				Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
-				Title:    "Запись SPF (защита от подделки отправителя)",
-				Status:   "warning",
-				Summary:  fmt.Sprintf("SPF-запись найдена, но в ней НЕ указан ни 'mx', ни IP вашего сервера %s — письма с Kerio не пройдут SPF!", serverIP),
-				Details:  []string{"Текущая запись: " + spf},
-			})
 			mergedSPF := strings.TrimSpace(strings.Replace(spf, "~all", "", 1))
-			mergedSPF = strings.TrimSpace(strings.Replace(mergedSPF, "-all", "", 1)) + fmt.Sprintf(" mx ip4:%s ~all", serverIP)
-			report.Remediations = append(report.Remediations, MailRemediationGuide{
-				Severity:     "critical",
-				Category:     "Аутентификация отправителя (SPF)",
-				Title:        "Добавьте IP вашего сервера Kerio (" + serverIP + ") в существующую SPF-запись",
-				WhyItMatters: "Если сервер отправляет почту с IP " + serverIP + ", которого нет в вашей SPF-записи, все получатели видят статус SPF SoftFail / Fail -> СПАМ.",
-				Steps: []string{
-					"Откройте существующую TXT-запись v=spf1 в панели DNS домена " + mailDomain + ".",
-					"Обновите её на объединённый вариант ниже (сохранены все ваши старые настройки + добавлен сервер Kerio):",
+			mergedSPF = strings.TrimSpace(strings.Replace(mergedSPF, "-all", "", 1))
+			mergedSPF = strings.TrimSpace(strings.Replace(mergedSPF, "?all", "", 1)) + fmt.Sprintf(" mx a:%s ip4:%s ~all", recommendedHost, ipDisplay)
+			addIssue(
+				MailCheckItem{
+					ID:       "spf",
+					Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
+					Title:    "Запись SPF (разрешённые серверы отправки для @" + mailDomain + ")",
+					Status:   "warning",
+					Summary:  fmt.Sprintf("Запись SPF есть, но в ней НЕ разрешён ваш сервер Kerio Connect (%s / %s)! Письма с Kerio получают статус SPF SoftFail → СПАМ!", recommendedHost, ipDisplay),
+					Details:  []string{"Текущая запись (скорее всего осталась от старого хостинга): " + spf},
 				},
-				CopyItems: []CopySnippet{
-					{Label: "Обновлённая запись TXT (SPF)", Value: mergedSPF},
+				MailRemediationGuide{
+					Severity:     "critical",
+					Category:     "Аутентификация отправителя (DNS TXT — SPF)",
+					Title:        fmt.Sprintf("Добавьте сервер Kerio (%s) в существующую SPF-запись домена %s", ipDisplay, mailDomain),
+					WhyItMatters: "Частая ситуация: домен перенесли на свой Kerio Connect в офисе, а в DNS осталась старая SPF-запись веб-хостинга. В итоге каждый исходящий email с офисного IP проваливает проверку SPF!",
+					Steps: []string{
+						fmt.Sprintf("Откройте существующую TXT-запись v=spf1 в панели DNS домена %s (НЕ создавайте вторую запись — отредактируйте существующую!).", mailDomain),
+						"Замените её текст на готовый объединённый вариант ниже (мы сохранили ваши текущие правила и добавили Kerio Connect):",
+					},
+					VerifyCmd: fmt.Sprintf("nslookup -type=txt %s 8.8.8.8", mailDomain),
+					CopyItems: []CopySnippet{
+						{Label: "Готовая объединённая TXT-запись SPF", Value: mergedSPF},
+					},
 				},
-			})
+			)
 		} else {
 			report.Checks = append(report.Checks, MailCheckItem{
 				ID:       "spf",
 				Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
-				Title:    "Запись SPF (защита от подделки отправителя)",
+				Title:    "Запись SPF (разрешённые серверы отправки для @" + mailDomain + ")",
 				Status:   "ok",
-				Summary:  "SPF-запись настроена корректно и включает ваш почтовый сервер: " + spf,
+				Summary:  "SPF-запись настроена правильно и разрешает отправку вашему серверу: " + spf,
 				Details:  []string{"Активная TXT-запись: " + spf},
 			})
 		}
@@ -1167,90 +1350,129 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 	// =========================================================================
 	if dkimFoundRecord == "" {
 		deduct(16)
-		report.Checks = append(report.Checks, MailCheckItem{
-			ID:       "dkim",
-			Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
-			Title:    "Цифровая криптографическая подпись писем (DKIM)",
-			Status:   "error",
-			Summary:  fmt.Sprintf("В DNS не найдена публичная запись DKIM (проверены mail._domainkey.%s и ещё 11 стандартных селекторов)!", mailDomain),
-			Details: []string{
-				"В Kerio Connect по умолчанию используется имя записи: mail._domainkey." + mailDomain,
-				"Без цифровой подписи DKIM письма часто попадают в папку «Спам» в Gmail, Outlook и Mail.ru (особенно с вложениями PDF/DOCX/счетами!).",
+		addIssue(
+			MailCheckItem{
+				ID:       "dkim",
+				Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
+				Title:    "Цифровая криптографическая подпись писем (DKIM)",
+				Status:   "error",
+				Summary:  fmt.Sprintf("Не настроена цифровая подпись DKIM (проверены mail._domainkey.%s и ещё 11 селекторов)! В Kerio Connect это включается штатной галочкой за 2 минуты.", mailDomain),
+				Details: []string{
+					"Штатное имя DKIM-записи для Kerio Connect: mail._domainkey." + mailDomain,
+					"Без подписи DKIM письма со счетами, актами, PDF/DOCX/XLSX и ссылками массово отфильтровываются в папку «Спам» в Gmail, Outlook и Mail.ru.",
+				},
 			},
-		})
-		report.Remediations = append(report.Remediations, MailRemediationGuide{
-			Severity:     "critical",
-			Category:     "Kerio Connect + DNS (DKIM)",
-			Title:        "Включите криптографическую подпись DKIM в Kerio Connect за 2 минуты",
-			WhyItMatters: "DKIM прикрепляет к каждому исходящему письму цифровую RSA-подпись вашего домена. Для Gmail, Mail.ru и Yandex наличие DKIM — главный признак легитимного корпоративного сервера, а не спам-бота.",
-			Steps: []string{
-				"Откройте веб-админку Kerio Connect: https://" + mailHost + ":4040/admin/ → раздел «Конфигурация» → «Домены».",
-				"Дважды щёлкните на ваш домен «" + mailDomain + "» → перейдите на вкладку «Дополнительно» (в новых версиях — блок DomainKeys / DKIM).",
-				"Поставьте галочку «Подписывать исходящие сообщения ключом DomainKeys Identified Mail (DKIM)» и нажмите кнопку «Показать открытый ключ» (Kerio сам сгенерирует ключ и покажет готовый текст v=DKIM1; k=rsa; p=...).",
-				"Откройте панель DNS вашего домена (" + mailDomain + ") и создайте запись типа TXT с коротким именем mail._domainkey и скопированным из Kerio значением!",
-				"Вернитесь в окно домена в Kerio Connect и нажмите «Проверить DNS» → «ОК» → «Применить».",
+			MailRemediationGuide{
+				Severity:     "critical",
+				Category:     "Kerio Connect Admin + Панель DNS (DKIM)",
+				Title:        fmt.Sprintf("Пошаговое включение подписи DKIM в Kerio Connect для домена %s", mailDomain),
+				WhyItMatters: "В Kerio Connect встроен готовый генератор ключей DKIM — никаких сторонних плагинов ставить НЕ нужно! Kerio подписывает заголовок и тело каждого исходящего письма закрытым ключом, а Gmail / Yandex / Mail.ru проверяют подпись по открытому ключу из DNS и гарантируют, что письмо подлинное и не подделано.",
+				Steps: []string{
+					fmt.Sprintf("Откройте консоль администрирования Kerio Connect (например, https://10.146.100.14:4040/admin/ или https://%s:4040/admin/).", recommendedHost),
+					fmt.Sprintf("В левом меню перейдите в «Конфигурация» (Configuration) → «Домены» (Domains) → дважды кликните на ваш домен «%s».", mailDomain),
+					"В открывшемся окне свойств домена перейдите на вкладку «Дополнительно» (Advanced) — или на вкладку «DomainKeys / DKIM» (в зависимости от версии Kerio Connect 9.x).",
+					"Поставьте галочку «Подписывать исходящие сообщения ключом DomainKeys Identified Mail (Sign outgoing messages with DKIM key)».",
+					"Нажмите кнопку рядом «Показать открытый ключ... (Show public key...)» — откроется окошко с длинным текстом вида: v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA... Скопируйте это значение ЦЕЛИКОМ (начиная с v=DKIM1... до последнего символа)!",
+					fmt.Sprintf("Откройте панель управления DNS вашего домена %s и создайте новую запись: • Тип записи: TXT • Поле «Имя / Субдомен»: mail._domainkey (ВНИМАНИЕ: в hoster.by / active.by / Cloudflare пишите ТОЛЬКО mail._domainkey — НЕ дописывайте .%s в конце, иначе получится ошибка mail._domainkey.%s.%s! А в ISPmanager / BIND пишите с точкой в самом конце: mail._domainkey.%s.) • Поле «Значение»: вставьте скопированную из Kerio строку v=DKIM1; k=rsa; p=...", mailDomain, mailDomain, mailDomain, mailDomain, mailDomain),
+					"Подождите 3–5 минут, вернитесь в окно свойств домена в Kerio Connect и нажмите кнопку «Проверить DNS (Check DNS)» — Kerio покажет зелёное сообщение «Открытый ключ подтверждён в DNS!». Нажмите «ОК» для сохранения!",
+				},
+				VerifyCmd: fmt.Sprintf("nslookup -type=txt mail._domainkey.%s 8.8.8.8", mailDomain),
+				CopyItems: []CopySnippet{
+					{Label: "Поле «Имя / Хост» для hoster.by / active.by / Cloudflare (Тип TXT)", Value: "mail._domainkey"},
+					{Label: "Полное FQDN-имя (для ISPmanager — с точкой на конце)", Value: "mail._domainkey." + mailDomain + "."},
+				},
 			},
-			CopyItems: []CopySnippet{
-				{Label: "Короткое имя TXT-записи (для hoster.by / Cloudflare / ISPmanager)", Value: "mail._domainkey"},
-				{Label: "Полное FQDN-имя TXT-записи", Value: "mail._domainkey." + mailDomain},
-			},
-		})
+		)
 	} else {
 		algo, bits := parseDKIMPublicKeyBits(dkimFoundRecord)
-		status := "ok"
-		summary := fmt.Sprintf("Найдена активная запись DKIM (%s._domainkey.%s, ключ %s %d бит)", dkimFoundSelector, mailDomain, strings.ToUpper(algo), bits)
 		if algo == "rsa" && bits > 0 && bits < 1024 {
-			status = "warning"
 			deduct(8)
-			summary = fmt.Sprintf("DKIM найден (%s._domainkey), но длина RSA-ключа слишком мала (%d бит — рекомендуется 1024–2048 бит)!", dkimFoundSelector, bits)
+			addIssue(
+				MailCheckItem{
+					ID:       "dkim",
+					Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
+					Title:    "Цифровая криптографическая подпись писем (DKIM)",
+					Status:   "warning",
+					Summary:  fmt.Sprintf("Запись DKIM найдена (%s._domainkey.%s), но ключ RSA устаревшей длины %d бит (Gmail требует минимум 1024–2048 бит)!", dkimFoundSelector, mailDomain, bits),
+					Details:  []string{fmt.Sprintf("Селектор: %s._domainkey.%s", dkimFoundSelector, mailDomain), dkimFoundRecord},
+				},
+				MailRemediationGuide{
+					Severity:     "warning",
+					Category:     "Kerio Connect + DNS (DKIM 2048 бит)",
+					Title:        "Перегенерируйте DKIM-ключ длиной 1024/2048 бит в Kerio Connect",
+					WhyItMatters: "Ключи RSA 512/768 бит считаются криптографически слабыми и отклоняются Google Gmail и Microsoft 365.",
+					Steps: []string{
+						fmt.Sprintf("В Kerio Connect WebAdmin → Конфигурация → Домены → %s → вкладка Дополнительно (DKIM) сгенерируйте новый ключ и обновите TXT-запись %s._domainkey в панели DNS.", mailDomain, dkimFoundSelector),
+					},
+					VerifyCmd: fmt.Sprintf("nslookup -type=txt %s._domainkey.%s 8.8.8.8", dkimFoundSelector, mailDomain),
+				},
+			)
+		} else {
+			report.Checks = append(report.Checks, MailCheckItem{
+				ID:       "dkim",
+				Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
+				Title:    "Цифровая криптографическая подпись писем (DKIM)",
+				Status:   "ok",
+				Summary:  fmt.Sprintf("Отлично! Активна криптографическая подпись DKIM (%s._domainkey.%s, ключ %s %d бит)", dkimFoundSelector, mailDomain, strings.ToUpper(algo), bits),
+				Details:  []string{fmt.Sprintf("Селектор: %s._domainkey.%s", dkimFoundSelector, mailDomain), dkimFoundRecord},
+			})
 		}
-		report.Checks = append(report.Checks, MailCheckItem{
-			ID:       "dkim",
-			Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
-			Title:    "Цифровая криптографическая подпись писем (DKIM)",
-			Status:   status,
-			Summary:  summary,
-			Details:  []string{fmt.Sprintf("Селектор: %s._domainkey.%s", dkimFoundSelector, mailDomain), dkimFoundRecord},
-		})
 	}
 
 	// =========================================================================
 	// CHECK 5: DMARC POLICY (_dmarc.<domain>)
 	// =========================================================================
-	recommendedDMARC := fmt.Sprintf("v=DMARC1; p=quarantine; sp=quarantine; pct=100; rua=mailto:postmaster@%s; adkim=r; aspf=r", mailDomain)
+	recommendedDMARCSoft := fmt.Sprintf("v=DMARC1; p=none; sp=none; pct=100; rua=mailto:admin@%s; adkim=r; aspf=r", mailDomain)
+	recommendedDMARCStrict := fmt.Sprintf("v=DMARC1; p=quarantine; sp=quarantine; pct=100; rua=mailto:admin@%s; adkim=r; aspf=r", mailDomain)
 	if len(dmarcRecords) == 0 {
 		deduct(12)
-		report.Checks = append(report.Checks, MailCheckItem{
-			ID:       "dmarc",
-			Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
-			Title:    "Политика DMARC (_dmarc." + mailDomain + ")",
-			Status:   "error",
-			Summary:  "Запись _dmarc." + mailDomain + " отсутствует! Gmail, Yahoo, Outlook и Mail.ru требуют обязательного наличия DMARC.",
-		})
-		report.Remediations = append(report.Remediations, MailRemediationGuide{
-			Severity:     "warning",
-			Category:     "Аутентификация отправителя (DMARC)",
-			Title:        "Добавьте политику DMARC (_dmarc) в панель DNS домена " + mailDomain,
-			WhyItMatters: "Политика DMARC связывает воедино SPF + DKIM и защищает ваших клиентов и бухгалтерию от фишинговых писем с подменой вашего домена @" + mailDomain + ". Важно: включайте p=quarantine после того, как настроили SPF и DKIM (на первое время для мониторинга можно поставить p=none).",
-			Steps: []string{
-				"Откройте панель управления DNS домена " + mailDomain + " (hoster.by / active.by / Cloudflare).",
-				"Создайте запись типа TXT с коротким именем _dmarc и вставьте готовое значение ниже:",
+		var dDetails []string
+		steps := []string{
+			fmt.Sprintf("Войдите в панель управления DNS домена %s (hoster.by, active.by, Cloudflare, ISPmanager).", mailDomain),
+		}
+		if len(straySubdomainDMARC) > 0 {
+			dDetails = append(dDetails, fmt.Sprintf("⚠️ НАЙДЕНА ПРИЧИНА: в вашей панели DNS запись DMARC сейчас ошибочно создана на поддомене «_dmarc.mail.%s» (%s) вместо «_dmarc.%s»!", mailDomain, straySubdomainDMARC[0], mailDomain))
+			steps = append(steps, fmt.Sprintf("⚠️ ОБРАТИТЕ ВНИМАНИЕ: мы нашли вашу текущую запись «%s» на адресе _dmarc.mail.%s! Просто отредактируйте эту запись в панели DNS и измените поле «Имя / Хост» с «_dmarc.mail» на просто «_dmarc» (без .mail)!", straySubdomainDMARC[0], mailDomain))
+		} else {
+			dDetails = append(dDetails, "Отсутствует запись TXT для имени _dmarc."+mailDomain)
+			steps = append(steps, "Нажмите «Добавить запись» → выберите Тип записи: TXT.")
+			steps = append(steps, "В поле «Имя / Субдомен» напишите строго: _dmarc (ВНИМАНИЕ: НЕ пишите _dmarc.mail!).")
+		}
+		steps = append(steps,
+			"Если вы только что настраиваете SPF и DKIM — вставьте на первые 3–5 дней мягкий режим мониторинга (p=none, кнопка копирования №2 ниже): ни одно ваше письмо не заблокируется, а на почту администратора придут отчёты.",
+			"Когда убедитесь, что и SPF, и DKIM горят зелёным ✅ на этой вкладке — переключите значение на боевой защитный режим p=quarantine (кнопка копирования №3 ниже), чтобы чужие спамеры не могли подделывать письма от имени @"+mailDomain+"!",
+		)
+		addIssue(
+			MailCheckItem{
+				ID:       "dmarc",
+				Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
+				Title:    "Политика защиты домена DMARC (_dmarc." + mailDomain + ")",
+				Status:   "error",
+				Summary:  fmt.Sprintf("На основном домене _dmarc.%s отсутствует политика DMARC!", mailDomain),
+				Details:  dDetails,
 			},
-			CopyItems: []CopySnippet{
-				{Label: "Короткое имя TXT (для hoster.by / Cloudflare)", Value: "_dmarc"},
-				{Label: "Полное имя FQDN", Value: "_dmarc." + mailDomain},
-				{Label: "Готовое значение TXT (защита p=quarantine + отчёты на postmaster)", Value: recommendedDMARC},
-				{Label: "Мягкий стартовый вариант TXT (p=none — если DKIM ещё не включён)", Value: fmt.Sprintf("v=DMARC1; p=none; rua=mailto:postmaster@%s", mailDomain)},
+			MailRemediationGuide{
+				Severity:     "warning",
+				Category:     "Аутентификация отправителя (DNS TXT — DMARC)",
+				Title:        fmt.Sprintf("Добавьте (или перенесите с .mail) запись TXT _dmarc для домена %s", mailDomain),
+				WhyItMatters: "Политика DMARC — третий обязательный элемент («золотой стандарт» SPF + DKIM + DMARC), без которого Gmail, Yahoo, Microsoft и Mail.ru снижают репутацию домена, а злоумышленники могут присылать вашим контрагентам поддельные счета якобы от имени вашего директора @" + mailDomain + ".",
+				Steps:        steps,
+				VerifyCmd:    fmt.Sprintf("nslookup -type=txt _dmarc.%s 8.8.8.8", mailDomain),
+				CopyItems: []CopySnippet{
+					{Label: "1. Поле «Имя / Хост» в hoster.by / Cloudflare (Тип TXT)", Value: "_dmarc"},
+					{Label: "2. Безопасное значение TXT на старт (мониторинг p=none)", Value: recommendedDMARCSoft},
+					{Label: "3. Боевое значение TXT после включения SPF+DKIM (защита p=quarantine)", Value: recommendedDMARCStrict},
+				},
 			},
-		})
+		)
 	} else {
 		dm := dmarcRecords[0]
 		report.Checks = append(report.Checks, MailCheckItem{
 			ID:       "dmarc",
 			Category: "Аутентификация отправителя (SPF / DKIM / DMARC)",
-			Title:    "Политика DMARC (_dmarc." + mailDomain + ")",
+			Title:    "Политика защиты домена DMARC (_dmarc." + mailDomain + ")",
 			Status:   "ok",
-			Summary:  "Политика DMARC настроена: " + dm,
+			Summary:  "Политика DMARC активна на корневом домене: " + dm,
 			Details:  dmarcRecords,
 		})
 	}
@@ -1259,99 +1481,116 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 	// CHECK 6: SMTP PORT 25 + HELO BANNER HOSTNAME + OPEN RELAY CHECK
 	// =========================================================================
 	if !smtp25.Reachable {
-		// Note: Outbound port 25 from client ISP might be filtered even if server is fine, explain clearly!
 		deduct(8)
-		report.Checks = append(report.Checks, MailCheckItem{
-			ID:       "smtp25",
-			Category: "Служба SMTP и безопасность Kerio Connect",
-			Title:    "Доступность SMTP-сервера (порт 25), баннер EHLO и проверка Open Relay",
-			Status:   "warning",
-			Summary:  fmt.Sprintf("Не удалось подключиться к %s:25 (%s)", probeTargetHost, smtp25.DialErr),
-			Details: []string{
-				"Возможные причины: 1) Ваш текущий интернет-провайдер на рабочем ПК блокирует исходящий порт 25 (частая практика у домашних тарифов Белтелеком/A1), ИЛИ 2) На межсетевом экране почтового сервера закрыт входящий порт TCP 25 (тогда к вам не доходят внешние письма!).",
+		addIssue(
+			MailCheckItem{
+				ID:       "smtp25",
+				Category: "Служба SMTP, межсетевой экран и безопасность Kerio Connect",
+				Title:    "Доступность SMTP-сервера (порт 25), приветствие EHLO и защита от Open Relay",
+				Status:   "warning",
+				Summary:  fmt.Sprintf("С этого компьютера не удалось подключиться к %s:25 (%s)", probeTargetHost, smtp25.DialErr),
+				Details: []string{
+					"Проверенный адрес подключения: " + net.JoinHostPort(probeTargetHost, "25"),
+					"Причина А (очень частая при проверке из дома/офиса): интернет-провайдер вашего рабочего ПК (Белтелеком / A1 / мобильный оператор) режет исходящий порт 25 для защиты от вирусов — при этом сам сервер для внешнего мира работает нормально! Чтобы обойти блокировку провайдера, укажите локальный VPN IP сервера (например, 10.146.100.14) в поле «IP для прямой проверки портов по VPN» наверху этой вкладки и нажмите «Проверить»!",
+					"Причина Б: на вашем роутере (Kerio Control / MikroTik) не проброшен входящий порт TCP 25 на сервер Kerio Connect, либо остановлена служба SMTP — тогда внешние письма к вам вообще не доходят!",
+				},
 			},
-		})
-		report.Remediations = append(report.Remediations, MailRemediationGuide{
-			Severity:     "warning",
-			Category:     "Служба SMTP и межсетевой экран",
-			Title:        "Проверьте открытость входящего порта TCP 25 на роутере почтового сервера",
-			WhyItMatters: "Все внешние почтовые серверы интернета доставляют входящую почту строго на порт TCP 25 (SMTP).",
-			Steps: []string{
-				"Если вы запустили проверку с домашнего/мобильного интернета — провайдер вашего ПК может резать исходящий порт 25 (в этом случае проверьте приём тестовым письмом с Gmail/Yandex).",
-				"Если внешние письма действительно не приходят — на главном роутере почтового сервера проверьте проброс порта TCP 25 → внутренний IP сервера Kerio Connect, а в Kerio WebAdmin (Конфигурация → Службы → SMTP) убедитесь, что служба запущена.",
+			MailRemediationGuide{
+				Severity:     "warning",
+				Category:     "Kerio Connect SMTP + Межсетевой экран (Порт 25)",
+				Title:        "Как за 1 минуту проверить порт 25 через VPN и настроить проброс портов на роутере",
+				WhyItMatters: "Порт TCP 25 — единственный стандартный порт, на который Gmail, Mail.ru, Yandex и все серверы мира доставляют вам входящие письма. Кроме того, прямое подключение к порту 25 позволяет нашей программе проверить правильность имени HELO и отсутствие опасной дыры Open Relay!",
+				Steps: []string{
+					"ШАГ 1 (Проверка без блокировки вашего провайдера): Если вы подключены к сети предприятия по VPN — впишите внутренний IP сервера Kerio Connect (например, 10.146.100.14) в правое нижнее поле наверху этой вкладки («IP для прямой проверки портов по VPN») и снова нажмите кнопку «Проверить почтовый сервер»! Программа проверит живой порт 25, баннер HELO, Open Relay и все SSL-порты прямо внутри туннеля!",
+					"ШАГ 2 (Проверка в Kerio Connect WebAdmin): Откройте https://...:4040/admin/ → «Конфигурация» → «Службы» (Services) → убедитесь, что службы «SMTP» (порт 25), «SMTPS» (порт 465), «Submission» (порт 587) и «IMAPS» (порт 993) имеют статус «Запущено» и галочку автозапуска.",
+					"ШАГ 3 (Проброс портов на межсетевом экране роутера): На внешнем шлюзе (Kerio Control / MikroTik / Keenetic / Fortigate) должны быть проброшены снаружи (WAN → LAN IP сервера Kerio) TCP-порты: • 25 (SMTP приём внешней почты) • 465 и/или 587 (защищённая отправка для сотрудников с телефонов/ноутбуков) • 993 (IMAPS почта) • 443 (Kerio WebMail и ActiveSync).",
+					"⚠️ КРИТИЧЕСКОЕ ПРАВИЛО НА РОУТЕРЕ (MikroTik / Kerio Control): При пробросе (DST-NAT) входящего порта TCP 25 НИ В КОЕМ СЛУЧАЕ НЕ ВКЛЮЧАЙТЕ Source NAT / Masquerade на LAN-интерфейсе для этого трафика! Иначе Kerio Connect будет видеть все спам-письма из интернета как пришедшие с локального IP вашего собственного роутера!",
+					"ШАГ 4 (Живой тест приёма из интернета): Отправьте проверочное письмо с личного ящика @gmail.com или @yandex.by на любой ящик @" + mailDomain + " и убедитесь в Kerio Connect (Логи → Mail / Operations), что оно мгновенно пришло.",
+				},
+				VerifyCmd: fmt.Sprintf("Test-NetConnection -ComputerName %s -Port 25", probeTargetHost),
+				QuickAction: "focus_vpn_ip",
 			},
-		})
+		)
 	} else {
 		// Check Open Relay FIRST — emergency security priority!
 		if smtp25.OpenRelay {
 			deduct(35)
-			report.Checks = append(report.Checks, MailCheckItem{
-				ID:       "relay",
-				Category: "Служба SMTP и безопасность Kerio Connect",
-				Title:    "КРИТИЧЕСКАЯ УЯЗВИМОСТЬ: Открытый почтовый релей (Open Relay)!",
-				Status:   "error",
-				Summary:  "СЕРВЕР ПРИНЯЛ ЧУЖОЕ ПИСЬМО НА ВНЕШНИЙ АДРЕС БЕЗ ПАРОЛЯ! Ваш IP попадёт во все мировые спам-базы за считанные часы!",
-				Details:  []string{"Проверка MAIL FROM:<check-noreply@example.org> → RCPT TO:<relay-audit-test@gmail.com> вернула код 250 OK вместо 550 Relay denied!"},
-			})
-			report.Remediations = append(report.Remediations, MailRemediationGuide{
-				Severity:     "critical",
-				Category:     "Безопасность Kerio Connect",
-				Title:        "СРОЧНО закройте Открытый релей (Open Relay) в настройках Kerio Connect!",
-				WhyItMatters: "Спам-боты круглосуточно сканируют порт 25. Сервер с открытым релеем за 2–3 часа начинает рассылать десятки тысяч спам-писем, после чего IP блокируется в Spamhaus и у провайдера связи.",
-				Steps: []string{
-					"Немедленно откройте Kerio Connect WebAdmin → «Конфигурация» → «Сервер SMTP» → вкладка «Контроль реле (Relay Control)».",
-					"Снимите разрешение «Открытый релей» и выберите «Открыть реле только для следующих IP-групп» (оставьте ТОЛЬКО «Локальные клиенты / 127.0.0.1», а НЕ всю подсеть роутера, если роутер делает Src-NAT/Masquerade на входящий порт 25!).",
-					"Внимание (частая ловушка MikroTik/Kerio Control!): если на роутере включён Masquerade на внутреннем интерфейсе LAN, Kerio Connect видит ВСЕ входящие письма из интернета как пришедшие с локального IP самого роутера (например, 10.146.100.1) и считает их «своими»! Отключите src-nat/masquerade для проброса порта 25 на роутере или уберите IP шлюза из доверенной группы релея в Kerio!",
-					"Обязательно оставьте галочку «Пользователи, прошедшие аутентификацию по SMTP, могут пересылать почту куда угодно».",
+			addIssue(
+				MailCheckItem{
+					ID:       "relay",
+					Category: "Служба SMTP и безопасность Kerio Connect",
+					Title:    "🚨 КРИТИЧЕСКАЯ УЯЗВИМОСТЬ: Открытый почтовый релей (Open Relay)!",
+					Status:   "error",
+					Summary:  "СЕРВЕР ПРИНЯЛ ЧУЖОЕ ПИСЬМО НА ВНЕШНИЙ АДРЕС БЕЗ ПАРОЛЯ! Ваш IP попадёт во все спам-базы и будет заблокирован провайдером!",
+					Details:  []string{"Лог проверки: " + smtp25.RelayTestLog + " (соединение сброшено командой RSET без отправки письма)"},
 				},
-			})
+				MailRemediationGuide{
+					Severity:     "critical",
+					Category:     "ЭКСТРЕННАЯ ЗАЩИТА KERIO CONNECT + NAT",
+					Title:        "НЕМЕДЛЕННО закройте Открытый релей (Open Relay) в Kerio Connect и на роутере!",
+					WhyItMatters: "Боты сканируют все IP интернета каждые несколько минут. Открытый релей позволяет спамерам рассылать через ваш сервер десятки тысяч фишинговых писем в час — IP мгновенно попадает в Spamhaus, а провайдер (Белтелеком / A1) отключает порт 25 по жалобе Abuse!",
+					Steps: []string{
+						"Откройте Kerio Connect WebAdmin (:4040) → «Конфигурация» → «Сервер SMTP» → вкладка «Контроль реле (Relay Control)».",
+						"Переключите в режим «Открыть реле только для следующих IP-групп» и УБЕРИТЕ оттуда локальную подсеть (оставьте только 127.0.0.1, если вы проверяли по VPN или если роутер делает NAT!).",
+						"Проверьте главную ловушку MikroTik / Kerio Control: если на вашем роутере настроено общее правило Masquerade без указания out-interface=WAN (hairpin/LAN masquerade), то пакеты из интернета на порт 25 приходят в Kerio с исходным IP самого роутера (например, 10.146.100.1), который входит в «Доверенную локальную сеть» Kerio! В MikroTik в правиле masquerade обязательно укажите Out. Interface = WAN (интернет-провайдер)!",
+						"Обязательно оставьте включённой галочку: «Пользователи, прошедшие аутентификацию по протоколу SMTP, могут пересылать сообщения на любой адрес» (тогда ваши сотрудники с паролем смогут отправлять письма откуда угодно, а спамеры — нет!).",
+						"Нажмите «Применить» и тут же повторно нажмите «Проверить почтовый сервер» в этой программе — статус должен смениться на зелёный ✅!",
+					},
+				},
+			)
 		} else {
 			report.Checks = append(report.Checks, MailCheckItem{
 				ID:       "relay",
 				Category: "Служба SMTP и безопасность Kerio Connect",
 				Title:    "Защита от открытого релея (Open Relay Protection)",
 				Status:   "ok",
-				Summary:  "Отлично! Сервер надёжно отклоняет неавторизованную пересылку чужой почты (550 Relay denied).",
+				Summary:  "Отлично! Сервер надёжно запрещает неавторизованную пересылку чужой почты (550 Relay denied).",
+				Details:  []string{smtp25.RelayTestLog},
 			})
 		}
 
-		// Check SMTP Banner Hostname == mailHost
-		bannerMatches := strings.EqualFold(smtp25.BannerHost, mailHost)
-		isLocalBanner := strings.HasSuffix(smtp25.BannerHost, ".local") || strings.HasSuffix(smtp25.BannerHost, ".lan") || !strings.Contains(smtp25.BannerHost, ".")
+		// Check SMTP Banner Hostname == recommendedHost
+		bannerMatches := strings.EqualFold(smtp25.BannerHost, recommendedHost)
+		isLocalBanner := strings.HasSuffix(strings.ToLower(smtp25.BannerHost), ".local") ||
+			strings.HasSuffix(strings.ToLower(smtp25.BannerHost), ".lan") ||
+			!strings.Contains(smtp25.BannerHost, ".")
 		if !bannerMatches || isLocalBanner {
 			deduct(10)
-			report.Checks = append(report.Checks, MailCheckItem{
-				ID:       "banner",
-				Category: "Служба SMTP и безопасность Kerio Connect",
-				Title:    "Приветствие SMTP-сервера (HELO / Banner Hostname)",
-				Status:   "warning",
-				Summary:  fmt.Sprintf("В приветствии SMTP сервер представляется как «%s» вместо «%s»!", smtp25.BannerHost, mailHost),
-				Details: []string{
-					"Полученный баннер 220: " + smtp25.BannerLine,
-					"Ожидаемое имя в баннере (совпадающее с MX, A и PTR): " + mailHost,
+			addIssue(
+				MailCheckItem{
+					ID:       "banner",
+					Category: "Служба SMTP и безопасность Kerio Connect",
+					Title:    "Приветствие SMTP-сервера (HELO / EHLO Banner Hostname)",
+					Status:   "warning",
+					Summary:  fmt.Sprintf("В приветствии SMTP ваш Kerio представляется именем «%s» вместо «%s»!", smtp25.BannerHost, recommendedHost),
+					Details: []string{
+						"Фактическая строка приветствия сервера (220): " + smtp25.BannerLine,
+						"Должно быть полное интернет-имя (FQDN): " + recommendedHost,
+					},
 				},
-			})
-			report.Remediations = append(report.Remediations, MailRemediationGuide{
-				Severity:     "warning",
-				Category:     "Kerio Connect SMTP",
-				Title:        fmt.Sprintf("Пропишите правильное Интернет-имя узла (%s) в настройках SMTP Kerio Connect", mailHost),
-				WhyItMatters: "Когда Kerio Connect при отправке писем представляется внутренним именем Windows-сервера (например, WIN-SERVER.domain.local или localhost), антиспам-фильтры SpamAssassin / Rspamd начисляют штрафные баллы HELO_LOCALHOST / HELO_MISMATCH и отправляют письма в Спам!",
-				Steps: []string{
-					"Откройте веб-админку Kerio Connect → «Конфигурация» → «Сервер SMTP» → вкладка «Общие» (или «Конфигурация» → «Сетевые настройки» / «Домены»).",
-					"В поле «Имя узла в сети Интернет (Internet hostname)» впишите ровно: " + mailHost,
-					"Нажмите «Применить» — изменение вступает в силу сразу без перезагрузки сервера!",
+				MailRemediationGuide{
+					Severity:     "warning",
+					Category:     "Настройка Kerio Connect WebAdmin (SMTP Имя узла)",
+					Title:        fmt.Sprintf("Укажите правильное «Имя узла в сети Интернет» (%s) в Kerio Connect за 30 секунд", recommendedHost),
+					WhyItMatters: fmt.Sprintf("По умолчанию Kerio Connect берёт локальное имя Windows-машины (например, WIN-KERIO.office.local или localhost). Когда ваш сервер подключается к Gmail или Yandex и говорит «Привет, я %s», спам-фильтр видит несовпадение с A/MX/PTR (%s) и начисляет штрафные баллы СПАМа (HELO_LOCALHOST / RDNS_HELO_MISMATCH)!", smtp25.BannerHost, recommendedHost),
+					Steps: []string{
+						"Откройте веб-админку Kerio Connect (:4040/admin/).",
+						"В левом меню откройте «Конфигурация» (Configuration) → «Сервер SMTP» (SMTP Server) → вкладка «Общие» (General) — а также проверьте «Конфигурация» → «Домены» → ваш домен.",
+						fmt.Sprintf("В поле «Имя узла в сети Интернет (Internet hostname)» впишите строго: %s", recommendedHost),
+						"Нажмите кнопку «Применить (Apply)» внизу справа — почта НЕ прерывается, настройка применяется мгновенно!",
+					},
+					CopyItems: []CopySnippet{
+						{Label: "Поле «Имя узла в сети Интернет (Internet hostname)» в Kerio Connect", Value: recommendedHost},
+					},
 				},
-				CopyItems: []CopySnippet{
-					{Label: "Имя узла в сети Интернет для Kerio SMTP", Value: mailHost},
-				},
-			})
+			)
 		} else {
 			report.Checks = append(report.Checks, MailCheckItem{
 				ID:       "banner",
 				Category: "Служба SMTP и безопасность Kerio Connect",
-				Title:    "Приветствие SMTP-сервера (HELO / Banner Hostname)",
+				Title:    "Приветствие SMTP-сервера (HELO / EHLO Banner Hostname)",
 				Status:   "ok",
-				Summary:  fmt.Sprintf("Баннер SMTP корректен (%s — отклик %d мс)", smtp25.BannerHost, smtp25.LatencyMs),
+				Summary:  fmt.Sprintf("Идеально! Kerio представляется правильным именем %s (отклик %d мс)", smtp25.BannerHost, smtp25.LatencyMs),
 				Details:  []string{smtp25.BannerLine},
 			})
 		}
@@ -1368,13 +1607,13 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 
 	for _, p := range report.Ports {
 		if !p.Open {
-			sslDetails = append(sslDetails, fmt.Sprintf("Порт %d (%s): закрыт / недоступен", p.Port, p.Protocol))
+			sslDetails = append(sslDetails, fmt.Sprintf("Порт %d (%s): закрыт / нет ответа с текущей сети", p.Port, p.Protocol))
 			continue
 		}
 		anyOpenMailPort = true
 		if !p.TLSOK {
 			sslBadPorts = append(sslBadPorts, fmt.Sprintf("%d (TLS не включён)", p.Port))
-			sslDetails = append(sslDetails, fmt.Sprintf("Порт %d (%s): открыт (%d мс), но шифрование TLS/STARTTLS не сработало!", p.Port, p.Protocol, p.LatencyMs))
+			sslDetails = append(sslDetails, fmt.Sprintf("Порт %d (%s): открыт (%d мс), но шифрование SSL/STARTTLS не сработало!", p.Port, p.Protocol, p.LatencyMs))
 			continue
 		}
 		if p.CertDays < sslDaysMin {
@@ -1393,54 +1632,77 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 
 	if len(sslBadPorts) > 0 {
 		deduct(18)
-		report.Checks = append(report.Checks, MailCheckItem{
-			ID:       "ssl",
-			Category: "Шифрование почты (SSL / STARTTLS)",
-			Title:    "Проверка SSL-сертификата и полной цепочки CA на почтовых портах",
-			Status:   "error",
-			Summary:  fmt.Sprintf("На почтовых портах [%s] обнаружен недоверенный / самоподписанный / неполный SSL-сертификат!", strings.Join(sslBadPorts, ", ")),
-			Details:  sslDetails,
-		})
-		report.Remediations = append(report.Remediations, MailRemediationGuide{
-			Severity:     "critical",
-			Category:     "Шифрование почты (SSL / STARTTLS)",
-			Title:        "Установите доверенный SSL-сертификат Let's Encrypt с полной цепочкой (Fullchain) на " + mailHost,
-			WhyItMatters: "При самоподписанном или просроченном сертификате (или если загружен только листовой сертификат без промежуточного R10/R11) Outlook, iPhone/Android выдают постоянные окна ошибок безопасности, внешние серверы с политикой MTA-STS отказываются принимать письма, а спам-фильтры снижают рейтинг доверия TLS.",
-			Steps: []string{
-				"Нажмите кнопку ниже «Перейти к выпуску доверенного SSL для " + mailHost + "» прямо в этой программе!",
-				"Выпустите бесплатный 90-дневный сертификат Let's Encrypt для домена " + mailHost + ".",
-				"Установите его в 1 клик через вкладку «Установка в Kerio Connect» (порт 4040) — наш файл server.crt уже содержит полную цепочку Fullchain!",
+		addIssue(
+			MailCheckItem{
+				ID:       "ssl",
+				Category: "Шифрование почты (SSL / STARTTLS)",
+				Title:    "Проверка SSL-сертификата и полной цепочки CA на почтовых портах",
+				Status:   "error",
+				Summary:  fmt.Sprintf("На почтовых портах [%s] активен недоверенный / самоподписанный / неполный SSL-сертификат!", strings.Join(sslBadPorts, ", ")),
+				Details:  sslDetails,
 			},
-			QuickAction: "goto_issue_ssl",
-		})
+			MailRemediationGuide{
+				Severity:     "critical",
+				Category:     "Kerio Connect SSL / Let's Encrypt",
+				Title:        fmt.Sprintf("Выпустите и активируйте доверенный SSL-сертификат для %s прямо в этой программе!", recommendedHost),
+				WhyItMatters: "Если в Kerio Connect активен старый самоподписанный сертификат или сертификат без промежуточной цепочки (Fullchain), у сотрудников в Outlook и на смартфонах iPhone/Android выскакивают окна «Не удаётся проверить подлинность сервера», а внешние почтовые системы снижают рейтинг безопасности TLS.",
+				Steps: []string{
+					fmt.Sprintf("Если вы уже выпустили сертификат %s в этой программе — перейдите на вкладку «📬 Установка в Kerio Connect», введите адрес и пароль админки :4040 и нажмите «Установить сертификат в Kerio Connect» (или импортируйте server.key + server.crt вручную в Конфигурация → Сертификаты SSL → Сделать активным).", recommendedHost),
+					fmt.Sprintf("Если сертификат ещё не выпущен — нажмите синюю кнопку ниже, чтобы сразу перейти на вкладку выпуска сертификата Let's Encrypt для %s!", recommendedHost),
+				},
+				QuickAction: "goto_issue_ssl",
+			},
+		)
 	} else if sslExpiringSoon && anyOpenMailPort {
 		deduct(8)
-		report.Checks = append(report.Checks, MailCheckItem{
-			ID:       "ssl",
-			Category: "Шифрование почты (SSL / STARTTLS)",
-			Title:    "Проверка SSL-сертификата и полной цепочки CA на почтовых портах",
-			Status:   "warning",
-			Summary:  fmt.Sprintf("SSL-сертификат действителен, но истекает уже через %d дн.! Пора обновить сертификат.", sslDaysMin),
-			Details:  sslDetails,
-		})
-		report.Remediations = append(report.Remediations, MailRemediationGuide{
-			Severity:     "warning",
-			Category:     "Шифрование почты (SSL / STARTTLS)",
-			Title:        fmt.Sprintf("Обновите истекающий SSL-сертификат на %s (осталось %d дн.)", mailHost, sslDaysMin),
-			WhyItMatters: "Как только срок действия сертификата закончится, у всех сотрудников в Outlook, на iPhone и Android мгновенно остановится отправка и получение почты.",
-			Steps: []string{
-				"Нажмите кнопку ниже, чтобы за 1 минуту перевыпустить свежий сертификат для " + mailHost + " и активировать его в Kerio Connect.",
+		addIssue(
+			MailCheckItem{
+				ID:       "ssl",
+				Category: "Шифрование почты (SSL / STARTTLS)",
+				Title:    "Проверка SSL-сертификата и полной цепочки CA на почтовых портах",
+				Status:   "warning",
+				Summary:  fmt.Sprintf("SSL-сертификат доверенный, но истекает уже через %d дн.! Рекомендуется продлить сейчас.", sslDaysMin),
+				Details:  sslDetails,
 			},
-			QuickAction: "goto_issue_ssl",
-		})
+			MailRemediationGuide{
+				Severity:     "warning",
+				Category:     "Kerio Connect SSL / Let's Encrypt",
+				Title:        fmt.Sprintf("Обновите истекающий SSL-сертификат на %s (осталось %d дн.)", recommendedHost, sslDaysMin),
+				WhyItMatters: "В день окончания сертификата Outlook и мобильные клиенты всех сотрудников перестанут отправлять и получать почту до замены сертификата.",
+				Steps: []string{
+					fmt.Sprintf("Нажмите кнопку ниже, перевыпустите свежий 90-дневный сертификат Let's Encrypt для %s и активируйте его на вкладке «Установка в Kerio Connect».", recommendedHost),
+				},
+				QuickAction: "goto_issue_ssl",
+			},
+		)
 	} else if anyOpenMailPort {
 		report.Checks = append(report.Checks, MailCheckItem{
 			ID:       "ssl",
 			Category: "Шифрование почты (SSL / STARTTLS)",
 			Title:    "Проверка SSL-сертификата и полной цепочки CA на почтовых портах",
 			Status:   "ok",
-			Summary:  fmt.Sprintf("Все открытые почтовые порты используют полностью доверенный SSL-сертификат (осталось %d дн.)!", sslDaysMin),
+			Summary:  fmt.Sprintf("Идеально! Все открытые почтовые порты защищены доверенным SSL-сертификатом Let's Encrypt / CA (осталось %d дн.)!", sslDaysMin),
 			Details:  sslDetails,
+		})
+	} else {
+		report.Checks = append(report.Checks, MailCheckItem{
+			ID:       "ssl",
+			Category: "Шифрование почты (SSL / STARTTLS)",
+			Title:    "Проверка SSL-сертификата и полной цепочки CA на почтовых портах",
+			Status:   "info",
+			Summary:  "Ни один из почтовых портов (25/465/587/993/995/443) не ответил по TCP с вашего текущего сетевого подключения.",
+			Details:  sslDetails,
+			Solution: &MailRemediationGuide{
+				CheckID:      "ssl",
+				Severity:     "info",
+				Category:     "Проверка портов через VPN / WAN",
+				Title:        "Укажите локальный IP сервера Kerio для проверки всех SSL-портов по VPN",
+				WhyItMatters: "Если сервер пока доступен только внутри корпоративного VPN (например, 10.146.100.14), укажите этот IP в поле «IP для прямой проверки портов по VPN» наверху этой вкладки.",
+				Steps: []string{
+					"Впишите локальный IP вашего Kerio Connect (например, 10.146.100.14) в правое поле наверху вкладки и нажмите «Проверить почтовый сервер» — программа мгновенно проверит сертификаты на всех 6 портах (25, 465, 587, 993, 995, 443)!",
+				},
+				QuickAction: "focus_vpn_ip",
+			},
 		})
 	}
 
@@ -1456,70 +1718,87 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 	if len(listedIn) > 0 {
 		deduct(25)
 		var bDetails []string
-		var steps []string
-		steps = append(steps, "1. Сначала устраните первопричину попадания IP в спам-базу: проверьте, нет ли взломанного почтового ящика со слабым паролем в Kerio Connect (Статус → Очередь сообщений — если в очереди сотни чужих писем, смените пароль скомпрометированного пользователя!), закройте Open Relay и обязательно пропишите PTR-запись у провайдера!")
-		for _, b := range listedIn {
-			bDetails = append(bDetails, fmt.Sprintf("🔴 В чёрном списке %s (%s) — код ответа %s, ссылка удаления: %s", b.Provider, b.Zone, b.ReturnCode, b.DelistURL))
-			steps = append(steps, fmt.Sprintf("Подайте бесплатный запрос на удаление IP %s из %s по ссылке: %s", serverIP, b.Provider, b.DelistURL))
+		steps := []string{
+			"ШАГ 1 (Сначала устраните причину попадания в бан — иначе после удаления IP забанят повторно!): Откройте Kerio Connect WebAdmin → «Статус» (Status) → «Очередь сообщений» (Message Queue). Если в очереди висят сотни/тысячи чужих писем — значит у одного из сотрудников подобрали простой пароль от почты (посмотрите столбец Отправитель, немедленно смените пароль этому пользователю в Разделе «Пользователи» и очистите спам из очереди!).",
+			"ШАГ 2: Убедитесь, что у вашего IP " + serverIP + " прописана обратная запись PTR (см. пункт про PTR выше) и закрыт Open Relay (некоторые списки, такие как SORBS / SpamRATS, вносят IP просто за отсутствие PTR-записи!).",
+			"ШАГ 3: Откройте официальные страницы удаления (Delist) по каждому сработавшему списку ниже и отправьте бесплатный запрос на разблокировку IP " + serverIP + " (удаление занимает от 15 минут до 24 часов):",
 		}
-		report.Checks = append(report.Checks, MailCheckItem{
-			ID:       "rbl",
-			Category: "Репутация IP в спам-базах (DNSBL / RBL)",
-			Title:    fmt.Sprintf("Проверка IP %s по %d мировым чёрным спискам спама", serverIP, len(rbls)),
-			Status:   "error",
-			Summary:  fmt.Sprintf("ВНИМАНИЕ: IP-адрес %s найден в %d спам-базах! Исходящие письма блокируются на уровне соединения!", serverIP, len(listedIn)),
-			Details:  bDetails,
-		})
-		report.Remediations = append(report.Remediations, MailRemediationGuide{
-			Severity:     "critical",
-			Category:     "Репутация IP (удаление из чёрных списков)",
-			Title:        fmt.Sprintf("Исключите IP-адрес %s из чёрных списков спама (%d баз)", serverIP, len(listedIn)),
-			WhyItMatters: "Большинство почтовых систем проверяют IP отправителя по базам Spamhaus, Barracuda и SpamCop ещё до чтения заголовков письма и мгновенно разрывают соединение.",
-			Steps:        steps,
-		})
+		for _, b := range listedIn {
+			bDetails = append(bDetails, fmt.Sprintf("🔴 В чёрном списке %s (%s) — код %s, удаление: %s", b.Provider, b.Zone, b.ReturnCode, b.DelistURL))
+			steps = append(steps, fmt.Sprintf("• %s → откройте %s , введите IP %s и нажмите Delist / Removal Request.", b.Provider, b.DelistURL, serverIP))
+		}
+		addIssue(
+			MailCheckItem{
+				ID:       "rbl",
+				Category: "Репутация IP в спам-базах (DNSBL / RBL)",
+				Title:    fmt.Sprintf("Проверка внешнего IP %s по %d мировым чёрным спискам спама", serverIP, len(rbls)),
+				Status:   "error",
+				Summary:  fmt.Sprintf("ВНИМАНИЕ: внешний IP %s числится в %d чёрных списках спама! Многие серверы отклоняют ваши письма ещё до чтения!", serverIP, len(listedIn)),
+				Details:  bDetails,
+			},
+			MailRemediationGuide{
+				Severity:     "critical",
+				Category:     "Репутация IP (Удаление из чёрных списков DNSBL)",
+				Title:        fmt.Sprintf("Пошаговая очистка репутации и удаление IP %s из %d спам-баз", serverIP, len(listedIn)),
+				WhyItMatters: "Почтовые шлюзы Microsoft, Gmail, банков и гос. организаций проверяют IP отправителя по базам Spamhaus, Barracuda и SpamCop прямо в момент TCP-соединения и мгновенно сбрасывают сессию с ошибкой 554 Service unavailable; Client host blocked using Spamhaus.",
+				Steps:        steps,
+			},
+		)
 	} else if len(rbls) > 0 {
 		report.Checks = append(report.Checks, MailCheckItem{
 			ID:       "rbl",
 			Category: "Репутация IP в спам-базах (DNSBL / RBL)",
-			Title:    fmt.Sprintf("Проверка IP %s по %d мировым чёрным спискам спама", serverIP, len(rbls)),
+			Title:    fmt.Sprintf("Проверка внешнего IP %s по %d мировым чёрным спискам спама", serverIP, len(rbls)),
 			Status:   "ok",
-			Summary:  fmt.Sprintf("Чисто! IP-адрес %s не числится ни в одном из %d проверенных чёрных списков (Spamhaus, Barracuda, SpamCop, SORBS и др.).", serverIP, len(rbls)),
+			Summary:  fmt.Sprintf("Отлично! Внешний IP %s чист — не найден ни в одной из %d мировых спам-баз (Spamhaus, Barracuda, SpamCop, SORBS и др.).", serverIP, len(rbls)),
+		})
+	} else {
+		report.Checks = append(report.Checks, MailCheckItem{
+			ID:       "rbl",
+			Category: "Репутация IP в спам-базах (DNSBL / RBL)",
+			Title:    "Проверка внешнего IP по 11 мировым чёрным спискам спама (DNSBL)",
+			Status:   "info",
+			Summary:  "Ожидает настройки A-записи домена с внешним публичным IPv4-адресом (локальные IP 10.x / 192.168.x в спам-базах не проверяются).",
 		})
 	}
 
 	// =========================================================================
-	// CHECK 9: OUTLOOK / MOBILE AUTODISCOVER & MTA-STS / TLS-RPT BONUS
+	// CHECK 9: OUTLOOK / MOBILE AUTODISCOVER & TLS-RPT
 	// =========================================================================
 	if len(autodiscoverIPs) == 0 && len(autodiscoverSRVs) == 0 {
-		report.Checks = append(report.Checks, MailCheckItem{
-			ID:       "autodiscover",
-			Category: "Удобство клиентов и расширенные стандарты",
-			Title:    "Автонастройка Outlook / мобильных клиентов (Autodiscover) и TLS-RPT",
-			Status:   "info",
-			Summary:  fmt.Sprintf("Не настроена SRV-запись _autodiscover._tcp.%s (сотрудникам приходится вводить сервер и порты в Outlook вручную).", mailDomain),
-			Details: []string{
-				fmt.Sprintf("MTA-STS: %d записей, TLS-RPT: %d записей", len(mtaStsRecords), len(tlsRptRecords)),
+		addIssue(
+			MailCheckItem{
+				ID:       "autodiscover",
+				Category: "Удобство клиентов и расширенные стандарты",
+				Title:    "Автонастройка Outlook / телефонов (Autodiscover SRV) и отчёты TLS-RPT",
+				Status:   "info",
+				Summary:  fmt.Sprintf("Рекомендуемое улучшение: добавьте SRV-запись _autodiscover._tcp.%s для автоматической настройки Outlook и мобильных клиентов.", mailDomain),
+				Details: []string{
+					fmt.Sprintf("MTA-STS: %d записей | TLS-RPT: %d записей", len(mtaStsRecords), len(tlsRptRecords)),
+				},
 			},
-		})
-		report.Remediations = append(report.Remediations, MailRemediationGuide{
-			Severity:     "info",
-			Category:     "Автонастройка почтовых клиентов Kerio Connect",
-			Title:        "Добавьте SRV-запись Autodiscover для автонастройки Microsoft Outlook и телефонов",
-			WhyItMatters: "Когда сотрудник вводит только email и пароль в Outlook / iOS / Android, клиент автоматически находит сервер " + mailHost + ":443 без ручного ввода IMAP/SMTP портов! И при этом не нужно выпускать отдельный SSL-сертификат на поддомен autodiscover." + mailDomain + "!",
-			Steps: []string{
-				"В панели DNS домена " + mailDomain + " создайте запись типа SRV: Служба/Имя = _autodiscover._tcp, Приоритет = 0, Вес = 0, Порт = 443, Цель (Target) = " + mailHost,
-				"(По желанию) Добавьте TXT-запись отчётности о сбоях шифрования _smtp._tls → v=TLSRPTv1; rua=mailto:postmaster@" + mailDomain,
+			MailRemediationGuide{
+				Severity:     "info",
+				Category:     "Автонастройка клиентов Kerio Connect (DNS SRV)",
+				Title:        fmt.Sprintf("Настройте автоподключение Outlook / iOS / Android через SRV-запись для @%s", mailDomain),
+				WhyItMatters: fmt.Sprintf("С одной SRV-записью любому сотруднику достаточно ввести в Outlook только свой email и пароль — программа сама найдёт %s:443 и настроит все порты! Причём в отличие от A-записи autodiscover.%s, для SRV-записи НЕ требуется выпускать отдельный SSL-сертификат — используется ваш основной сертификат %s!", recommendedHost, mailDomain, recommendedHost),
+				Steps: []string{
+					fmt.Sprintf("В панели управления DNS домена %s нажмите «Добавить запись» → выберите Тип: SRV.", mailDomain),
+					fmt.Sprintf("Заполните поля: • Служба / Имя: _autodiscover._tcp • Приоритет: 0 • Вес: 0 • Порт: 443 • Цель (Target / Сервер): %s", recommendedHost),
+					"(Дополнительно по желанию) Создайте запись TXT с именем _smtp._tls и значением из кнопки ниже, чтобы почтовые системы присылали вам уведомление, если когда-нибудь возникнет проблема с SSL при доставке писем.",
+				},
+				CopyItems: []CopySnippet{
+					{Label: "SRV — Поле «Имя / Служба»", Value: "_autodiscover._tcp"},
+					{Label: "SRV — Поле «Цель / Target» (Приоритет 0, Вес 0, Порт 443)", Value: recommendedHost},
+					{Label: "TXT (_smtp._tls) — Отчёты о шифровании TLS", Value: fmt.Sprintf("v=TLSRPTv1; rua=mailto:admin@%s", mailDomain)},
+				},
 			},
-			CopyItems: []CopySnippet{
-				{Label: "Запись SRV (_autodiscover._tcp — Приоритет 0, Вес 0, Порт 443)", Value: mailHost},
-				{Label: "Запись TXT (_smtp._tls — отчёты о доставке TLS)", Value: fmt.Sprintf("v=TLSRPTv1; rua=mailto:postmaster@%s", mailDomain)},
-			},
-		})
+		)
 	} else {
 		report.Checks = append(report.Checks, MailCheckItem{
 			ID:       "autodiscover",
 			Category: "Удобство клиентов и расширенные стандарты",
-			Title:    "Автонастройка Outlook / мобильных клиентов (Autodiscover) и TLS-RPT",
+			Title:    "Автонастройка Outlook / телефонов (Autodiscover SRV) и отчёты TLS-RPT",
 			Status:   "ok",
 			Summary:  "Автонастройка почтовых клиентов (Autodiscover) настроена в DNS!",
 			Details:  append(autodiscoverIPs, autodiscoverSRVs...),
@@ -1544,20 +1823,20 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 		report.Verdict = "Эталонная настройка почтового сервера! Высочайшая доставляемость во Входящие (Gmail, Mail.ru, Yandex, Outlook)."
 	case report.Score >= 82:
 		report.Grade = "A"
-		report.Verdict = "Хорошая настройка сервера! Почта ходит стабильно, но есть пара тонких улучшений ниже для максимальной репутации 10/10."
+		report.Verdict = "Хорошая настройка сервера! Почта ходит стабильно — ниже даны тонкие улучшения для максимальной оценки 100/100."
 	case report.Score >= 65:
 		report.Grade = "B"
-		report.Verdict = "Почта ходит, но часть писем (особенно в Gmail / строгие корп. фильтры) может попадать в папку «Спам». Выполните пошаговую инструкцию ниже!"
+		report.Verdict = "Почта работает, но часть писем может попадать в «Спам». Прямо под каждым замечанием ниже дана подробная пошаговая инструкция по исправлению!"
 	case report.Score >= 45:
 		report.Grade = "C"
-		report.Verdict = "Высокий риск попадания в «Спам» и отказов при отправке писем! Ниже подготовлен точный план исправления по шагам."
+		report.Verdict = "Высокий риск попадания в «Спам» и отказов доставки! Выполните подробные пошаговые инструкции прямо под красными/жёлтыми карточками ниже."
 	default:
 		report.Grade = "F"
-		report.Verdict = "Критические проблемы настройки почтового сервера — многие почтовые провайдеры блокируют ваши письма! Исправьте пункты ниже по порядку."
+		report.Verdict = "Обнаружены критические ошибки настройки DNS / почтового сервера! Прямо внутри каждой красной карточки ниже расписана подробная пошаговая инструкция по решению."
 	}
 
 	log("success", fmt.Sprintf("Аудит @%s (%s) завершён: рейтинг %d/100 (оценка %s) — успешно: %d, предупреждений: %d, критических: %d",
-		mailDomain, mailHost, report.Score, report.Grade, report.PassedCount, report.WarningCount, report.CriticalCount))
+		mailDomain, recommendedHost, report.Score, report.Grade, report.PassedCount, report.WarningCount, report.CriticalCount))
 
 	return report, nil
 }

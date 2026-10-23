@@ -531,6 +531,13 @@ func TestMailDeliverabilityAuditHelpersAndReport(t *testing.T) {
 	if len(rep.Remediations) < 4 {
 		t.Fatalf("expected step-by-step remediation guides to be generated, got %d", len(rep.Remediations))
 	}
+	for _, ch := range rep.Checks {
+		if ch.Status == "error" || ch.Status == "warning" {
+			if ch.Solution == nil || len(ch.Solution.Steps) == 0 {
+				t.Fatalf("check %q (%s) has status=%s but missing inline Solution steps!", ch.ID, ch.Title, ch.Status)
+			}
+		}
+	}
 	t.Logf("Generated %d checks and %d remediation guides (score=%d, grade=%s)", len(rep.Checks), len(rep.Remediations), rep.Score, rep.Grade)
 }
 

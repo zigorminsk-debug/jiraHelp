@@ -674,7 +674,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v2.0 • SSL + Почтовый Аудит</span>
+        <span class="brand-badge">Windows Native GUI v2.1 • SSL + Почтовый Аудит + Справочник</span>
       </div>
       <div class="brand-sub">Генерация приватного ключа (.key) и выпуск SSL-сертификатов (.crt / .pfx) по IP и домену для Kerio MailServer</div>
     </div>
@@ -1269,10 +1269,10 @@
         <div>
           <div class="card-title">
             <span class="step-num">📨</span>
-            Комплексная диагностика почтового сервера, доставляемости и защиты от СПАМа
+            Комплексная диагностика почтового сервера, доставляемости и подробный Хелп по устранению проблем
           </div>
           <div class="card-subtitle">
-            Проверяет <strong>MX, прямую и обратную зону PTR (FCrDNS), SPF, цифровую подпись DKIM (Kerio <code>mail._domainkey</code>), DMARC, порты 25/465/587/993/995/443, SSL-цепочку, баннер HELO, защиту от Open Relay и 11 мировых спам-баз (Spamhaus, Barracuda, SpamCop, SORBS)</strong> + формирует готовые записи и пошаговый план исправления!
+            Проверяет <strong>MX + A, обратную зону провайдера PTR (FCrDNS), SPF, подпись DKIM (Kerio <code>mail._domainkey</code>), DMARC, порты 25/465/587/993/995/443, SSL-цепочку, баннер HELO, защиту от Open Relay и 11 спам-баз</strong> — и прямо под каждой найденной ошибкой выдаёт <strong>подробную пошаговую инструкцию с готовыми записями для копирования!</strong>
           </div>
         </div>
       </div>
@@ -1280,17 +1280,17 @@
       <div class="field-row">
         <div class="field">
           <label class="field-label" for="auditDomainInput">
-            <span>Почтовый домен или email *</span>
-            <span class="label-hint">например: <code>leend.by</code>, <code>csl.by</code> или <code>info@leend.by</code></span>
+            <span>Почтовый домен компании или email *</span>
+            <span class="label-hint">например: <code>leend.by</code> (или <code>mail.leend.by</code> — домен определится сам!)</span>
           </label>
           <input type="text" id="auditDomainInput" placeholder="leend.by" autocomplete="off" spellcheck="false">
         </div>
         <div class="field">
           <label class="field-label" for="auditMailHostInput">
             <span>Хост почтового сервера (необязательно)</span>
-            <span class="label-hint">определяется сам по MX, напр. <code>mail.leend.by</code></span>
+            <span class="label-hint">определяется автоматически, напр. <code>mail.leend.by</code></span>
           </label>
-          <input type="text" id="auditMailHostInput" placeholder="Автоопределение из MX" autocomplete="off" spellcheck="false">
+          <input type="text" id="auditMailHostInput" placeholder="Автоопределение (mail.ваш_домен)" autocomplete="off" spellcheck="false">
         </div>
       </div>
 
@@ -1298,29 +1298,29 @@
         <div class="field">
           <label class="field-label" for="auditDkimSelectorInput">
             <span>Селектор DKIM (необязательно)</span>
-            <span class="label-hint">по умолчанию автопоиск <code>mail</code> (Kerio), <code>default</code>, <code>dkim</code> и др.</span>
+            <span class="label-hint">по умолчанию автопоиск <code>mail</code> (Kerio Connect) + 11 селекторов</span>
           </label>
-          <input type="text" id="auditDkimSelectorInput" placeholder="mail (автопоиск по 12 селекторам)" autocomplete="off" spellcheck="false">
+          <input type="text" id="auditDkimSelectorInput" placeholder="mail (автопоиск)" autocomplete="off" spellcheck="false">
         </div>
         <div class="field">
           <label class="field-label" for="auditTargetIpInput">
-            <span>IP для прямой проверки портов по VPN/сети (необязательно)</span>
-            <span class="label-hint">например <code>10.146.100.14</code>, если ваш провайдер режет порт 25</span>
+            <span>Локальный / VPN IP Kerio для прямой проверки портов (необязательно)</span>
+            <span class="label-hint">укажите <code>10.146.100.14</code>, если ваш домашний провайдер блокирует порт 25</span>
           </label>
-          <input type="text" id="auditTargetIpInput" placeholder="Оставьте пустым для проверки через интернет" autocomplete="off" spellcheck="false">
+          <input type="text" id="auditTargetIpInput" placeholder="Например: 10.146.100.14 (или пусто для проверки из интернета)" autocomplete="off" spellcheck="false">
         </div>
       </div>
 
       <div class="actions-row" style="justify-content:space-between;">
         <div style="font-size:12.5px;color:var(--text-secondary);">
-          💡 Совет: даже если вы укажете локальный/VPN IP в правом поле для проверки портов 25/465/993, записи <strong>PTR, SPF и спам-базы RBL</strong> всё равно проверяются по реальному <strong>внешнему белому IP</strong> вашего домена!
+          💡 <strong>Важно:</strong> даже если справа указан локальный VPN IP (<code>10.146.100.14</code>), записи <strong>DNS, PTR, SPF и 11 спам-баз RBL</strong> всё равно проверяются по реальному <strong>внешнему белому IP</strong> вашего домена!
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
           <button type="button" class="btn btn-outline" id="exportAuditHtmlBtn" style="display:none;" onclick="exportMailAuditHTML()">
-            📄 Сохранить HTML-отчёт
+            📄 Сохранить полный HTML-отчёт с инструкциями
           </button>
           <button type="button" class="btn btn-primary btn-lg" id="runMailAuditBtn" onclick="runFullMailAudit()">
-            🔍 Проверить почтовый сервер и сформировать инструкцию
+            🔍 Проверить сервер и показать подробные инструкции по решению
           </button>
         </div>
       </div>
@@ -1333,9 +1333,9 @@
       <div class="card" id="mailAuditScoreCard" style="border-width:2px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;">
           <div style="display:flex;align-items:center;gap:18px;flex:1;min-width:260px;">
-            <div id="auditGradeCircle" style="width:78px;height:78px;border-radius:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:900;flex-shrink:0;">
-              <div id="auditScoreNum" style="font-size:24px;line-height:1;">100</div>
-              <div id="auditGradeLetter" style="font-size:12px;margin-top:3px;opacity:0.9;">A+</div>
+            <div id="auditGradeCircle" style="width:80px;height:80px;border-radius:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:900;flex-shrink:0;">
+              <div id="auditScoreNum" style="font-size:25px;line-height:1;">100</div>
+              <div id="auditGradeLetter" style="font-size:12px;margin-top:3px;opacity:0.95;">A+</div>
             </div>
             <div>
               <div style="font-size:17px;font-weight:800;" id="auditVerdictTitle">Результат аудита</div>
@@ -1344,47 +1344,31 @@
             </div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <a href="#remediationSectionAnchor" class="btn btn-kerio" id="jumpToFixesBtn" style="display:none;text-decoration:none;">
-              🛠️ Перейти к инструкции по устранению (<span id="fixesCountNum">0</span>) ↓
+            <a href="#remediationChecklistAnchor" class="btn btn-kerio" id="jumpToFixesBtn" style="display:none;text-decoration:none;">
+              📘 Сводный пошаговый план устранения (<span id="fixesCountNum">0</span>) ↓
             </a>
           </div>
         </div>
       </div>
 
-      <!-- 2. STEP-BY-STEP REMEDIATION GUIDE (PROMINENTLY AT TOP WHEN ISSUES EXIST!) -->
-      <div id="remediationSectionAnchor"></div>
-      <div class="card" id="mailRemediationCard" style="display:none;border:2px solid var(--kerio-orange);">
-        <div class="card-header">
-          <div>
-            <div class="card-title" style="font-size:16.5px;color:var(--kerio-orange);">
-              🛠️ Пошаговое руководство по устранению найденных проблем (Kerio Connect + DNS + Провайдер)
-            </div>
-            <div class="card-subtitle">
-              Выполните эти пункты сверху вниз (сначала критические 🔴, затем важные 🟠) — все имена записей, значения TXT и тексты писем уже заполнены под ваш домен и IP!
-            </div>
-          </div>
-        </div>
-        <div id="mailRemediationList"></div>
-      </div>
-
-      <!-- 3. DETAILED DIAGNOSTIC CHECKLIST -->
+      <!-- 2. DETAILED DIAGNOSTIC CHECKLIST WITH EMBEDDED STEP-BY-STEP INSTRUCTIONS RIGHT INSIDE EVERY PROBLEM CARD! -->
       <div class="card">
         <div class="card-header">
           <div>
-            <div class="card-title">📋 Детальные результаты всех проверок</div>
-            <div class="card-subtitle">Состояние каждого компонента приёма, отправки, подписи и шифрования почты</div>
+            <div class="card-title">📋 Результаты проверки и подробные инструкции по решению каждой проблемы</div>
+            <div class="card-subtitle">Под каждым красным 🔴 или оранжевым 🟠 пунктом сразу раскрыта полная пошаговая инструкция (Kerio Connect + панель DNS + роутер + провайдер) с кнопками копирования готовых записей!</div>
           </div>
         </div>
         <div id="mailChecksList"></div>
       </div>
 
-      <!-- 4. PORTS + SSL MATRIX & 11 DNSBL BLACKLISTS SIDE BY SIDE -->
+      <!-- 3. PORTS + SSL MATRIX & 11 DNSBL BLACKLISTS -->
       <div class="workspace-grid">
         <div class="card">
           <div class="card-header">
             <div>
               <div class="card-title">🔌 Почтовые порты и SSL/STARTTLS шифрование</div>
-              <div class="card-subtitle">Прямая проверка соединения, скорости отклика и цепочки сертификатов</div>
+              <div class="card-subtitle">Прямая проверка портов 25, 465, 587, 993, 995 и 443</div>
             </div>
           </div>
           <div id="mailPortsMatrix"></div>
@@ -1393,15 +1377,123 @@
         <div class="card">
           <div class="card-header">
             <div>
-              <div class="card-title">🚫 Проверка IP по 11 спам-базам (DNSBL / RBL)</div>
-              <div class="card-subtitle">Репутация внешнего почтового IP в мировых фильтрах</div>
+              <div class="card-title">🚫 Репутация внешнего IP по 11 спам-базам (DNSBL / RBL)</div>
+              <div class="card-subtitle">Spamhaus ZEN, Barracuda, SpamCop, SORBS, UCEPROTECT и др.</div>
             </div>
           </div>
           <div id="mailRblMatrix"></div>
         </div>
       </div>
 
+      <!-- 4. MASTER STEP-BY-STEP CHECKLIST AFTER THE AUDIT ("после проверки хелп по устранению найденых проблем") -->
+      <div id="remediationChecklistAnchor"></div>
+      <div class="card" id="mailRemediationCard" style="display:none;border:2px solid var(--kerio-orange);">
+        <div class="card-header">
+          <div>
+            <div class="card-title" style="font-size:17px;color:var(--kerio-orange);">
+              📘 Сводный чек-лист устранения всех найденных проблем (по порядку выполнения от Шага 1 до 10/10)
+            </div>
+            <div class="card-subtitle">
+              Отмечайте галочкой выполненные пункты по мере настройки — все команды, DNS-записи и шаблоны писем уже сгенерированы под ваш сервер!
+            </div>
+          </div>
+        </div>
+        <div id="mailRemediationList"></div>
+      </div>
+
     </div>
+
+    <!-- 5. ALWAYS-AVAILABLE COMPLETE KERIO CONNECT & ANTI-SPAM REFERENCE MANUAL -->
+    <div class="card" style="border:1px solid rgba(59,130,246,0.4);">
+      <details open>
+        <summary style="cursor:pointer;font-size:16px;font-weight:800;color:#93c5fd;list-style:none;display:flex;align-items:center;justify-content:space-between;">
+          <span>📚 Полный справочник администратора: идеальная настройка почты Kerio Connect без попадания в «Спам» (Шпаргалка)</span>
+          <span style="font-size:12px;color:var(--text-secondary);">Нажмите, чтобы свернуть / развернуть ▾</span>
+        </summary>
+        <div style="margin-top:16px;display:grid;gap:14px;font-size:13.5px;line-height:1.55;">
+
+          <div style="background:var(--bg-elevated);padding:14px 16px;border-radius:10px;border:1px solid var(--border);">
+            <div style="font-weight:800;color:#fde68a;margin-bottom:8px;">1️⃣ Эталонная таблица всех 7 записей DNS для корпоративного домена (на примере <code>company.by</code> и IP <code>178.124.x.x</code>)</div>
+            <div style="overflow-x:auto;">
+              <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+                <thead>
+                  <tr style="border-bottom:1px solid var(--border);text-align:left;color:var(--text-secondary);">
+                    <th style="padding:7px;">Тип</th>
+                    <th style="padding:7px;">Поле «Имя / Хост» (в hoster.by / Cloudflare)</th>
+                    <th style="padding:7px;">Поле «Значение»</th>
+                    <th style="padding:7px;">Назначение</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                    <td style="padding:7px;"><strong>A</strong></td>
+                    <td style="padding:7px;"><code>mail</code></td>
+                    <td style="padding:7px;"><code>178.124.x.x</code> (ваш белый статический IP)</td>
+                    <td style="padding:7px;">Прямой адрес почтового сервера <code>mail.company.by</code></td>
+                  </tr>
+                  <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                    <td style="padding:7px;"><strong>MX</strong></td>
+                    <td style="padding:7px;"><code>@</code> (корень домена, <strong>НЕ</strong> <code>mail</code>!)</td>
+                    <td style="padding:7px;"><code>mail.company.by</code> (Приоритет: <code>10</code>)</td>
+                    <td style="padding:7px;">Куда весь мир доставляет входящие письма для <code>@company.by</code></td>
+                  </tr>
+                  <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                    <td style="padding:7px;"><strong>PTR</strong></td>
+                    <td style="padding:7px;"><em>У интернет-провайдера (Белтелеком / A1 / МТС)</em></td>
+                    <td style="padding:7px;"><code>178.124.x.x</code> → <code>mail.company.by</code></td>
+                    <td style="padding:7px;">Обратная зона (без неё Gmail/Mail.ru отбивают письма с <code>550 5.7.1</code>)</td>
+                  </tr>
+                  <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                    <td style="padding:7px;"><strong>TXT (SPF)</strong></td>
+                    <td style="padding:7px;"><code>@</code> (строго одна запись <code>v=spf1</code>!)</td>
+                    <td style="padding:7px;"><code>v=spf1 mx a:mail.company.by ip4:178.124.x.x ~all</code></td>
+                    <td style="padding:7px;">Список серверов, которым разрешено слать почту от <code>@company.by</code></td>
+                  </tr>
+                  <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                    <td style="padding:7px;"><strong>TXT (DKIM)</strong></td>
+                    <td style="padding:7px;"><code>mail._domainkey</code> (в ISPmanager: <code>mail._domainkey.company.by.</code>)</td>
+                    <td style="padding:7px;"><code>v=DKIM1; k=rsa; p=MIIBIjANBg...</code> (копируется из Kerio)</td>
+                    <td style="padding:7px;">Цифровая криптоподпись каждого письма — главный фактор антиспама!</td>
+                  </tr>
+                  <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                    <td style="padding:7px;"><strong>TXT (DMARC)</strong></td>
+                    <td style="padding:7px;"><code>_dmarc</code> (<strong>НЕ</strong> <code>_dmarc.mail</code>!)</td>
+                    <td style="padding:7px;"><code>v=DMARC1; p=quarantine; rua=mailto:admin@company.by</code></td>
+                    <td style="padding:7px;">Защита домена от подделки отправителя и отчёты о доставке</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:7px;"><strong>SRV</strong></td>
+                    <td style="padding:7px;"><code>_autodiscover._tcp</code></td>
+                    <td style="padding:7px;">Приоритет <code>0</code>, Вес <code>0</code>, Порт <code>443</code>, Цель <code>mail.company.by</code></td>
+                    <td style="padding:7px;">Автонастройка Outlook и телефонов по email + паролю</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style="background:var(--bg-elevated);padding:14px 16px;border-radius:10px;border:1px solid var(--border);">
+            <div style="font-weight:800;color:#6ee7b7;margin-bottom:8px;">2️⃣ Обязательные настройки внутри Kerio Connect WebAdmin (<code>https://IP:4040/admin/</code>)</div>
+            <ul style="margin:0;padding-left:20px;display:grid;gap:6px;">
+              <li><strong>Интернет-имя SMTP (HELO):</strong> <em>Конфигурация → Сервер SMTP → вкладка Общие → «Имя узла в сети Интернет»</em> = <code>mail.company.by</code> (обязательно должно совпадать с PTR и A-записью, а НЕ быть локальным именем Windows типа <code>WIN-SERVER.local</code>!).</li>
+              <li><strong>Включение подписи DKIM:</strong> <em>Конфигурация → Домены → двойной клик по домену → вкладка Дополнительно (DomainKeys/DKIM)</em> → включить галочку подписи DKIM → нажать <em>«Показать открытый ключ»</em> → создать TXT <code>mail._domainkey</code> в DNS → нажать <em>«Проверить DNS»</em>.</li>
+              <li><strong>Защита от Open Relay (пересылки чужого спама):</strong> <em>Конфигурация → Сервер SMTP → вкладка Контроль реле (Relay Control)</em> → разрешить релей <strong>только</strong> для <code>127.0.0.1</code> + включить галочку <em>«Пользователи, прошедшие аутентификацию по SMTP, могут пересылать сообщения куда угодно»</em>.</li>
+              <li><strong>Доверенный SSL с полной цепочкой (Fullchain):</strong> <em>Конфигурация → Сертификаты SSL</em> — активный сертификат <code>mail.company.by</code> должен включать промежуточный сертификат Let's Encrypt (наша кнопка на вкладке «Установка в Kerio Connect» загружает сразу полный <code>server.crt</code> и делает его активным!).</li>
+            </ul>
+          </div>
+
+          <div style="background:var(--bg-elevated);padding:14px 16px;border-radius:10px;border:1px solid var(--border);">
+            <div style="font-weight:800;color:#fca5a5;margin-bottom:8px;">3️⃣ Главная ловушка на роутерах MikroTik / Kerio Control и какие порты пробрасывать снаружи</div>
+            <ul style="margin:0;padding-left:20px;display:grid;gap:6px;">
+              <li><strong>Какие TCP-порты пробросить с WAN на внутренний IP Kerio:</strong> <code>25</code> (приём внешней почты), <code>465</code> и <code>587</code> (защищённая отправка для сотрудников с телефонов/ноутбуков вне офиса), <code>993</code> (IMAPS), <code>443</code> (WebMail + ActiveSync + Autodiscover) и при выпуске HTTP-сертификата — <code>80</code>. Порт админки <code>4040</code> наружу в интернет <strong>НЕ открывайте</strong> (оставьте доступным только из LAN/VPN)!</li>
+              <li><strong>Опасная ошибка Masquerade:</strong> в правиле <code>srcnat / masquerade</code> на MikroTik обязательно указывайте <code>out-interface-list=WAN</code> (внешний интерфейс провайдера)! Если включить глобальный <code>masquerade</code> на все интерфейсы, все входящие спам-соединения на порт 25 будут приходить в Kerio с локальным IP роутера (например, <code>10.146.100.1</code>), из-за чего не работают RBL-списки в Kerio и возникает риск Open Relay!</li>
+            </ul>
+          </div>
+
+        </div>
+      </details>
+    </div>
+
   </section>
 
 </main>
@@ -2378,18 +2470,32 @@
 
 
   // =========================================================================
-  // FULL MAIL SERVER & ANTI-SPAM AUDIT + REMEDIATION WIZARD
+  // FULL MAIL SERVER & ANTI-SPAM AUDIT + INLINE & MASTER REMEDIATION WIZARD
   // =========================================================================
   let lastMailAuditReport = null;
 
-  // Auto-populate auditDomainInput from Tab 1 domainInput if still empty
+  // Smart strip of mail. prefix when pre-filling auditDomainInput from Tab 1 domainInput!
+  function extractMailRootDomainHint(raw) {
+    let v = (raw || '').trim().toLowerCase();
+    const parts = v.split('.');
+    if (parts.length >= 3 && ['mail','smtp','mx','webmail','relay','kerio','imap','pop'].includes(parts[0])) {
+      return { domain: parts.slice(1).join('.'), host: v };
+    }
+    return { domain: v, host: '' };
+  }
+
   document.querySelectorAll('.nav-tab').forEach(tabBtn => {
     tabBtn.addEventListener('click', () => {
       if (tabBtn.dataset.tab === 'mailcheck') {
         const audDom = document.getElementById('auditDomainInput');
+        const audHost = document.getElementById('auditMailHostInput');
         const mainDom = document.getElementById('domainInput').value.trim();
         if (audDom && !audDom.value.trim() && mainDom) {
-          audDom.value = mainDom;
+          const parsed = extractMailRootDomainHint(mainDom);
+          audDom.value = parsed.domain;
+          if (parsed.host && audHost && !audHost.value.trim()) {
+            audHost.value = parsed.host;
+          }
         }
         const audIp = document.getElementById('auditTargetIpInput');
         const apiHost = document.getElementById('kerioApiHost').value.trim();
@@ -2407,6 +2513,85 @@
     }
   });
 
+  function focusVpnProbeField() {
+    const inp = document.getElementById('auditTargetIpInput');
+    inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => inp.focus(), 300);
+    showToast('Введите локальный VPN IP вашего Kerio Connect (например, 10.146.100.14) и нажмите «Проверить»!');
+  }
+
+  function renderSolutionBlockHtml(sol, prefixKey, mailHost) {
+    if (!sol) return '';
+    const stepsHtml = (sol.steps || []).map((st, sIdx) => `
+      <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px;font-size:13.5px;line-height:1.55;">
+        <span style="min-width:24px;height:24px;border-radius:6px;background:rgba(59,130,246,0.2);border:1px solid rgba(59,130,246,0.45);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#93c5fd;margin-top:1px;">${sIdx + 1}</span>
+        <div style="flex:1;">${escapeHtml(st)}</div>
+      </div>
+    `).join('');
+
+    const copyHtml = (sol.copyItems || []).map((ci, cIdx) => {
+      const inpId = `${prefixKey}_cp_${cIdx}`;
+      return `
+        <div style="margin-top:8px;background:#0b1220;padding:10px 12px;border-radius:8px;border:1px solid rgba(251,191,36,0.35);">
+          <div style="font-size:12px;color:#cbd5e1;margin-bottom:5px;font-weight:700;">📋 ${escapeHtml(ci.label)}:</div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;">
+            <input type="text" readonly id="${inpId}" value="${escapeHtml(String(ci.value || ''))}" onclick="this.select()" style="font-family:Consolas,monospace;font-size:13px;font-weight:700;color:#fde68a;background:#111827;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="copyTextSafe(document.getElementById('${inpId}').value, 'Готовое значение скопировано в буфер!')">📋 Копировать</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const cmdInpId = `${prefixKey}_cmd`;
+    const verifyHtml = sol.verifyCmd ? `
+      <div style="margin-top:10px;background:rgba(16,185,129,0.08);padding:9px 12px;border-radius:8px;border:1px dashed rgba(16,185,129,0.4);">
+        <div style="font-size:11.5px;color:#6ee7b7;margin-bottom:4px;font-weight:700;">💻 Команда самопроверки в Командной строке Windows (CMD / PowerShell):</div>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;">
+          <input type="text" readonly id="${cmdInpId}" value="${escapeHtml(sol.verifyCmd)}" onclick="this.select()" style="font-family:Consolas,monospace;font-size:12.5px;color:#a7f3d0;background:#0b1220;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="copyTextSafe(document.getElementById('${cmdInpId}').value, 'Команда проверки скопирована!')">Копировать CMD</button>
+        </div>
+      </div>
+    ` : '';
+
+    let actionBtnHtml = '';
+    if (sol.quickAction === 'goto_issue_ssl') {
+      actionBtnHtml = `
+        <div style="margin-top:12px;">
+          <button type="button" class="btn btn-primary" onclick="jumpToSslIssueForHost('${escapeHtml(mailHost)}')">
+            🔐 Выпустить / установить доверенный SSL для ${escapeHtml(mailHost)} →
+          </button>
+        </div>`;
+    } else if (sol.quickAction === 'focus_vpn_ip') {
+      actionBtnHtml = `
+        <div style="margin-top:12px;">
+          <button type="button" class="btn btn-kerio" onclick="focusVpnProbeField()">
+            🔌 Указать локальный VPN IP сервера (напр. 10.146.100.14) и проверить порт 25 напрямую ↑
+          </button>
+        </div>`;
+    }
+
+    return `
+      <details open style="margin-top:12px;background:rgba(15,23,42,0.78);border:1.5px solid rgba(245,158,11,0.55);border-radius:10px;padding:14px 16px;">
+        <summary style="cursor:pointer;font-weight:800;font-size:14.5px;color:#fbbf24;display:flex;align-items:center;justify-content:space-between;list-style:none;">
+          <span>🛠️ ПОДРОБНАЯ ИНСТРУКЦИЯ ПО РЕШЕНИЮ: ${escapeHtml(sol.title)}</span>
+          <span style="font-size:11.5px;color:var(--text-secondary);font-weight:600;">Свернуть / развернуть ▾</span>
+        </summary>
+        <div style="margin-top:10px;">
+          <div style="font-size:13px;color:#cbd5e1;background:rgba(30,41,59,0.75);padding:10px 12px;border-left:3px solid #f59e0b;border-radius:6px;margin-bottom:12px;line-height:1.5;">
+            <strong>📌 Почему возникла проблема и чем грозит:</strong> ${escapeHtml(sol.whyItMatters)}
+          </div>
+          <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:#60a5fa;margin-bottom:9px;">
+            Пошаговый порядок действий (выполняйте по порядку):
+          </div>
+          ${stepsHtml}
+          ${copyHtml}
+          ${verifyHtml}
+          ${actionBtnHtml}
+        </div>
+      </details>
+    `;
+  }
+
   async function runFullMailAudit() {
     const domain = document.getElementById('auditDomainInput').value.trim();
     const mailHost = document.getElementById('auditMailHostInput').value.trim();
@@ -2422,7 +2607,7 @@
     const btn = document.getElementById('runMailAuditBtn');
     const orig = btn.innerHTML;
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span> Проверка MX, PTR, SPF, DKIM, DMARC, SMTP, SSL и 11 спам-баз...';
+    btn.innerHTML = '<span class="spinner"></span> Проверка MX, PTR, SPF, DKIM, DMARC, SMTP, SSL и подготовка инструкций...';
 
     try {
       const r = await fetch('/api/mail-audit', {
@@ -2434,7 +2619,7 @@
       if (!d.ok) throw new Error(d.error || 'Ошибка при выполнении аудита почтового сервера');
       lastMailAuditReport = d.report;
       renderMailAuditReport(d.report);
-      showToast(`Проверка завершена! Рейтинг доставляемости: ${d.report.score}/100 (${d.report.grade})`);
+      showToast(`Готово! Рейтинг: ${d.report.score}/100 (${d.report.grade}) — подробные инструкции раскрыты прямо под замечаниями!`);
     } catch (e) {
       showToast(e.message, true);
     } finally {
@@ -2446,7 +2631,7 @@
   function jumpToSslIssueForHost(host) {
     document.getElementById('domainInput').value = host;
     document.querySelector('.nav-tab[data-tab="issue"]').click();
-    showToast('Подставлен хост ' + host + ' — нажмите «Сгенерировать ключ и выпустить сертификат»!');
+    showToast('Подставлен хост ' + host + ' — выпустите сертификат или перейдите на вкладку «Установка в Kerio»!');
   }
 
   function renderMailAuditReport(rep) {
@@ -2474,116 +2659,38 @@
     document.getElementById('auditGradeLetter').textContent = `Оценка ${rep.grade}`;
     document.getElementById('auditVerdictTitle').textContent = rep.verdict;
     document.getElementById('auditTargetMeta').innerHTML =
-      `Почтовый домен: <strong>@${escapeHtml(rep.mailDomain)}</strong> • Сервер (MX/SMTP): <strong>${escapeHtml(rep.mailHost)}</strong> • Внешний IP: <strong>${escapeHtml(rep.serverIp || 'не определён')}</strong> • Время: ${escapeHtml(rep.checkedAt)}`;
+      `Почтовый домен: <strong>@${escapeHtml(rep.mailDomain)}</strong> • Сервер почты: <strong>${escapeHtml(rep.mailHost)}</strong> • Внешний IP: <strong>${escapeHtml(rep.serverIp || 'требуется A-запись')}</strong> • Проверено: ${escapeHtml(rep.checkedAt)}`;
 
     document.getElementById('auditCountersBar').innerHTML = `
-      <span class="status-pill ok">✅ Пройдено успешно: <strong>${rep.passedCount}</strong></span>
-      <span class="status-pill warn" style="${rep.warningCount ? '' : 'opacity:0.65;'}">🟠 Предупреждений: <strong>${rep.warningCount}</strong></span>
+      <span class="status-pill ok">✅ В порядке: <strong>${rep.passedCount}</strong></span>
+      <span class="status-pill warn" style="${rep.warningCount ? '' : 'opacity:0.65;'}">🟠 Важных замечаний: <strong>${rep.warningCount}</strong></span>
       <span class="status-pill" style="border-color:${rep.criticalCount ? '#ef4444' : 'var(--border)'};color:${rep.criticalCount ? '#fca5a5' : 'var(--text-secondary)'};">🔴 Критических проблем: <strong>${rep.criticalCount}</strong></span>
     `;
 
-    // 2. Remediation Guide
-    const remCard = document.getElementById('mailRemediationCard');
-    const remList = document.getElementById('mailRemediationList');
-    const jumpBtn = document.getElementById('jumpToFixesBtn');
-
-    if (rep.remediations && rep.remediations.length > 0) {
-      remCard.style.display = 'block';
-      jumpBtn.style.display = 'inline-flex';
-      document.getElementById('fixesCountNum').textContent = rep.remediations.length;
-
-      // Sort critical first, then warning, then info
-      const orderMap = { critical: 0, warning: 1, info: 2 };
-      const sortedRems = [...rep.remediations].sort((a, b) => (orderMap[a.severity] ?? 9) - (orderMap[b.severity] ?? 9));
-
-      remList.innerHTML = sortedRems.map((rem, idx) => {
-        let badgeHtml = '<span style="padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:800;background:rgba(59,130,246,0.18);color:#93c5fd;">💡 РЕКОМЕНДАЦИЯ</span>';
-        let borderCol = 'rgba(59,130,246,0.45)';
-        if (rem.severity === 'critical') {
-          badgeHtml = '<span style="padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:800;background:rgba(239,68,68,0.2);color:#fca5a5;">🔴 КРИТИЧНО — ВЛИЯЕТ НА СПАМ / ОТКАЗЫ</span>';
-          borderCol = 'rgba(239,68,68,0.55)';
-        } else if (rem.severity === 'warning') {
-          badgeHtml = '<span style="padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:800;background:rgba(245,158,11,0.2);color:#fcd34d;">🟠 ВАЖНО ИСПРАВИТЬ</span>';
-          borderCol = 'rgba(245,158,11,0.55)';
-        }
-
-        const stepsHtml = (rem.steps || []).map((st, sIdx) => `
-          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:7px;font-size:13.5px;line-height:1.5;">
-            <span style="min-width:22px;height:22px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:800;color:var(--accent);margin-top:1px;">${sIdx + 1}</span>
-            <div>${escapeHtml(st)}</div>
-          </div>
-        `).join('');
-
-        const copyHtml = (rem.copyItems || []).map((ci, cIdx) => {
-          const safeVal = String(ci.value || '');
-          const btnId = `rem_copy_btn_${idx}_${cIdx}`;
-          return `
-            <div style="margin-top:8px;background:var(--bg-card);padding:10px 12px;border-radius:8px;border:1px solid var(--border);">
-              <div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;font-weight:600;">${escapeHtml(ci.label)}:</div>
-              <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;">
-                <input type="text" readonly id="${btnId}_inp" value="${escapeHtml(safeVal)}" onclick="this.select()" style="font-family:Consolas,monospace;font-size:13px;font-weight:700;color:#fde68a;">
-                <button type="button" class="btn btn-primary btn-sm" onclick="copyTextSafe(document.getElementById('${btnId}_inp').value, 'Скопировано в буфер обмена!')">📋 Копировать</button>
-              </div>
-            </div>
-          `;
-        }).join('');
-
-        const quickBtnHtml = rem.quickAction === 'goto_issue_ssl'
-          ? `<div style="margin-top:12px;">
-               <button type="button" class="btn btn-primary" onclick="jumpToSslIssueForHost('${escapeHtml(rep.mailHost)}')">
-                 🔐 Выпустить доверенный SSL-сертификат для ${escapeHtml(rep.mailHost)} прямо сейчас →
-               </button>
-             </div>`
-          : '';
-
-        return `
-          <div style="background:var(--bg-elevated);border:1.5px solid ${borderCol};border-radius:12px;padding:16px 18px;margin-bottom:14px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                ${badgeHtml}
-                <span style="font-size:12px;color:var(--text-secondary);font-weight:600;">• ${escapeHtml(rem.category)}</span>
-              </div>
-              <span style="font-size:12px;color:var(--text-secondary);">Пункт #${idx + 1}</span>
-            </div>
-            <div style="font-size:15.5px;font-weight:800;margin-bottom:6px;">${escapeHtml(rem.title)}</div>
-            <div style="font-size:13px;color:var(--text-secondary);background:rgba(15,23,42,0.45);padding:9px 12px;border-radius:8px;margin-bottom:12px;line-height:1.45;">
-              <strong>Почему это важно:</strong> ${escapeHtml(rem.whyItMatters)}
-            </div>
-            <div style="font-size:12.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--accent);margin-bottom:8px;">Как устранить по шагам:</div>
-            ${stepsHtml}
-            ${copyHtml}
-            ${quickBtnHtml}
-          </div>
-        `;
-      }).join('');
-    } else {
-      remCard.style.display = 'none';
-      jumpBtn.style.display = 'none';
-    }
-
-    // 3. Detailed Checks List
+    // 2. Detailed Checks WITH INLINE FULL STEP-BY-STEP INSTRUCTIONS RIGHT INSIDE EVERY FAILED CARD!
     const iconByStatus = { ok: '✅', warning: '🟠', error: '🔴', info: '💡' };
     const borderByStatus = {
-      ok: 'rgba(16,185,129,0.35)',
-      warning: 'rgba(245,158,11,0.5)',
-      error: 'rgba(239,68,68,0.55)',
-      info: 'var(--border)'
+      ok: 'rgba(16,185,129,0.4)',
+      warning: 'rgba(245,158,11,0.65)',
+      error: 'rgba(239,68,68,0.75)',
+      info: 'rgba(59,130,246,0.45)'
     };
-    document.getElementById('mailChecksList').innerHTML = (rep.checks || []).map(ch => `
-      <div style="background:var(--bg-elevated);border:1px solid ${borderByStatus[ch.status] || 'var(--border)'};border-radius:10px;padding:13px 15px;margin-bottom:10px;">
+    document.getElementById('mailChecksList').innerHTML = (rep.checks || []).map((ch, idx) => `
+      <div style="background:var(--bg-elevated);border:1.5px solid ${borderByStatus[ch.status] || 'var(--border)'};border-radius:12px;padding:15px 17px;margin-bottom:14px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-          <div style="font-weight:800;font-size:14px;">${iconByStatus[ch.status] || '•'} ${escapeHtml(ch.title)}</div>
-          <span style="font-size:11.5px;color:var(--text-secondary);">${escapeHtml(ch.category)}</span>
+          <div style="font-weight:800;font-size:15px;">${iconByStatus[ch.status] || '•'} ${escapeHtml(ch.title)}</div>
+          <span style="font-size:11.5px;color:var(--text-secondary);font-weight:600;">${escapeHtml(ch.category)}</span>
         </div>
-        <div style="font-size:13.5px;margin-top:5px;line-height:1.45;">${escapeHtml(ch.summary)}</div>
+        <div style="font-size:13.8px;margin-top:6px;line-height:1.5;font-weight:${ch.status === 'ok' ? '400' : '600'};">${escapeHtml(ch.summary)}</div>
         ${(ch.details && ch.details.length) ? `
-          <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);font-family:Consolas,monospace;font-size:12px;color:var(--text-secondary);word-break:break-all;">
-            ${ch.details.map(d => `<div style="margin-bottom:3px;">• ${escapeHtml(d)}</div>`).join('')}
+          <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);font-family:Consolas,monospace;font-size:12px;color:var(--text-secondary);word-break:break-word;">
+            ${ch.details.map(d => `<div style="margin-bottom:4px;">• ${escapeHtml(d)}</div>`).join('')}
           </div>` : ''}
+        ${renderSolutionBlockHtml(ch.solution, 'inline_sol_' + idx, rep.mailHost)}
       </div>
     `).join('');
 
-    // 4. Ports Matrix
+    // 3. Ports Matrix
     document.getElementById('mailPortsMatrix').innerHTML = (rep.ports || []).map(p => {
       let stBadge = '<span style="color:#94a3b8;">Закрыт / недоступен</span>';
       if (p.open && p.tlsTrusted) {
@@ -2606,9 +2713,9 @@
       `;
     }).join('');
 
-    // 5. DNSBL Matrix
+    // 4. DNSBL Matrix
     if (!rep.blacklists || rep.blacklists.length === 0) {
-      document.getElementById('mailRblMatrix').innerHTML = '<div class="hint-text">Внешний IPv4 адрес не определён для проверки RBL.</div>';
+      document.getElementById('mailRblMatrix').innerHTML = '<div class="hint-text">Сначала настройте A-запись почтового хоста на внешний публичный IPv4 — после этого автоматически проверятся все 11 мировых спам-баз (Spamhaus, Barracuda, SpamCop, SORBS и др.).</div>';
     } else {
       document.getElementById('mailRblMatrix').innerHTML = rep.blacklists.map(b => `
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-radius:8px;background:var(--bg-elevated);border:1px solid ${b.listed ? '#ef4444' : 'var(--border)'};margin-bottom:7px;font-size:13px;">
@@ -2622,31 +2729,70 @@
         </div>
       `).join('');
     }
+
+    // 5. Master Tickable Remediation Plan AFTER the checks
+    const remCard = document.getElementById('mailRemediationCard');
+    const remList = document.getElementById('mailRemediationList');
+    const jumpBtn = document.getElementById('jumpToFixesBtn');
+
+    if (rep.remediations && rep.remediations.length > 0) {
+      remCard.style.display = 'block';
+      jumpBtn.style.display = 'inline-flex';
+      document.getElementById('fixesCountNum').textContent = rep.remediations.length;
+
+      const orderMap = { critical: 0, warning: 1, info: 2 };
+      const sortedRems = [...rep.remediations].sort((a, b) => (orderMap[a.severity] ?? 9) - (orderMap[b.severity] ?? 9));
+
+      remList.innerHTML = sortedRems.map((rem, idx) => {
+        let badgeHtml = '<span style="padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:800;background:rgba(59,130,246,0.18);color:#93c5fd;">💡 РЕКОМЕНДАЦИЯ</span>';
+        let borderCol = 'rgba(59,130,246,0.45)';
+        if (rem.severity === 'critical') {
+          badgeHtml = '<span style="padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:800;background:rgba(239,68,68,0.2);color:#fca5a5;">🔴 ШАГ ПЕРВОЙ ОЧЕРЕДИ (КРИТИЧНО)</span>';
+          borderCol = 'rgba(239,68,68,0.55)';
+        } else if (rem.severity === 'warning') {
+          badgeHtml = '<span style="padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:800;background:rgba(245,158,11,0.2);color:#fcd34d;">🟠 ВАЖНО ВЫПОЛНИТЬ</span>';
+          borderCol = 'rgba(245,158,11,0.55)';
+        }
+        return `
+          <div style="background:var(--bg-elevated);border:1.5px solid ${borderCol};border-radius:12px;padding:15px 18px;margin-bottom:14px;">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:15px;font-weight:800;margin-bottom:6px;">
+              <input type="checkbox" style="width:18px;height:18px;cursor:pointer;">
+              <span>Этап #${idx + 1}: ${escapeHtml(rem.title)}</span>
+              ${badgeHtml}
+            </label>
+            ${renderSolutionBlockHtml(rem, 'master_sol_' + idx, rep.mailHost)}
+          </div>
+        `;
+      }).join('');
+    } else {
+      remCard.style.display = 'none';
+      jumpBtn.style.display = 'none';
+    }
   }
 
   function exportMailAuditHTML() {
     if (!lastMailAuditReport) return;
     const rep = lastMailAuditReport;
-    const htmlDoc = `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Аудит почтового сервера ${escapeHtml(rep.mailDomain)}</title>
-      <style>body{font-family:Segoe UI,Arial,sans-serif;max-width:960px;margin:24px auto;padding:0 16px;color:#0f172a;background:#f8fafc;}
-      .box{background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:16px 20px;margin-bottom:14px;}
-      code,pre{background:#f1f5f9;padding:2px 6px;border-radius:5px;font-family:Consolas,monospace;word-break:break-all;}
+    const htmlDoc = `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Аудит и план настройки почты @${escapeHtml(rep.mailDomain)}</title>
+      <style>body{font-family:Segoe UI,Arial,sans-serif;max-width:980px;margin:24px auto;padding:0 16px;color:#0f172a;background:#f8fafc;line-height:1.55;}
+      .box{background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:18px 22px;margin-bottom:16px;}
+      .sol{background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:14px 16px;margin-top:12px;}
+      code{background:#f1f5f9;padding:2px 6px;border-radius:5px;font-family:Consolas,monospace;word-break:break-all;}
       h1,h2,h3{margin:0 0 8px;}</style></head><body>
-      <div class="box"><h1>Отчёт аудита почтового сервера @${escapeHtml(rep.mailDomain)}</h1>
-      <p><strong>Сервер:</strong> ${escapeHtml(rep.mailHost)} (${escapeHtml(rep.serverIp)}) • <strong>Оценка:</strong> ${rep.score}/100 (${rep.grade}) • <strong>Дата:</strong> ${escapeHtml(rep.checkedAt)}</p>
+      <div class="box"><h1>Полный аудит и инструкция по настройке почтового сервера @${escapeHtml(rep.mailDomain)}</h1>
+      <p><strong>Почтовый сервер:</strong> ${escapeHtml(rep.mailHost)} (${escapeHtml(rep.serverIp || '—')}) • <strong>Оценка:</strong> ${rep.score}/100 (${rep.grade}) • <strong>Дата:</strong> ${escapeHtml(rep.checkedAt)}</p>
       <p>${escapeHtml(rep.verdict)}</p></div>
-      <h2>План устранения замечаний</h2>
-      ${(rep.remediations || []).map((r, i) => `<div class="box"><h3>${i + 1}. [${r.severity.toUpperCase()}] ${escapeHtml(r.title)}</h3><p><em>${escapeHtml(r.whyItMatters)}</em></p><ol>${(r.steps || []).map(st => `<li>${escapeHtml(st)}</li>`).join('')}</ol>${(r.copyItems || []).map(c => `<p><strong>${escapeHtml(c.label)}:</strong> <code>${escapeHtml(c.value)}</code></p>`).join('')}</div>`).join('')}
-      <h2>Детальные проверки</h2>
-      ${(rep.checks || []).map(c => `<div class="box"><strong>[${c.status.toUpperCase()}] ${escapeHtml(c.title)}</strong><p>${escapeHtml(c.summary)}</p></div>`).join('')}
+      <h2>Детальные проверки и пошаговые инструкции по устранению</h2>
+      ${(rep.checks || []).map((c, i) => `<div class="box"><h3>${i + 1}. [${c.status.toUpperCase()}] ${escapeHtml(c.title)}</h3><p>${escapeHtml(c.summary)}</p>
+        ${c.solution ? `<div class="sol"><strong>🛠️ КАК ИСПРАВИТЬ: ${escapeHtml(c.solution.title)}</strong><p><em>${escapeHtml(c.solution.whyItMatters)}</em></p><ol>${(c.solution.steps || []).map(st => `<li>${escapeHtml(st)}</li>`).join('')}</ol>${(c.solution.copyItems || []).map(cp => `<p><strong>${escapeHtml(cp.label)}:</strong> <code>${escapeHtml(cp.value)}</code></p>`).join('')}${c.solution.verifyCmd ? `<p><strong>Проверка CMD:</strong> <code>${escapeHtml(c.solution.verifyCmd)}</code></p>` : ''}</div>` : ''}
+      </div>`).join('')}
       </body></html>`;
     const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `mail-audit-${rep.mailDomain}.html`;
+    a.download = `mail-audit-and-guide-${rep.mailDomain}.html`;
     a.click();
   }
-
   initApp();
 </script>
 </body>
