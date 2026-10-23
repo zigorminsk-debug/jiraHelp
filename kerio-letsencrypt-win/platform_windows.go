@@ -17,11 +17,15 @@ import (
 )
 
 var (
-	shell32DLL        = syscall.NewLazyDLL("shell32.dll")
-	procIsUserAnAdmin = shell32DLL.NewProc("IsUserAnAdmin")
-	procShellExecuteW = shell32DLL.NewProc("ShellExecuteW")
-	user32DLL         = syscall.NewLazyDLL("user32.dll")
-	procMessageBoxW   = user32DLL.NewProc("MessageBoxW")
+	kernel32DLL         = syscall.NewLazyDLL("kernel32.dll")
+	procGetModuleHandle = kernel32DLL.NewProc("GetModuleHandleW")
+	shell32DLL          = syscall.NewLazyDLL("shell32.dll")
+	procIsUserAnAdmin   = shell32DLL.NewProc("IsUserAnAdmin")
+	procShellExecuteW   = shell32DLL.NewProc("ShellExecuteW")
+	user32DLL           = syscall.NewLazyDLL("user32.dll")
+	procMessageBoxW     = user32DLL.NewProc("MessageBoxW")
+	procLoadImageW      = user32DLL.NewProc("LoadImageW")
+	procPostMessageW    = user32DLL.NewProc("PostMessageW")
 
 	activeWebViewMu sync.Mutex
 	activeWebView   webview2.WebView
@@ -226,6 +230,32 @@ func CloseDesktopWindow() {
 	}
 }
 
+func PlatformApplyWindowIcon(iconID int) {
+	if iconID < 1 || iconID > 4 {
+		iconID = 1
+	}
+	activeWebViewMu.Lock()
+	wv := activeWebView
+	activeWebViewMu.Unlock()
+	if wv == nil {
+		return
+	}
+	hwnd := uintptr(wv.Window())
+	if hwnd == 0 {
+		return
+	}
+	hMod, _, _ := procGetModuleHandle.Call(0)
+	// IMAGE_ICON = 1, LR_DEFAULTSIZE = 0x0040; WM_SETICON = 0x0080 (ICON_SMALL = 0, ICON_BIG = 1)
+	hBig, _, _ := procLoadImageW.Call(hMod, uintptr(iconID), 1, 256, 256, 0)
+	hSmall, _, _ := procLoadImageW.Call(hMod, uintptr(iconID), 1, 32, 32, 0)
+	if hBig != 0 {
+		procPostMessageW.Call(hwnd, 0x0080, 1, hBig)
+	}
+	if hSmall != 0 {
+		procPostMessageW.Call(hwnd, 0x0080, 0, hSmall)
+	}
+}
+
 // RunDesktopWindow creates a true native Win32 window embedding WebView2 (blocking on main thread until window closes),
 // with fallback to explorer.exe browser tab if WebView2 Runtime is missing on old Windows Server 2012/2016.
 func RunDesktopWindow(appURL string) (usedNativeWindow bool) {
@@ -241,15 +271,20 @@ func RunDesktopWindow(appURL string) (usedNativeWindow bool) {
 	// Prevent Windows 11 / UAC Admin / RDP GPU compositor freezes and bypass corporate proxy for 127.0.0.1
 	_ = os.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--proxy-bypass-list=<-loopback> --disable-gpu")
 
+	initIcon := uint(LoadSavedUISettings(DefaultCertsRoot()).SelectedIconID)
+	if initIcon < 1 || initIcon > 4 {
+		initIcon = 1
+	}
+
 	wv := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug:     false,
 		AutoFocus: true,
 		DataPath:  dataDir,
 		WindowOptions: webview2.WindowOptions{
-			Title:  "Kerio SSL, Mail Audit, Delist & Sanctions Suite (v4.1)",
-			Width:  1360,
+			Title:  "Kerio SSL, Mail Audit, Delist & Sanctions Suite (v4.2) — Zakharevich Igor",
+			Width:  1380,
 			Height: 940,
-			IconId: 0,
+			IconId: initIcon,
 			Center: true,
 		},
 	})
@@ -257,6 +292,7 @@ func RunDesktopWindow(appURL string) (usedNativeWindow bool) {
 		activeWebViewMu.Lock()
 		activeWebView = wv
 		activeWebViewMu.Unlock()
+		PlatformApplyWindowIcon(int(initIcon))
 
 		_ = wv.Bind("nativeCloseWindow", func() {
 			wv.Destroy()

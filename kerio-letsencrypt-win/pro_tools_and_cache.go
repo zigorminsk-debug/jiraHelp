@@ -106,6 +106,7 @@ func setCachedWANIP(ip string) {
 // ============================================================================
 
 type SavedUISettings struct {
+	SelectedIconID   int    `json:"selectedIconId,omitempty"`
 	LastDomain       string `json:"lastDomain"`
 	LastServerIP     string `json:"lastServerIp"`
 	LastEmail        string `json:"lastEmail"`

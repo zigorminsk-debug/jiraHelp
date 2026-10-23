@@ -658,25 +658,26 @@
     color: var(--accent);
   }
 </style>
+<link id="dynamicFaviconLink" rel="icon" type="image/png" href="/icons/emerald-shield.png">
 </head>
 <body>
 
 <!-- Header -->
 <header class="topbar">
   <div class="brand">
-    <div class="brand-logo" aria-hidden="true">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-        <rect x="9" y="11" width="6" height="5" rx="1"/>
-        <path d="M10 11V9a2 2 0 1 1 4 0v2"/>
-      </svg>
+    <div class="brand-logo" onclick="openAboutAndIconsModal()" style="cursor:pointer;padding:0;background:transparent;border:none;width:44px;height:44px;box-shadow:0 4px 14px rgba(0,0,0,0.45);" title="Нажмите, чтобы выбрать стилизованный значок программы или открыть контакты разработчика">
+      <img id="headerAppIconImg" src="/icons/emerald-shield.png" alt="Kerio SSL Icon" width="44" height="44" style="display:block;width:44px;height:44px;border-radius:10px;">
     </div>
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.1 • SSL • Аудит Почты • Delist • Проверка Санкций (Домен + IP)</span>
+        <span class="brand-badge">Windows Native GUI v4.2 • SSL • Аудит Почты • Delist • Проверка Санкций</span>
       </div>
-      <div class="brand-sub">Генерация приватного ключа (.key) и выпуск SSL-сертификатов (.crt / .pfx) по IP и домену для Kerio MailServer</div>
+      <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
+        <span style="opacity:0.45;">•</span>
+        <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong> (<a href="mailto:ziv@csl.by" style="color:#6ee7b7;text-decoration:none;">ziv@csl.by</a> • <a href="tel:+375293371412" style="color:#93c5fd;text-decoration:none;">+375293371412</a>)</span>
+      </div>
     </div>
   </div>
 
@@ -685,9 +686,13 @@
     <a id="downloadWinExeBtn" href="/api/download-windows-exe" class="btn btn-blue btn-sm" style="display:none;" title="Скачать автономный исполняемый файл для Windows x64 (без установки Python/OpenSSL)">
       ⬇ Скачать программу для Windows (.exe)
     </a>
-    <a id="downloadWinZipBtn" href="/api/download-windows-zip" class="btn btn-outline btn-sm" style="display:none;" title="Скачать ZIP-архив с KerioCertManager.exe и инструкцией">
+    <a id="downloadWinZipBtn" href="/api/download-windows-zip" class="btn btn-outline btn-sm" style="display:none;" title="Скачать ZIP-архив с KerioCertManager.exe и всеми значками">
       📦 ZIP для Windows
     </a>
+
+    <button type="button" class="btn btn-outline btn-sm" onclick="openAboutAndIconsModal()" title="Выбрать стилизованный значок приложения и посмотреть контакты разработчика">
+      🎨 Значки / Автор
+    </button>
 
     <div id="adminBadge" class="status-pill" title="Статус привилегий системы">
       <span class="status-dot"></span>
@@ -1965,6 +1970,61 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   </section>
 
 </main>
+
+<!-- Persistent Developer Attribution & Icon Chooser Footer -->
+<footer style="border-top:1px solid var(--border);background:var(--bg-surface);padding:13px 24px;">
+  <div style="max-width:1380px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
+      <span><strong>Kerio SSL, Mail Audit, Delist &amp; Sanctions Suite v4.2</strong></span>
+      <span>•</span>
+      <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
+      <span>•</span>
+      <a href="mailto:ziv@csl.by" style="color:#6ee7b7;font-weight:700;text-decoration:none;">✉ ziv@csl.by</a>
+      <span>•</span>
+      <a href="tel:+375293371412" style="color:#93c5fd;font-weight:700;text-decoration:none;">☎ +375293371412</a>
+    </div>
+    <div>
+      <button type="button" class="btn btn-outline btn-sm" onclick="openAboutAndIconsModal()">
+        🎨 Выбрать стилизованный значок программы (4 варианта)
+      </button>
+    </div>
+  </div>
+</footer>
+
+<!-- Stylized App Icons Picker & Developer Credits Modal -->
+<div id="aboutAndIconsModalOverlay" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(2,6,23,0.82);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:18px;" onclick="if(event.target===this)this.style.display='none'">
+  <div style="width:100%;max-width:860px;max-height:92vh;overflow-y:auto;background:var(--bg-card);border:1.5px solid var(--accent);border-radius:16px;padding:24px;box-shadow:0 24px 64px rgba(0,0,0,0.7);">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:18px;">
+      <div>
+        <div style="font-size:18px;font-weight:800;">🎨 Стилизованные значки приложения на выбор и информация о разработчике</div>
+        <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">
+          Нажмите на любой из <strong>4 фирменных 3D-значков</strong>, чтобы мгновенно применить его в окне программы и Панели задач Windows — все 4 значка также вшиты прямо внутрь <code>KerioCertManager.exe</code> (<em>Свойства ярлыка → Сменить значок...</em>)!
+        </div>
+      </div>
+      <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('aboutAndIconsModalOverlay').style.display='none'">Закрыть ✕</button>
+    </div>
+
+    <div id="stylizedIconsGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:14px;margin-bottom:20px;"></div>
+
+    <!-- Developer Card -->
+    <div style="background:var(--bg-elevated);border:1.5px solid rgba(59,130,246,0.45);border-radius:12px;padding:16px 18px;">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.06em;color:#93c5fd;font-weight:800;margin-bottom:8px;">👨‍💻 Разработчик и автор проекта</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;">
+        <div>
+          <div style="font-size:18px;font-weight:800;color:var(--text-main);">Zakharevich Igor</div>
+          <div style="font-size:13px;color:var(--text-secondary);margin-top:3px;">Архитектура, криптография ACME/X.509, диагностика Kerio Connect, антиспам и сетевая безопасность</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <a href="mailto:ziv@csl.by" class="btn btn-primary btn-sm" style="text-decoration:none;">✉ ziv@csl.by</a>
+          <button type="button" class="btn btn-outline btn-sm" onclick="copyTextSafe('ziv@csl.by', 'Email ziv@csl.by скопирован!')">📋 Копировать Email</button>
+          <a href="tel:+375293371412" class="btn btn-blue btn-sm" style="text-decoration:none;">☎ +375293371412</a>
+          <button type="button" class="btn btn-outline btn-sm" onclick="copyTextSafe('+375293371412', 'Телефон +375293371412 скопирован!')">📋 Копировать тел.</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="toast" id="toastBox"></div>
 
@@ -3606,8 +3666,99 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   // v4.0 PRO ADMIN TOOLS, PERSISTENT UI STATE, VAULT SEARCH, KERIO INSPECTOR
   // =========================================================================
 
+  const APP_ICON_PRESETS = [
+    {
+      id: 1,
+      slug: 'emerald-shield',
+      title: '1. Изумрудный Щит SSL',
+      desc: 'Стеклянный 3D-щит безопасности, золотой конверт и замок TLS (по умолчанию в .exe)',
+      accent: '#10b981'
+    },
+    {
+      id: 2,
+      slug: 'kerio-amber',
+      title: '2. Фирменный Kerio Amber',
+      desc: 'Тёплый янтарный конверт Kerio Connect, золотой крипто-ключ и щит проверки',
+      accent: '#f59e0b'
+    },
+    {
+      id: 3,
+      slug: 'sapphire-globe',
+      title: '3. Сапфировый Глобус TLS',
+      desc: 'Глобальная почтовая сеть, неоновая орбита шифрования и серебряный конверт',
+      accent: '#3b82f6'
+    },
+    {
+      id: 4,
+      slug: 'titanium-pro',
+      title: '4. Dark Titanium Pro',
+      desc: 'Строгий корпоративный шлифованный титан с неоновым замком и конвертом',
+      accent: '#34d399'
+    }
+  ];
+  let currentSelectedIconId = 1;
+
+  function applySelectedAppIconVisual(iconId) {
+    const preset = APP_ICON_PRESETS.find(x => x.id === iconId) || APP_ICON_PRESETS[0];
+    currentSelectedIconId = preset.id;
+    const pngUrl = `/icons/${preset.slug}.png`;
+    const hdrImg = document.getElementById('headerAppIconImg');
+    if (hdrImg) hdrImg.src = pngUrl;
+    const ftrImg = document.getElementById('footerAppIconImg');
+    if (ftrImg) ftrImg.src = pngUrl;
+    const fav = document.getElementById('dynamicFaviconLink');
+    if (fav) fav.href = pngUrl;
+    renderStylizedIconsModalGrid();
+  }
+
+  function renderStylizedIconsModalGrid() {
+    const grid = document.getElementById('stylizedIconsGrid');
+    if (!grid) return;
+    grid.innerHTML = APP_ICON_PRESETS.map(p => {
+      const active = p.id === currentSelectedIconId;
+      return `
+        <div onclick="selectAppIcon(${p.id})" style="cursor:pointer;background:var(--bg-elevated);border:2px solid ${active ? p.accent : 'var(--border)'};border-radius:14px;padding:14px;display:flex;flex-direction:column;align-items:center;text-align:center;transition:transform 0.14s,border-color 0.14s;box-shadow:${active ? '0 0 0 3px rgba(16,185,129,0.18)' : 'none'};">
+          <img src="/icons/${p.slug}.png" alt="${escapeHtml(p.title)}" width="92" height="92" style="width:92px;height:92px;border-radius:20px;margin-bottom:10px;box-shadow:0 8px 20px rgba(0,0,0,0.45);">
+          <div style="font-size:13.5px;font-weight:800;color:var(--text-main);margin-bottom:4px;">${escapeHtml(p.title)}</div>
+          <div style="font-size:11.8px;color:var(--text-secondary);line-height:1.4;margin-bottom:10px;flex:1;">${escapeHtml(p.desc)}</div>
+          <div style="display:flex;gap:6px;width:100%;justify-content:center;flex-wrap:wrap;">
+            <span class="btn ${active ? 'btn-primary' : 'btn-outline'} btn-sm" style="pointer-events:none;">
+              ${active ? '✓ Выбран сейчас' : 'Выбрать'}
+            </span>
+            <a href="/icons/${p.slug}.ico?dl=1" onclick="event.stopPropagation()" class="btn btn-outline btn-sm" style="text-decoration:none;" title="Скачать готовый файл значка Windows (.ico, 16..256 px)">
+              ⬇ .ICO
+            </a>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  async function selectAppIcon(iconId) {
+    applySelectedAppIconVisual(iconId);
+    try {
+      await fetch('/api/set-app-icon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ iconId })
+      });
+      const preset = APP_ICON_PRESETS.find(x => x.id === iconId) || APP_ICON_PRESETS[0];
+      showToast(`Установлен значок «${preset.title}» (обновлены шапка, иконка окна Windows и настройки)!`);
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  }
+
+  function openAboutAndIconsModal() {
+    renderStylizedIconsModalGrid();
+    document.getElementById('aboutAndIconsModalOverlay').style.display = 'flex';
+  }
+
   function applyLoadedUiSettings(s, detectedWanIp) {
     if (!s) return;
+    if (s.selectedIconId >= 1 && s.selectedIconId <= 4) {
+      applySelectedAppIconVisual(s.selectedIconId);
+    }
     if (s.lastDomain && !document.getElementById('domainInput').value.trim()) {
       document.getElementById('domainInput').value = s.lastDomain;
     }
@@ -3657,6 +3808,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            selectedIconId: currentSelectedIconId,
             lastDomain: document.getElementById('domainInput').value.trim(),
             lastServerIp: document.getElementById('ipInput').value.trim(),
             lastEmail: document.getElementById('emailInput').value.trim(),

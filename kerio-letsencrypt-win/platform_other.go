@@ -71,6 +71,8 @@ func PlatformOpenTempFirewallPort(_ int) func() {
 
 func CloseDesktopWindow() {}
 
+func PlatformApplyWindowIcon(_ int) {}
+
 func RunDesktopWindow(_ string) bool {
 	return false
 }

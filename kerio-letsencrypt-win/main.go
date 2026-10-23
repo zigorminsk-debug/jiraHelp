@@ -4,7 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -24,6 +24,22 @@ var embeddedIndexHTML []byte
 
 //go:embed ui/icon.ico
 var embeddedIconICO []byte
+
+//go:embed ui/icons/*
+var embeddedIconsFS embed.FS
+
+func iconSlugByID(iconID int) string {
+	switch iconID {
+	case 2:
+		return "kerio-amber"
+	case 3:
+		return "sapphire-globe"
+	case 4:
+		return "titanium-pro"
+	default:
+		return "emerald-shield"
+	}
+}
 
 type LogEntry struct {
 	Timestamp string `json:"timestamp"`
@@ -160,8 +176,59 @@ func buildRouter() http.Handler {
 	})
 
 	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		slug := iconSlugByID(LoadSavedUISettings(DefaultCertsRoot()).SelectedIconID)
+		if b, err := embeddedIconsFS.ReadFile("ui/icons/" + slug + ".ico"); err == nil {
+			w.Header().Set("Content-Type", "image/x-icon")
+			_, _ = w.Write(b)
+			return
+		}
 		w.Header().Set("Content-Type", "image/x-icon")
 		_, _ = w.Write(embeddedIconICO)
+	})
+
+	mux.HandleFunc("/icons/", func(w http.ResponseWriter, r *http.Request) {
+		name := filepath.Base(strings.TrimPrefix(r.URL.Path, "/icons/"))
+		b, err := embeddedIconsFS.ReadFile("ui/icons/" + name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if strings.HasSuffix(name, ".png") {
+			w.Header().Set("Content-Type", "image/png")
+		} else if strings.HasSuffix(name, ".ico") {
+			w.Header().Set("Content-Type", "image/x-icon")
+		}
+		if r.URL.Query().Get("dl") == "1" {
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", "KerioCertManager-"+name))
+		}
+		_, _ = w.Write(b)
+	})
+
+	mux.HandleFunc("/api/set-app-icon", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, 405, fmt.Errorf("method not allowed"))
+			return
+		}
+		var body struct {
+			IconID int `json:"iconId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		if body.IconID < 1 || body.IconID > 4 {
+			body.IconID = 1
+		}
+		defDir := DefaultCertsRoot()
+		cur := LoadSavedUISettings(defDir)
+		cur.SelectedIconID = body.IconID
+		_ = SaveUISettings(defDir, cur)
+		PlatformApplyWindowIcon(body.IconID)
+		writeJSON(w, 200, map[string]any{
+			"ok":     true,
+			"iconId": body.IconID,
+			"slug":   iconSlugByID(body.IconID),
+		})
 	})
 
 	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {

@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"debug/pe"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
@@ -774,6 +775,61 @@ func TestSanctionsOFACAndGeoBlockAuditEngine(t *testing.T) {
 		t.Fatalf("expected belarusbank.by to be flagged as OFAC blocked with remediation guide, got: %+v", blockedRep)
 	}
 }
+
+func TestStylizedAppIconsAndDeveloperAttribution(t *testing.T) {
+	// 1. Verify all 4 stylized PNG + ICO icons are cleanly embedded & valid
+	for _, slug := range []string{"emerald-shield", "kerio-amber", "sapphire-globe", "titanium-pro"} {
+		pngBytes, err := embeddedIconsFS.ReadFile("ui/icons/" + slug + ".png")
+		if err != nil || len(pngBytes) < 10000 {
+			t.Fatalf("missing or invalid embedded PNG icon %s: err=%v len=%d", slug, err, len(pngBytes))
+		}
+		icoBytes, err := embeddedIconsFS.ReadFile("ui/icons/" + slug + ".ico")
+		if err != nil || len(icoBytes) < 10000 {
+			t.Fatalf("missing or invalid embedded ICO icon %s: err=%v len=%d", slug, err, len(icoBytes))
+		}
+	}
+
+	// 2. Verify developer attribution in UI HTML
+	htmlStr := string(embeddedIndexHTML)
+	for _, mustHave := range []string{"Zakharevich Igor", "ziv@csl.by", "+375293371412"} {
+		if !strings.Contains(htmlStr, mustHave) {
+			t.Fatalf("embedded UI HTML missing required developer attribution %q", mustHave)
+		}
+	}
+
+	// 3. Verify compiled Windows COFF resource object (.syso) embeds all 4 icons + UTF-16LE developer info
+	sysoRaw, err := os.ReadFile("rsrc_windows_amd64.syso")
+	if err != nil {
+		t.Fatalf("rsrc_windows_amd64.syso missing: %v", err)
+	}
+	f, err := pe.NewFile(strings.NewReader(string(sysoRaw)))
+	if err != nil {
+		t.Fatalf("invalid COFF object rsrc_windows_amd64.syso: %v", err)
+	}
+	defer f.Close()
+	rsrcSec := f.Section(".rsrc")
+	if rsrcSec == nil {
+		t.Fatalf("missing .rsrc section in rsrc_windows_amd64.syso")
+	}
+	secData, err := rsrcSec.Data()
+	if err != nil || len(secData) < 100000 {
+		t.Fatalf("unexpected .rsrc section payload: err=%v len=%d", err, len(secData))
+	}
+	// Check UTF-16LE encoded developer strings inside VS_VERSION_INFO
+	utf16Check := func(s string) []byte {
+		var out []byte
+		for _, r := range s {
+			out = append(out, byte(r), byte(r>>8))
+		}
+		return out
+	}
+	for _, needle := range []string{"Zakharevich Igor", "ziv@csl.by", "+375293371412"} {
+		if !strings.Contains(string(secData), string(utf16Check(needle))) {
+			t.Fatalf("VS_VERSION_INFO in .rsrc missing UTF-16LE string %q", needle)
+		}
+	}
+}
+
 
 
 
