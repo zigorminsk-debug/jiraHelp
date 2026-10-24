@@ -20,11 +20,11 @@ import (
 
 func TestParseVersionV46(t *testing.T) {
 	cases := []struct {
-		in      string
-		major   int
-		minor   int
-		patch   int
-		wantOK  bool
+		in     string
+		major  int
+		minor  int
+		patch  int
+		wantOK bool
 	}{
 		{"v4.6.0", 4, 6, 0, true},
 		{"4.6.0", 4, 6, 0, true},
@@ -462,5 +462,52 @@ func TestCIBuildsInstaller(t *testing.T) {
 		if !strings.Contains(wf, want) {
 			t.Errorf(".github/workflows/build-windows.yml: нет %q — установщик не попадёт в релиз", want)
 		}
+	}
+}
+
+// --- служба Kerio на Linux ------------------------------------------------
+
+// TestLinuxServiceStatusWithoutKerio — самая дорогая ошибка: `systemctl
+// is-active` для НЕсуществующего юнита отвечает «inactive» и кодом 3, ровно
+// как для остановленной службы. Из-за этого программа считала, что Kerio
+// установлен, и пыталась его «перезапустить» (а тест установки сертификата
+// падал в CI, где systemd есть, а Kerio нет).
+func TestLinuxServiceStatusWithoutKerio(t *testing.T) {
+	if dirExists("/opt/kerio/mailserver") || dirExists("/usr/local/kerio/mailserver") {
+		t.Skip("на этой машине реально установлен Kerio Connect")
+	}
+
+	dir := t.TempDir()
+	fakeSystemctl := filepath.Join(dir, "systemctl")
+	// Юнита нет: systemctl list-unit-files ничего не находит.
+	script := `#!/bin/sh
+case "$1" in
+  list-unit-files) echo "0 unit files listed."; exit 0 ;;
+  is-active) echo "inactive"; exit 3 ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(fakeSystemctl, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if got := PlatformKerioServiceStatus(); got != "NOT_INSTALLED" {
+		t.Fatalf("без Kerio статус = %q, ожидался NOT_INSTALLED", got)
+	}
+
+	// А теперь «юнит есть, но служба остановлена».
+	script2 := `#!/bin/sh
+case "$1" in
+  list-unit-files) echo "kerio-connect.service enabled"; exit 0 ;;
+  is-active) echo "inactive"; exit 3 ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(fakeSystemctl, []byte(script2), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := PlatformKerioServiceStatus(); got != "STOPPED" {
+		t.Fatalf("для остановленной службы статус = %q, ожидался STOPPED", got)
 	}
 }

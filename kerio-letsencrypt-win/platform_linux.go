@@ -64,15 +64,8 @@ func PlatformKerioServiceImagePath() (string, string) {
 // platformLinuxServiceName — первое известное имя службы, которое реально есть.
 func platformLinuxServiceName() string {
 	for _, name := range platformLinuxServiceNames {
-		if _, err := os.Stat("/etc/init.d/" + name); err == nil {
+		if linuxServiceExists(name) {
 			return name
-		}
-	}
-	for _, name := range platformLinuxServiceNames {
-		if out, err := exec.Command("systemctl", "list-unit-files", name+".service").Output(); err == nil {
-			if strings.Contains(string(out), name+".service") {
-				return name
-			}
 		}
 	}
 	return "kerio-connect"
@@ -98,8 +91,45 @@ func PlatformCandidateKerioDirs() []string {
 	return out
 }
 
+// linuxServiceExists — есть ли вообще такая служба в системе.
+// Без этой проверки `systemctl is-active` для несуществующего юнита отвечает
+// «inactive» (код 3) — ровно как для остановленной службы, и программа
+// считала бы «Kerio установлен, но остановлен» там, где Kerio нет вовсе.
+func linuxServiceExists(name string) bool {
+	if _, err := os.Stat("/etc/init.d/" + name); err == nil {
+		return true
+	}
+	if !isSystemdAvailable() {
+		return false
+	}
+	out, err := exec.Command("systemctl", "list-unit-files", name+".service").CombinedOutput()
+	if err != nil && len(out) == 0 {
+		return false
+	}
+	return strings.Contains(string(out), name+".service")
+}
+
+// platformLinuxKerioInstalled — установлен ли Kerio Connect вообще
+// (по каталогу установки или по службе).
+func platformLinuxKerioInstalled() bool {
+	for _, dir := range platformLinuxKerioDirs {
+		if dirExists(dir) {
+			return true
+		}
+	}
+	for _, name := range platformLinuxServiceNames {
+		if linuxServiceExists(name) {
+			return true
+		}
+	}
+	return false
+}
+
 // PlatformKerioServiceStatus — состояние службы Kerio.
 func PlatformKerioServiceStatus() string {
+	if !platformLinuxKerioInstalled() {
+		return "NOT_INSTALLED"
+	}
 	name := platformLinuxServiceName()
 	if isSystemdAvailable() {
 		out, err := exec.Command("systemctl", "is-active", name).CombinedOutput()
@@ -123,10 +153,7 @@ func PlatformKerioServiceStatus() string {
 		strings.Contains(strings.ToLower(string(out)), "stopped") {
 		return "STOPPED"
 	}
-	if dirExists("/opt/kerio/mailserver") || dirExists("/usr/local/kerio/mailserver") {
-		return "UNKNOWN"
-	}
-	return "NOT_INSTALLED"
+	return "UNKNOWN"
 }
 
 // PlatformControlKerioService — start/stop/restart через systemd, с откатом
