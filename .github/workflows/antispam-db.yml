@@ -30,16 +30,28 @@ jobs:
           ref: ${{ github.ref_name }}
 
       - name: Build anti-spam database
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUNBUFFERED: "1"
         run: |
-          set -euo pipefail
-          python3 antispam-db/tools/build_db.py --out antispam-db/dist
+          set +e
+          python3 antispam-db/tools/build_db.py --out antispam-db/dist > /tmp/db-build.log 2>&1
+          rc=$?
+          cat /tmp/db-build.log
+          if [ $rc -ne 0 ]; then
+            echo "::error::build_db.py exited with $rc"
+            tail -25 /tmp/db-build.log | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+            exit $rc
+          fi
           python3 - <<'PY'
           import json
           m = json.load(open("antispam-db/dist/manifest.json", encoding="utf-8"))
           print("version:", m["version"])
           print("counts:", json.dumps(m["counts"], ensure_ascii=False))
-          for s in m.get("sources", []):
-              print(("  OK " if s.get("ok") else "  -- "), s["name"], s.get("count", 0), s.get("error", ""))
+          for src in m.get("sources", []):
+              print(("  OK " if src.get("ok") else "  -- "), src["name"], src.get("count", 0), src.get("error", ""))
           PY
 
       - name: Validate database (SHA-256, manifest, SpamAssassin syntax)
