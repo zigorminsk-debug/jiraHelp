@@ -60,7 +60,7 @@ jobs:
         working-directory: kerio-letsencrypt-win
         run: |
           set +e
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -mod=vendor -trimpath -ldflags "-s -w -H windowsgui" -o ../KerioCertManager.exe . > /tmp/build.log 2>&1
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -mod=vendor -trimpath -buildvcs=false -ldflags "-s -w -H windowsgui" -o ../KerioCertManager.exe . > /tmp/build.log 2>&1
           rc=$?
           cat /tmp/build.log
           if [ $rc -ne 0 ]; then
