@@ -511,3 +511,21 @@ exit 0
 		t.Fatalf("для остановленной службы статус = %q, ожидался STOPPED", got)
 	}
 }
+
+// TestLinuxSudoDefaultEnabled — по умолчанию sudo для Linux-операций включён:
+// при входе не от root без него не работает ни запись в /opt/kerio, ни
+// перезапуск службы. Раньше флаг по умолчанию был false, и галочка в UI
+// снималась при первом запуске.
+func TestLinuxSudoDefaultEnabled(t *testing.T) {
+	dir := t.TempDir()
+	if s := LoadSavedUISettings(dir); !s.LinuxSudo {
+		t.Fatal("LinuxSudo по умолчанию должен быть true (нет файла настроек)")
+	}
+	// Явное выключение пользователем должно сохраняться.
+	if err := SaveUISettings(dir, SavedUISettings{AutoCheckUpdates: true, LinuxSudo: false}); err != nil {
+		t.Fatal(err)
+	}
+	if s := LoadSavedUISettings(dir); s.LinuxSudo {
+		t.Fatal("явно выключенный LinuxSudo не должен включаться обратно")
+	}
+}

@@ -161,7 +161,9 @@ func LoadSavedUISettings(baseDir string) SavedUISettings {
 	defer settingsMu.Unlock()
 	// Автопроверка обновлений включена по умолчанию: администратор сервера
 	// обычно не следит за релизами, а узнавать о новой версии полезно.
-	s := SavedUISettings{AutoCheckUpdates: true}
+	// Sudo для Linux-операций тоже включён по умолчанию — иначе при входе
+	// не от root программа не сможет ни записать файл, ни перезапустить службу.
+	s := SavedUISettings{AutoCheckUpdates: true, LinuxSudo: true}
 	b, err := os.ReadFile(filepath.Join(baseDir, "ui_settings.json"))
 	if err == nil {
 		_ = json.Unmarshal(b, &s)
