@@ -167,8 +167,8 @@
     border-bottom: 1px solid var(--border);
     padding: 0 24px;
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
-    overflow-x: auto;
   }
   .nav-tab {
     background: transparent;
@@ -657,6 +657,95 @@
     font-size: 12px;
     color: var(--accent);
   }
+
+  /* ===================== АДАПТИВНОСТЬ / МАЛЕНЬКИЕ ЭКРАНЫ ===================== */
+
+  /* Аккуратные скроллбары вместо системных «белых полос» */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg-app); }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-hover);
+    border-radius: 999px;
+    border: 2px solid var(--bg-app);
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+  html, body { max-width: 100%; overflow-x: hidden; }
+
+  /* Две подписи вкладки: короткая по умолчанию, полная — на очень широких
+     мониторах (4K+), где все 8 длинных названий помещаются в одну строку. */
+  .nav-tabs .lbl-full { display: none; }
+  .nav-tabs .lbl-short { display: inline; }
+  .tab-ico { line-height: 1; }
+  @media (min-width: 2400px) {
+    .nav-tabs .lbl-full { display: inline; }
+    .nav-tabs .lbl-short { display: none; }
+  }
+
+  /* Вкладки больше не уезжают за край: при нехватке места переносятся
+     на вторую строку, горизонтальной прокрутки у панели нет. */
+  .nav-tab { flex: 0 1 auto; max-width: 100%; }
+
+  /* --- Окно уже 1450 px: длинный бейдж версии в шапке скрываем,
+         чтобы кнопки управления оставались в той же строке --- */
+  @media (max-width: 1450px) {
+    .brand-badge .badge-extra { display: none; }
+  }
+
+  /* --- Ноутбук 1024-1280 px: убираем длинный бейдж и подзаголовок шапки --- */
+  @media (max-width: 1180px) {
+    .topbar { padding: 10px 16px; gap: 12px; }
+    .nav-tabs { padding: 0 16px; }
+    .container { padding: 16px 16px 32px; }
+    .brand-badge { display: none; }
+    .brand-sub { display: none; }
+    .workspace-grid { grid-template-columns: 1fr; }
+    .card { padding: 16px; }
+  }
+
+  /* --- Планшет / узкое окно до 900 px: одна колонка полей, кнопки на всю ширину --- */
+  @media (max-width: 900px) {
+    .field-row { grid-template-columns: 1fr; }
+    .mode-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .actions-row { gap: 8px; }
+    .actions-row .btn-primary { flex: 1 1 100%; min-width: 0; }
+    .actions-row .btn { flex: 1 1 auto; }
+    .btn { white-space: normal; text-align: center; }
+    .input-with-btn { flex-wrap: wrap; }
+    .input-with-btn input { min-width: 0; }
+    .input-with-btn .btn { flex: 0 0 auto; }
+    .card-header { flex-wrap: wrap; }
+    .data-table th, .data-table td { padding: 9px 10px; }
+    .toast { right: 12px; left: 12px; bottom: 12px; max-width: none; }
+  }
+
+  /* --- Телефон / совсем узкое окно до 700 px: только иконки в шапке --- */
+  @media (max-width: 700px) {
+    body { font-size: 13px; }
+    .topbar { padding: 8px 10px; }
+    .nav-tabs { padding: 0 10px; }
+    .container { padding: 12px 10px 28px; }
+    .topbar .btn-lbl { display: none; }
+    .status-pill { padding: 6px 9px; }
+    .nav-tab { padding: 9px 10px; font-size: 12.5px; gap: 5px; }
+    .card { padding: 13px; border-radius: 10px; }
+    .card-title { font-size: 14px; }
+    .brand-title { font-size: 14px; }
+    .brand-logo, .brand-logo img { width: 34px !important; height: 34px !important; }
+    .btn { padding: 8px 12px; font-size: 12.5px; }
+    .btn-sm { padding: 6px 9px; font-size: 11.5px; }
+    .mode-grid { grid-template-columns: 1fr; }
+    .data-table { font-size: 12px; }
+    .data-table th { font-size: 10.5px; }
+  }
+
+  /* --- Низкие экраны (1366x768 и меньше): компактнее по вертикали --- */
+  @media (max-height: 780px) {
+    .topbar { padding-top: 7px; padding-bottom: 7px; }
+    .nav-tab { padding-top: 8px; padding-bottom: 8px; }
+    .container { padding-top: 12px; }
+    .card { margin-bottom: 12px; }
+  }
 </style>
 <link id="dynamicFaviconLink" rel="icon" type="image/png" href="/icons/emerald-shield.png">
 </head>
@@ -671,7 +760,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.4.2 • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span>
+        <span class="brand-badge">Windows Native GUI v4.4.3<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -691,50 +780,50 @@
     </a>
 
     <button type="button" class="btn btn-outline btn-sm" onclick="openAboutAndIconsModal()" title="Выбрать стилизованный значок приложения и посмотреть контакты разработчика">
-      🎨 Значки / Автор
+      🎨 <span class="btn-lbl">Значки / Автор</span>
     </button>
 
     <div id="adminBadge" class="status-pill" title="Статус привилегий системы">
       <span class="status-dot"></span>
-      <span id="adminBadgeText">Проверка системы...</span>
+      <span class="btn-lbl" id="adminBadgeText">Проверка системы...</span>
     </div>
 
     <button type="button" class="btn btn-outline btn-sm" id="themeToggleBtn" title="Переключить тёмную / светлую тему">
-      ☀ Тема
+      ☀ <span class="btn-lbl">Тема</span>
     </button>
 
     <button type="button" class="btn btn-danger btn-sm" id="exitAppBtn" style="display:none;" title="Закрыть программу и остановить локальный фоновый процесс">
-      ⏻ Выход
+      ⏻ <span class="btn-lbl">Выход</span>
     </button>
   </div>
 </header>
 
 <!-- Navigation Tabs -->
 <nav class="nav-tabs">
-  <button type="button" class="nav-tab active" data-tab="issue">
-    🔐 Выпуск сертификата (IP + Домен)
+  <button type="button" class="nav-tab active" data-tab="issue" title="Выпуск сертификата (IP + Домен)">
+    <span class="tab-ico">🔐</span><span class="lbl-full">Выпуск сертификата (IP + Домен)</span><span class="lbl-short">Сертификат</span>
   </button>
-  <button type="button" class="nav-tab" data-tab="kerio">
-    📬 Установка в Kerio Connect
+  <button type="button" class="nav-tab" data-tab="kerio" title="Установка в Kerio Connect">
+    <span class="tab-ico">📬</span><span class="lbl-full">Установка в Kerio Connect</span><span class="lbl-short">Kerio</span>
   </button>
-  <button type="button" class="nav-tab" data-tab="mailcheck">
-    📨 Проверка почты и Антиспам
+  <button type="button" class="nav-tab" data-tab="mailcheck" title="Проверка почты и Антиспам">
+    <span class="tab-ico">📨</span><span class="lbl-full">Проверка почты и Антиспам</span><span class="lbl-short">Почта</span>
   </button>
-  <button type="button" class="nav-tab" data-tab="delist">
-    🚑 Выход из Блэклистов и Письма <span class="badge" id="delistNavBadge" style="display:none;background:#ef4444;color:#fff;margin-left:5px;">!</span>
+  <button type="button" class="nav-tab" data-tab="delist" title="Выход из Блэклистов и Письма">
+    <span class="tab-ico">🚑</span><span class="lbl-full">Выход из Блэклистов и Письма</span><span class="lbl-short">Блэклисты</span> <span class="badge" id="delistNavBadge" style="display:none;background:#ef4444;color:#fff;margin-left:5px;">!</span>
   </button>
-  <button type="button" class="nav-tab" data-tab="sanctions">
-    🌍 Санкции и Гео-блокировки (Домен + IP)
+  <button type="button" class="nav-tab" data-tab="sanctions" title="Санкции и Гео-блокировки (Домен + IP)">
+    <span class="tab-ico">🌍</span><span class="lbl-full">Санкции и Гео-блокировки (Домен + IP)</span><span class="lbl-short">Санкции</span>
   </button>
-  <button type="button" class="nav-tab" data-tab="vault">
-    📂 Выпущенные сертификаты и Автопродление
+  <button type="button" class="nav-tab" data-tab="vault" title="Выпущенные сертификаты и Автопродление">
+    <span class="tab-ico">📂</span><span class="lbl-full">Выпущенные сертификаты и Автопродление</span><span class="lbl-short">Хранилище</span>
     <span class="tab-count" id="certCountBadge">0</span>
   </button>
-  <button type="button" class="nav-tab" data-tab="antispam">
-    🛡️ Антиспам-база KCM (GitHub)
+  <button type="button" class="nav-tab" data-tab="antispam" title="Антиспам-база KCM (GitHub)">
+    <span class="tab-ico">🛡️</span><span class="lbl-full">Антиспам-база KCM (GitHub)</span><span class="lbl-short">Антиспам</span>
   </button>
-  <button type="button" class="nav-tab" data-tab="tools">
-    🧰 Инструменты админа (Заголовки / DNS)
+  <button type="button" class="nav-tab" data-tab="tools" title="Инструменты админа (Заголовки / DNS)">
+    <span class="tab-ico">🧰</span><span class="lbl-full">Инструменты админа (Заголовки / DNS)</span><span class="lbl-short">Инструменты</span>
   </button>
 </nav>
 
@@ -2145,7 +2234,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:1380px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.4.2</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.4.3</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -2221,7 +2310,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 <script>
   // Версия интерфейса. Должна совпадать с appVersion в version.go
   // (проверяется тестом TestVersionConsistency).
-  const APP_VERSION = '4.4.2';
+  const APP_VERSION = '4.4.3';
   let systemState = null;
   let currentCert = null;
   let allCerts = [];

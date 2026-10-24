@@ -26,6 +26,8 @@ var (
 	procMessageBoxW     = user32DLL.NewProc("MessageBoxW")
 	procLoadImageW      = user32DLL.NewProc("LoadImageW")
 	procPostMessageW    = user32DLL.NewProc("PostMessageW")
+	procGetSystemMetrics = user32DLL.NewProc("GetSystemMetrics")
+	procSystemParametersInfoW = user32DLL.NewProc("SystemParametersInfoW")
 
 	activeWebViewMu sync.Mutex
 	activeWebView   webview2.WebView
@@ -288,6 +290,54 @@ func PlatformApplyWindowIcon(iconID int) {
 	}
 }
 
+
+// winRect — RECT из Win32 (рабочая область экрана без панели задач).
+type winRect struct {
+	Left, Top, Right, Bottom int32
+}
+
+// desktopWorkArea возвращает ширину и высоту рабочей области экрана в пикселях.
+func desktopWorkArea() (int, int) {
+	const spiGetWorkArea = 0x0030
+	var r winRect
+	if ret, _, _ := procSystemParametersInfoW.Call(spiGetWorkArea, 0, uintptr(unsafe.Pointer(&r)), 0); ret != 0 {
+		if w, h := int(r.Right-r.Left), int(r.Bottom-r.Top); w > 0 && h > 0 {
+			return w, h
+		}
+	}
+	cx, _, _ := procGetSystemMetrics.Call(0) // SM_CXSCREEN
+	cy, _, _ := procGetSystemMetrics.Call(1) // SM_CYSCREEN
+	return int(cx), int(cy)
+}
+
+// adaptiveWindowSize подбирает стартовый размер окна под экран.
+// На 1920x1080 остаётся привычные 1380x940, а на ноутбуке 1366x768
+// (или в RDP-сессии) окно ужимается, чтобы кнопки и вкладки не уезжали
+// за границы экрана. Дальше вёрстка подстраивается через CSS media queries.
+func adaptiveWindowSize() (int, int) {
+	const (
+		preferredW, preferredH = 1380, 940
+		margin                 = 48 // место под тень окна и края экрана
+		minW, minH             = 640, 520
+	)
+	w, h := preferredW, preferredH
+	if sw, sh := desktopWorkArea(); sw > 0 && sh > 0 {
+		if maxW := sw - margin; w > maxW {
+			w = maxW
+		}
+		if maxH := sh - margin; h > maxH {
+			h = maxH
+		}
+	}
+	if w < minW {
+		w = minW
+	}
+	if h < minH {
+		h = minH
+	}
+	return w, h
+}
+
 // RunDesktopWindow creates a true native Win32 window embedding WebView2 (blocking on main thread until window closes),
 // with fallback to explorer.exe browser tab if WebView2 Runtime is missing on old Windows Server 2012/2016.
 func RunDesktopWindow(appURL string) (usedNativeWindow bool) {
@@ -308,14 +358,16 @@ func RunDesktopWindow(appURL string) (usedNativeWindow bool) {
 		initIcon = 1
 	}
 
+	winW, winH := adaptiveWindowSize()
+
 	wv := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug:     false,
 		AutoFocus: true,
 		DataPath:  dataDir,
 		WindowOptions: webview2.WindowOptions{
 			Title:  "Kerio SSL, Mail Audit, Delist, Sanctions & AntiSpam DB Suite (v" + appVersion + ") — Zakharevich Igor",
-			Width:  1380,
-			Height: 940,
+			Width:  uint(winW),
+			Height: uint(winH),
 			IconId: initIcon,
 			Center: true,
 		},
