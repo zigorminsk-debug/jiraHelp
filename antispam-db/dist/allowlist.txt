@@ -1,5 +1,5 @@
 # KCM AntiSpam DB — allowlist.txt
-# generated: 2026-10-24T08:11:45+00:00
+# generated: 2026-10-24T08:19:16+00:00
 # entries: 58
 1c.ru
 amazon.com

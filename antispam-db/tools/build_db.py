@@ -100,6 +100,8 @@ def normalize_domain(raw):
 
 def extract_host(line):
     line = line.strip()
+    if not line or line.startswith("#") or line.startswith(";") or line.startswith("!"):
+        return ""
     m = URL_RE.match(line)
     if m:
         host = m.group(1).lower().strip(".")
@@ -219,18 +221,29 @@ def build(offline=False, out_dir=None):
                 continue
 
             got_d, got_u, got_i = set(), set(), set()
-            if ftype == "ips":
-                got_i = parse_ip_lines(text)
-            elif ftype == "urls":
-                for line in text.splitlines()[: limit * 3]:
-                    host = extract_host(line)
-                    if host:
-                        got_u.add(host)
-            else:  # plain-domains | hosts | adblock
-                for line in text.splitlines()[: limit * 3]:
-                    host = extract_host(line)
-                    if host:
-                        got_d.add(host)
+            try:
+                if ftype == "ips":
+                    got_i = parse_ip_lines(text)
+                elif ftype == "urls":
+                    for line in text.splitlines():
+                        host = extract_host(line)
+                        if host:
+                            got_u.add(host)
+                        if len(got_u) >= limit:
+                            break
+                else:  # plain-domains | hosts | adblock
+                    for line in text.splitlines():
+                        host = extract_host(line)
+                        if host:
+                            got_d.add(host)
+                        if len(got_d) >= limit:
+                            break
+            except Exception as exc:  # noqa: BLE001 - битый фид не должен ломать всю сборку
+                log(f"    ! {name}: ошибка разбора: {exc}")
+                stats["sources"].append({"name": name, "enabled": True, "ok": False,
+                                         "count": 0, "error": "parse: " + str(exc)[:200], "url": url,
+                                         "credit": feed.get("credit", "")})
+                continue
             got_d = set(list(got_d)[:limit])
             got_u = set(list(got_u)[:limit])
             got_i = set(list(got_i)[:limit])

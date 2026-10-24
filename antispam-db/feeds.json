@@ -3,7 +3,7 @@
   "feeds": [
     {
       "name": "urlhaus",
-      "url": "https://urlhaus.abuse.ch/downloads/text_online/",
+      "url": "https://urlhaus.abuse.ch/downloads/text_recent/",
       "type": "urls",
       "enabled": true,
       "limit": 8000,
