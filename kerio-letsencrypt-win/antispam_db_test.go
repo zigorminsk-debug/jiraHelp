@@ -376,3 +376,87 @@ func TestFetchAntiSpamManifestBadChecksum(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// TestInstallAntiSpamDBMissingKerioExplainsWhy — регрессия на жалобу
+// «не найден каталог SpamAssassin Kerio Connect. 1) Укажите папку…».
+// Ошибка обязана называть проверенные пути и что делать, а не быть
+// одной общей фразой; диагностика должна быть в отчёте.
+func TestInstallAntiSpamDBMissingKerioExplainsWhy(t *testing.T) {
+	srv, _ := newTestMirror(t, "2026.10.24-0810")
+	t.Setenv("KCM_ANTISPAM_DB_BASE", srv.URL)
+
+	certsDir := t.TempDir()
+	// Пустая «папка установки»: ни plugins, ни mailserver.cfg.
+	emptyKerio := t.TempDir()
+
+	_, err := InstallAntiSpamDB(certsDir, AntiSpamInstallOptions{KerioDir: emptyKerio, Restart: false})
+	if err == nil {
+		t.Fatalf("ожидалась ошибка: в пустом каталоге ставить базу некуда")
+	}
+	msg := err.Error()
+	for _, want := range []string{"Что проверено", "Что делать", emptyKerio} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("в ошибке нет %q\nсообщение:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "1) Укажите папку установки Kerio Connect (обычно") {
+		t.Errorf("вернулся старый бесполезный текст ошибки:\n%s", msg)
+	}
+
+	// Ошибка сохранена в состоянии — её видно на вкладке после перезапуска.
+	st := LoadAntiSpamState(certsDir)
+	if !strings.Contains(st.LastError, "Что проверено") {
+		t.Errorf("LastError не содержит отчёта: %q", st.LastError)
+	}
+}
+
+// TestInstallAntiSpamDBCreatesRulesInSpamServerLayout — установка в «реальную»
+// раскладку plugins\spamserver\spamassassin, где подпапки rules ещё нет.
+func TestInstallAntiSpamDBCreatesRulesInSpamServerLayout(t *testing.T) {
+	srv, _ := newTestMirror(t, "2026.10.24-0900")
+	t.Setenv("KCM_ANTISPAM_DB_BASE", srv.URL)
+
+	certsDir := t.TempDir()
+	kerioDir := t.TempDir()
+	saDir := filepath.Join(kerioDir, "plugins", "spamserver", "spamassassin")
+	if err := os.MkdirAll(saDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := InstallAntiSpamDB(certsDir, AntiSpamInstallOptions{KerioDir: kerioDir, Restart: false})
+	if err != nil {
+		t.Fatalf("установка не удалась: %v", err)
+	}
+	want := filepath.Join(saDir, "rules", antiSpamRuleFileName)
+	if res.RulePath != want {
+		t.Fatalf("файл записан в %q, ожидалось %q", res.RulePath, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("файла правил нет: %v", err)
+	}
+	if dirExists(filepath.Join(kerioDir, "plugins", "spamassassin", "rules")) {
+		t.Errorf("создана лишняя папка plugins/spamassassin/rules")
+	}
+}
+
+// TestPreviewAntiSpamInstallDoesNotCreateDirs — предпросмотр не должен
+// создавать каталоги: иначе «проверка» молча меняет диск.
+func TestPreviewAntiSpamInstallDoesNotCreateDirs(t *testing.T) {
+	srv, _ := newTestMirror(t, "2026.10.24-0910")
+	t.Setenv("KCM_ANTISPAM_DB_BASE", srv.URL)
+
+	certsDir := t.TempDir()
+	kerioDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(kerioDir, "plugins", "spamassassin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, err := PreviewAntiSpamInstall(certsDir)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	_ = preview
+	if dirExists(filepath.Join(kerioDir, "plugins", "spamassassin", "rules")) {
+		t.Errorf("предпросмотр создал папку rules")
+	}
+}

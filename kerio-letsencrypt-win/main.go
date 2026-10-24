@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1179,6 +1180,84 @@ func buildRouter() http.Handler {
 		default:
 			writeErr(w, 400, fmt.Errorf("неизвестное действие автообновления базы: %s", body.Action))
 		}
+	})
+
+	// Диагностика путей: какие каталоги Kerio/SpamAssassin проверены и что найдено.
+	// Нужна, когда автоматика не нашла папку правил (нестандартная установка,
+	// Kerio на другом сервере, Linux и т.п.) — вместо общей ошибки админ видит
+	// конкретный список путей и подсказки.
+	mux.HandleFunc("/api/antispam/diagnose", func(w http.ResponseWriter, r *http.Request) {
+		settings := LoadSavedUISettings(DefaultCertsRoot())
+		kerioHint := strings.TrimSpace(r.URL.Query().Get("kerioDir"))
+		rulesHint := strings.TrimSpace(r.URL.Query().Get("rulesDir"))
+		if r.Method == http.MethodPost {
+			var body struct {
+				KerioDir string `json:"kerioDir"`
+				RulesDir string `json:"rulesDir"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				if strings.TrimSpace(body.KerioDir) != "" {
+					kerioHint = strings.TrimSpace(body.KerioDir)
+				}
+				if strings.TrimSpace(body.RulesDir) != "" {
+					rulesHint = strings.TrimSpace(body.RulesDir)
+				}
+			}
+		}
+		rep := DiagnoseKerioPaths(settings, kerioHint, rulesHint)
+		// Подсказываем, куда ставить, чтобы UI мог сразу заполнить поля.
+		choice := ChooseRulesDir(settings, LoadAntiSpamState(DefaultCertsRoot()), kerioHint, rulesHint, false)
+		rep.KerioDir = firstNonEmpty(rep.KerioDir, choice.KerioDir)
+		if rep.RulesDir == "" && choice.Dir != "" {
+			rep.RulesDir = choice.Dir
+			rep.RulesDirSource = choice.Source
+			rep.RulesDirExists = choice.Exists
+			rep.Summary = kerioPathSummary(&rep)
+			rep.Advice = kerioPathAdvice(&rep)
+		}
+		logHub.Emit("info", "Диагностика путей Kerio: "+rep.Summary)
+		writeJSON(w, 200, rep)
+	})
+
+	// Скачивание готового .cf: пригодится, когда Kerio стоит на другом сервере
+	// (Linux, другая машина, закрытый контур) и положить файл нужно вручную.
+	mux.HandleFunc("/api/antispam/download-rule", func(w http.ResponseWriter, r *http.Request) {
+		certsDir := DefaultCertsRoot()
+		st := LoadAntiSpamState(certsDir)
+		var data []byte
+		if p := strings.TrimSpace(st.RulePath); p != "" {
+			if b, err := os.ReadFile(p); err == nil {
+				data = b
+			}
+		}
+		// Нет установленного файла — берём самую свежую локальную копию из
+		// резервных (работает даже без интернета), и только затем GitHub.
+		if len(data) == 0 {
+			if backups, err := filepath.Glob(filepath.Join(antiSpamBackupDir(certsDir), "*.cf")); err == nil && len(backups) > 0 {
+				sort.Strings(backups)
+				if b, err := os.ReadFile(backups[len(backups)-1]); err == nil {
+					data = b
+				}
+			}
+		}
+		if len(data) == 0 {
+			remote, err := fetchAntiSpamManifest()
+			if err != nil {
+				writeErr(w, 502, fmt.Errorf("%w\n\nСкачайте kerio-antispam.cf со страницы релиза antispam-db-latest и положите его в папку правил вручную "+
+					"(или используйте «Импорт файла базы» на этой вкладке)", err))
+				return
+			}
+			b, err := verifyAndDownload(remote.BaseURL, antiSpamRuleFileName, remote.Manifest.RuleSHA())
+			if err != nil {
+				writeErr(w, 502, err)
+				return
+			}
+			data = b
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+antiSpamRuleFileName+`"`)
+		w.Header().Set("X-Rule-SHA256", sha256Hex(data))
+		_, _ = w.Write(data)
 	})
 
 	mux.HandleFunc("/api/antispam/test-email", func(w http.ResponseWriter, r *http.Request) {

@@ -199,77 +199,9 @@ func antiSpamAppendHistory(st *AntiSpamState, action, version, note string) {
 // Определение каталогов Kerio Connect
 // ---------------------------------------------------------------------------
 
-func resolveKerioInstallDir(settings SavedUISettings) (string, string) {
-	if p := strings.TrimSpace(settings.KerioInstallPath); p != "" {
-		if st, err := os.Stat(p); err == nil && st.IsDir() {
-			return p, "из настроек программы"
-		}
-	}
-	for _, cand := range PlatformCandidateKerioDirs() {
-		for _, marker := range []string{"mailserver.cfg", filepath.Join("plugins"), filepath.Join("kerio")} {
-			if _, err := os.Stat(filepath.Join(cand, marker)); err == nil {
-				return cand, "найден автоматически"
-			}
-		}
-	}
-	for _, cand := range PlatformCandidateKerioDirs() {
-		if st, err := os.Stat(cand); err == nil && st.IsDir() {
-			return cand, "найден по стандартному пути"
-		}
-	}
-	return "", "не найден"
-}
-
-func spamAssassinRulesCandidates(kerioDir string) []string {
-	if kerioDir == "" {
-		return nil
-	}
-	return []string{
-		filepath.Join(kerioDir, "plugins", "spamassassin", "rules"),
-		filepath.Join(kerioDir, "plugins", "spamserver", "spamassassin", "rules"),
-		filepath.Join(kerioDir, "kerio", "plugins", "spamassassin", "rules"),
-	}
-}
-
-func detectSpamAssassinRulesDir(kerioDir string) (string, bool) {
-	for _, cand := range spamAssassinRulesCandidates(kerioDir) {
-		if st, err := os.Stat(cand); err == nil && st.IsDir() {
-			return cand, true
-		}
-	}
-	// Каталог ещё не создан — создаём только внутри существующего plugins,
-	// чтобы не насоздавать «пустышек» в неверном месте.
-	plugins := filepath.Join(kerioDir, "plugins")
-	if kerioDir != "" {
-		if st, err := os.Stat(plugins); err == nil && st.IsDir() {
-			primary := filepath.Join(plugins, "spamassassin", "rules")
-			if err := os.MkdirAll(primary, 0o755); err == nil {
-				return primary, false
-			}
-		}
-	}
-	return "", false
-}
-
-func kerioDirCandidates(settings SavedUISettings) []string {
-	seen := map[string]bool{}
-	var out []string
-	add := func(p string) {
-		p = strings.TrimSpace(p)
-		if p == "" || seen[strings.ToLower(p)] {
-			return
-		}
-		if st, err := os.Stat(p); err == nil && st.IsDir() {
-			seen[strings.ToLower(p)] = true
-			out = append(out, p)
-		}
-	}
-	add(settings.KerioInstallPath)
-	for _, c := range PlatformCandidateKerioDirs() {
-		add(c)
-	}
-	return out
-}
+// Поиск каталогов Kerio и SpamAssassin вынесен в kerio_paths.go: там полная
+// цепочка (служба → реестр → стандартные пути → обход дерева) и отчёт
+// «что проверено» для интерфейса.
 
 // ---------------------------------------------------------------------------
 // Разбор файла правил и статистика
@@ -345,6 +277,7 @@ type AntiSpamStatus struct {
 	KerioCandidates   []string               `json:"kerioCandidates"`
 	RulesDir          string                 `json:"rulesDir"`
 	RulesDirExists    bool                   `json:"rulesDirExists"`
+	RulesDirSource    string                 `json:"rulesDirSource"`
 	RulePath          string                 `json:"rulePath"`
 	Installed         bool                   `json:"installed"`
 	Version           string                 `json:"version"`
@@ -376,22 +309,31 @@ func GetAntiSpamStatus(certsDir string) AntiSpamStatus {
 	st := LoadAntiSpamState(certsDir)
 
 	kerioDir, source := resolveKerioInstallDir(settings)
-	rulesDir := ""
-	if p := strings.TrimSpace(st.RulesDir); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			rulesDir = p
-		}
-	}
-	rulesDirExists := false
+	// Только поиск существующей папки: статус не должен создавать каталоги.
+	choice := ChooseRulesDir(settings, st, kerioDir, "", false)
+	rulesDir := choice.Dir
+	rulesDirExists := choice.Exists
+	rulesDirSource := choice.Source
 	if rulesDir == "" {
-		rulesDir, rulesDirExists = detectSpamAssassinRulesDir(kerioDir)
-	} else {
-		rulesDirExists = true
+		rulesDirSource = "не найден"
+	}
+	if choice.KerioDir != "" && kerioDir == "" {
+		kerioDir = choice.KerioDir
+		source = choice.Source
 	}
 
 	rulePath := filepath.Join(rulesDir, antiSpamRuleFileName)
 	if rulesDir == "" {
 		rulePath = ""
+	}
+	if rulesDir == "" {
+		// В статусе честно показываем, что автопоиск не дал результата, — админу
+		// это экономит время: видно, что программа действительно искала.
+		if n := len(kerioDirCandidates(settings)); n > 0 {
+			rulesDirSource = fmt.Sprintf("не найден (найдено установок Kerio: %d)", n)
+		} else {
+			rulesDirSource = "не найден — Kerio Connect не обнаружен на этом компьютере"
+		}
 	}
 
 	res := AntiSpamStatus{
@@ -401,6 +343,7 @@ func GetAntiSpamStatus(certsDir string) AntiSpamStatus {
 		KerioCandidates:   kerioDirCandidates(settings),
 		RulesDir:          rulesDir,
 		RulesDirExists:    rulesDirExists,
+		RulesDirSource:    rulesDirSource,
 		RulePath:          rulePath,
 		ListsDir:          antiSpamListsDir(certsDir),
 		ServiceStatus:     PlatformKerioServiceStatus(),
@@ -696,16 +639,12 @@ func PreviewAntiSpamInstall(certsDir string) (*AntiSpamPreview, error) {
 		return nil, err
 	}
 
-	kerioDir, _ := resolveKerioInstallDir(settings)
-	if p := strings.TrimSpace(st.KerioDir); p == "" {
-		st.KerioDir = kerioDir
-	}
-	rulesDir := strings.TrimSpace(st.RulesDir)
-	if rulesDir == "" {
-		rulesDir, _ = detectSpamAssassinRulesDir(kerioDir)
-	}
+	// Предпросмотр ничего не создаёт: ищем только существующую папку правил.
+	choice := ChooseRulesDir(settings, st, "", "", false)
+	rulesDir := choice.Dir
+	kerioDir := choice.KerioDir
 	if kerioDir == "" {
-		kerioDir = st.KerioDir
+		kerioDir, _ = resolveKerioInstallDir(settings)
 	}
 	rulePath := filepath.Join(rulesDir, antiSpamRuleFileName)
 	if rulesDir == "" {
@@ -894,28 +833,19 @@ func InstallAntiSpamDB(certsDir string, opts AntiSpamInstallOptions) (*AntiSpamI
 	res.Steps = append(res.Steps, fmt.Sprintf("1. База %s скачана с %s (%.1f КБ, SHA-256 подтверждён).",
 		remote.Manifest.Version, remote.Source, float64(len(ruleData))/1024))
 
-	kerioDir := strings.TrimSpace(opts.KerioDir)
+	// Куда ставить: учитываем и папку Kerio, и папку правил из полей ввода,
+	// и сохранённый путь. create=true — разрешено создать папку rules.
+	choice := ChooseRulesDir(settings, st, opts.KerioDir, opts.RulesDir, true)
+	rulesDir := choice.Dir
+	kerioDir := choice.KerioDir
 	if kerioDir == "" {
 		kerioDir, _ = resolveKerioInstallDir(settings)
 	}
 	if kerioDir == "" {
 		kerioDir = st.KerioDir
 	}
-	rulesDir := strings.TrimSpace(opts.RulesDir)
 	if rulesDir == "" {
-		rulesDir = strings.TrimSpace(st.RulesDir)
-	}
-	if rulesDir == "" || !dirExists(rulesDir) {
-		detected, _ := detectSpamAssassinRulesDir(kerioDir)
-		if detected != "" {
-			rulesDir = detected
-		}
-	}
-	if rulesDir == "" {
-		err := fmt.Errorf("не найден каталог SpamAssassin Kerio Connect.\n\n" +
-			"1) Укажите папку установки Kerio Connect (обычно C:\\Program Files\\Kerio\\MailServer).\n" +
-			"2) Проверьте, что внутри есть plugins\\spamassassin\\rules.\n" +
-			"3) Запустите программу от имени Администратора, если каталог защищён.")
+		err := RulesDirError(choice)
 		st.LastError = err.Error()
 		_ = SaveAntiSpamState(certsDir, st)
 		return nil, err
@@ -1091,14 +1021,10 @@ func RollbackAntiSpamDB(certsDir string, restart bool) (*AntiSpamInstallResult, 
 	if err != nil {
 		return nil, err
 	}
-	rulesDir := st.RulesDir
-	if rulesDir == "" || !dirExists(rulesDir) {
-		if detected, _ := detectSpamAssassinRulesDir(st.KerioDir); detected != "" {
-			rulesDir = detected
-		}
-	}
+	choice := ChooseRulesDir(LoadSavedUISettings(certsDir), st, st.KerioDir, "", true)
+	rulesDir := choice.Dir
 	if rulesDir == "" {
-		return nil, fmt.Errorf("не удалось определить каталог правил Kerio — укажите его вручную при установке")
+		return nil, RulesDirError(choice)
 	}
 	rulePath := filepath.Join(rulesDir, antiSpamRuleFileName)
 	if _, err := os.Stat(rulePath); err == nil {
@@ -1159,12 +1085,8 @@ func RemoveAntiSpamDB(certsDir string, restart bool) (*AntiSpamRemoveResult, err
 	st := LoadAntiSpamState(certsDir)
 	rulePath := st.RulePath
 	if rulePath == "" {
-		rulesDir := st.RulesDir
-		if rulesDir == "" {
-			rulesDir, _ = detectSpamAssassinRulesDir(st.KerioDir)
-		}
-		if rulesDir != "" {
-			rulePath = filepath.Join(rulesDir, antiSpamRuleFileName)
+		if choice := ChooseRulesDir(LoadSavedUISettings(certsDir), st, st.KerioDir, "", false); choice.Dir != "" {
+			rulePath = filepath.Join(choice.Dir, antiSpamRuleFileName)
 		}
 	}
 	res := &AntiSpamRemoveResult{OK: true, RulePath: rulePath, Steps: []string{}, Warnings: []string{}}
@@ -1224,16 +1146,17 @@ func ImportAntiSpamRuleFile(certsDir, srcPath string, restart bool) (*AntiSpamIn
 	}
 	settings := LoadSavedUISettings(certsDir)
 	st := LoadAntiSpamState(certsDir)
-	kerioDir, _ := resolveKerioInstallDir(settings)
+	choice := ChooseRulesDir(settings, st, "", "", true)
+	rulesDir := choice.Dir
+	if rulesDir == "" {
+		return nil, RulesDirError(choice)
+	}
+	kerioDir := choice.KerioDir
+	if kerioDir == "" {
+		kerioDir, _ = resolveKerioInstallDir(settings)
+	}
 	if kerioDir == "" {
 		kerioDir = st.KerioDir
-	}
-	rulesDir := st.RulesDir
-	if rulesDir == "" || !dirExists(rulesDir) {
-		rulesDir, _ = detectSpamAssassinRulesDir(kerioDir)
-	}
-	if rulesDir == "" {
-		return nil, fmt.Errorf("не найден каталог SpamAssassin Kerio Connect — укажите папку установки Kerio вручную")
 	}
 	rulePath := filepath.Join(rulesDir, antiSpamRuleFileName)
 	res := &AntiSpamInstallResult{

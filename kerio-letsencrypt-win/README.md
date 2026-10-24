@@ -1,4 +1,4 @@
-# Kerio SSL, Mail Audit, Delist, Sanctions & AntiSpam DB Suite v4.5.0 (Windows Desktop GUI)
+# Kerio SSL, Mail Audit, Delist, Sanctions & AntiSpam DB Suite v4.5.1 (Windows Desktop GUI)
 
 **Разработчик:** **Zakharevich Igor** • ✉ [`ziv@csl.by`](mailto:ziv@csl.by) • ☎ `+375293371412`
 
@@ -98,6 +98,20 @@ bash kerio-letsencrypt-win/sync-faq.sh
 ```
 
 Если забыть — `go test ./...` упадёт на `TestEmbeddedFAQMatchesRoot`, и CI не выпустит сборку. Дополнительно `TestFAQAnchorsResolve` проверяет, что все ссылки из «Содержания» находят свой заголовок (иначе оглавление внутри программы «молча» не работало бы), а `TestUIHelpTabWiring` — что кнопки «📖 Подробно в инструкции» на вкладках ведут на существующие разделы.
+
+---
+
+## 🔎 Не нашлась папка SpamAssassin в Kerio (`v4.5.1`)
+
+Если при установке базы программа пишет «не найден каталог SpamAssassin Kerio Connect» — нажмите на вкладке «Антиспам» кнопку **«🔎 Что проверено»**. Поиск идёт по цепочке:
+
+1. путь, введённый вручную (в том числе сразу папка `rules` или сетевой путь `\\SERVER\c$\...`);
+2. команда запуска службы `KerioMailServer` (`sc qc` + `ImagePath` из реестра) — ловит нестандартные диски (`D:\Kerio\MailServer`);
+3. значения реестра Kerio (`InstallPath`, `Path`, `InstallLocation`);
+4. стандартные каталоги на всех дисках (включая `Program Files (x86)` и `%ProgramFiles%`);
+5. обход дерева Kerio: папка `spamassassin` (в т.ч. внутри `spamserver`) или любая папка с настоящими `*.cf`-правилами.
+
+Отчёт показывает каждый проверенный путь, состояние службы и права администратора, а также кнопки «⤵ Подставить папку» и «⬇ Скачать .cf» — для случая, когда Kerio стоит на другом сервере или на Linux. Подробная пошаговая инструкция — в ФАК, п. 9.16 (в самой программе: вкладка **📖 ФАК**).
 
 ---
 

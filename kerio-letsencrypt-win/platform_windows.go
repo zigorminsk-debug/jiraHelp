@@ -11,26 +11,37 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	webview2 "github.com/jchv/go-webview2"
 )
 
 var (
-	kernel32DLL         = syscall.NewLazyDLL("kernel32.dll")
-	procGetModuleHandle = kernel32DLL.NewProc("GetModuleHandleW")
-	shell32DLL          = syscall.NewLazyDLL("shell32.dll")
-	procIsUserAnAdmin   = shell32DLL.NewProc("IsUserAnAdmin")
-	procShellExecuteW   = shell32DLL.NewProc("ShellExecuteW")
-	user32DLL           = syscall.NewLazyDLL("user32.dll")
-	procMessageBoxW     = user32DLL.NewProc("MessageBoxW")
-	procLoadImageW      = user32DLL.NewProc("LoadImageW")
-	procPostMessageW    = user32DLL.NewProc("PostMessageW")
-	procGetSystemMetrics = user32DLL.NewProc("GetSystemMetrics")
+	kernel32DLL               = syscall.NewLazyDLL("kernel32.dll")
+	procGetModuleHandle       = kernel32DLL.NewProc("GetModuleHandleW")
+	shell32DLL                = syscall.NewLazyDLL("shell32.dll")
+	procIsUserAnAdmin         = shell32DLL.NewProc("IsUserAnAdmin")
+	procShellExecuteW         = shell32DLL.NewProc("ShellExecuteW")
+	user32DLL                 = syscall.NewLazyDLL("user32.dll")
+	procMessageBoxW           = user32DLL.NewProc("MessageBoxW")
+	procLoadImageW            = user32DLL.NewProc("LoadImageW")
+	procPostMessageW          = user32DLL.NewProc("PostMessageW")
+	procGetSystemMetrics      = user32DLL.NewProc("GetSystemMetrics")
 	procSystemParametersInfoW = user32DLL.NewProc("SystemParametersInfoW")
 
 	activeWebViewMu sync.Mutex
 	activeWebView   webview2.WebView
+
+	// Кэш сведений о службе и реестре: поиск путей вызывается часто (статус,
+	// диагностика, предпросмотр), а каждый вызов — это запуск sc.exe/reg.exe.
+	kerioSysCacheMu             sync.Mutex
+	kerioSysCacheAt             time.Time
+	kerioSysCacheServiceName    string
+	kerioSysCacheServiceCmd     string
+	kerioSysCacheServiceQueried bool
+	kerioSysCacheRegDirs        []string
+	kerioSysCacheRegQueried     bool
 )
 
 const scheduledTaskName = "KerioLetsEncryptAutoRenew"
@@ -85,32 +96,204 @@ func runHiddenCmd(name string, args ...string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
-func PlatformCandidateKerioDirs() []string {
-	var dirs []string
-	// 1. Check Windows Registry (64-bit & WOW6432Node)
-	for _, key := range []string{
-		`HKLM\SOFTWARE\Kerio\MailServer`,
-		`HKLM\SOFTWARE\WOW6432Node\Kerio\MailServer`,
-	} {
-		out, err := runHiddenCmd("reg", "query", key, "/v", "InstallPath")
-		if err == nil {
-			for _, line := range strings.Split(string(out), "\n") {
-				if idx := strings.Index(line, "REG_SZ"); idx >= 0 {
-					p := strings.TrimSpace(line[idx+len("REG_SZ"):])
-					if p != "" {
-						dirs = append(dirs, p)
-					}
+// kerioServiceNames — имена службы Kerio Connect в разных версиях и разрядностях.
+var kerioServiceNames = []string{
+	"KerioMailServer",
+	"KerioConnect",
+	"Kerio Connect",
+	"KerioConnectService",
+}
+
+// PlatformKerioServiceImagePath возвращает имя службы Kerio и её команду
+// запуска (BINARY_PATH_NAME). Это самый надёжный источник пути: если Kerio
+// поставили в D:\Kerio, в реестре «InstallPath» может не быть, а в команде
+// службы путь есть всегда. Строка вида:
+//
+//	"C:\Program Files\Kerio\MailServer\mailserver.exe" -dir "C:\Program Files\Kerio\MailServer"
+func PlatformKerioServiceImagePath() (string, string) {
+	kerioSysCacheMu.Lock()
+	if time.Since(kerioSysCacheAt) < kerioSysCacheTTL && kerioSysCacheServiceQueried {
+		name, cmd := kerioSysCacheServiceName, kerioSysCacheServiceCmd
+		kerioSysCacheMu.Unlock()
+		return name, cmd
+	}
+	kerioSysCacheMu.Unlock()
+
+	name, cmd := detectKerioServiceImagePath()
+
+	kerioSysCacheMu.Lock()
+	kerioSysCacheServiceName, kerioSysCacheServiceCmd = name, cmd
+	kerioSysCacheServiceQueried = true
+	kerioSysCacheAt = time.Now()
+	kerioSysCacheMu.Unlock()
+	return name, cmd
+}
+
+// detectKerioServiceImagePath — сам поиск (без кэша).
+func detectKerioServiceImagePath() (string, string) {
+	for _, name := range kerioServiceNames {
+		out, err := runHiddenCmd("sc", "qc", name)
+		if err != nil {
+			continue
+		}
+		if cmd := parseScBinaryPath(string(out)); cmd != "" {
+			return name, cmd
+		}
+	}
+	// Резерв: значение ImagePath прямо из реестра (если sc недоступен).
+	for _, name := range kerioServiceNames {
+		out, err := runHiddenCmd("reg", "query", `HKLM\SYSTEM\CurrentControlSet\Services\`+name, "/v", "ImagePath")
+		if err != nil {
+			continue
+		}
+		if cmd := parseRegSZ(string(out)); cmd != "" {
+			return name, cmd
+		}
+	}
+	// И напоследок — поиск службы по имени среди всех служб системы.
+	if out, err := runHiddenCmd("reg", "query", `HKLM\SYSTEM\CurrentControlSet\Services`, "/f", "Kerio", "/k"); err == nil {
+		for _, name := range parseKerioServiceNames(string(out)) {
+			if scOut, err := runHiddenCmd("sc", "qc", name); err == nil {
+				if cmd := parseScBinaryPath(string(scOut)); cmd != "" {
+					return name, cmd
 				}
 			}
 		}
 	}
-	// 2. Check common Windows installation drives
-	for _, drv := range []string{"C:", "D:", "E:", "F:"} {
-		dirs = append(dirs,
-			filepath.Join(drv+`\`, "Program Files", "Kerio", "MailServer"),
-			filepath.Join(drv+`\`, "Program Files (x86)", "Kerio", "MailServer"),
-			filepath.Join(drv+`\`, "Kerio", "MailServer"),
-		)
+	return "", ""
+}
+
+// PlatformKerioRegistryDirs — пути, найденные в реестре: значения Kerio
+// (InstallPath, Path, InstallDir, Home, Directory) и сведения об удалении
+// из «Программы и компоненты» (InstallLocation).
+func PlatformKerioRegistryDirs() []string {
+	kerioSysCacheMu.Lock()
+	if time.Since(kerioSysCacheAt) < kerioSysCacheTTL && kerioSysCacheRegQueried {
+		dirs := append([]string(nil), kerioSysCacheRegDirs...)
+		kerioSysCacheMu.Unlock()
+		return dirs
+	}
+	kerioSysCacheMu.Unlock()
+
+	dirs := detectKerioRegistryDirs()
+
+	kerioSysCacheMu.Lock()
+	kerioSysCacheRegDirs = append([]string(nil), dirs...)
+	kerioSysCacheRegQueried = true
+	kerioSysCacheAt = time.Now()
+	kerioSysCacheMu.Unlock()
+	return dirs
+}
+
+func detectKerioRegistryDirs() []string {
+	var dirs []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		p = normalizeKerioPath(p)
+		if p == "" {
+			return
+		}
+		key := strings.ToLower(filepath.ToSlash(p))
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		dirs = append(dirs, p)
+	}
+
+	keys := []string{
+		`HKLM\SOFTWARE\Kerio\MailServer`,
+		`HKLM\SOFTWARE\WOW6432Node\Kerio\MailServer`,
+		`HKLM\SOFTWARE\Kerio\Connect`,
+		`HKLM\SOFTWARE\WOW6432Node\Kerio\Connect`,
+		`HKLM\SOFTWARE\Kerio`,
+		`HKLM\SOFTWARE\WOW6432Node\Kerio`,
+	}
+	for _, key := range keys {
+		out, err := runHiddenCmd("reg", "query", key, "/s")
+		if err != nil {
+			continue
+		}
+		for _, p := range parseKerioPathValues(string(out)) {
+			add(p)
+		}
+	}
+
+	// Записи «Программы и компоненты» — там есть InstallLocation.
+	for _, root := range []string{
+		`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`,
+		`HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall`,
+	} {
+		out, err := runHiddenCmd("reg", "query", root, "/f", "Kerio", "/k", "/s")
+		if err != nil {
+			continue
+		}
+		for _, p := range parseInstallLocationValues(string(out)) {
+			add(p)
+		}
+	}
+	return dirs
+}
+
+// PlatformKerioSearchRoots — «широкие» каталоги, которые просматриваются,
+// если папку установки определить не удалось (portable-сборка, нет службы).
+func PlatformKerioSearchRoots() []string {
+	var roots []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		p = normalizeKerioPath(p)
+		if p == "" {
+			return
+		}
+		key := strings.ToLower(filepath.ToSlash(p))
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		roots = append(roots, p)
+	}
+	for _, env := range []string{"ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "ProgramData"} {
+		if base := strings.TrimSpace(os.Getenv(env)); base != "" {
+			add(filepath.Join(base, "Kerio"))
+		}
+	}
+	for _, drv := range []string{"C:", "D:", "E:", "F:", "G:"} {
+		add(filepath.Join(drv+`\`, "Kerio"))
+		add(filepath.Join(drv+`\`, "Program Files", "Kerio"))
+		add(filepath.Join(drv+`\`, "Program Files (x86)", "Kerio"))
+	}
+	return roots
+}
+
+func PlatformCandidateKerioDirs() []string {
+	var dirs []string
+	add := func(p string) { dirs = append(dirs, p) }
+
+	// 1. Точный путь из команды запуска службы (переживает нестандартные диски).
+	if _, cmd := PlatformKerioServiceImagePath(); cmd != "" {
+		for _, d := range kerioDirsFromServiceCommand(cmd) {
+			add(d)
+		}
+	}
+
+	// 2. Значения реестра Kerio.
+	for _, d := range PlatformKerioRegistryDirs() {
+		add(d)
+	}
+
+	// 3. Переменные окружения Windows (работают и при нестандартном ProgramFiles).
+	for _, env := range []string{"ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"} {
+		if base := strings.TrimSpace(os.Getenv(env)); base != "" {
+			add(filepath.Join(base, "Kerio", "MailServer"))
+		}
+	}
+
+	// 4. Стандартные пути на всех разумных дисках.
+	for _, drv := range []string{"C:", "D:", "E:", "F:", "G:"} {
+		add(filepath.Join(drv+`\`, "Program Files", "Kerio", "MailServer"))
+		add(filepath.Join(drv+`\`, "Program Files (x86)", "Kerio", "MailServer"))
+		add(filepath.Join(drv+`\`, "Kerio", "MailServer"))
+		add(filepath.Join(drv+`\`, "MailServer"))
 	}
 	return dirs
 }
@@ -289,7 +472,6 @@ func PlatformApplyWindowIcon(iconID int) {
 		procPostMessageW.Call(hwnd, 0x0080, 0, hSmall)
 	}
 }
-
 
 // winRect — RECT из Win32 (рабочая область экрана без панели задач).
 type winRect struct {

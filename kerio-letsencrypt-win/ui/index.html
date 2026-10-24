@@ -960,7 +960,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.5.0<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
+        <span class="brand-badge">Windows Native GUI v4.5.1<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -2279,8 +2279,20 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
       <div class="actions-row" style="justify-content:flex-start;gap:8px;">
         <button type="button" class="btn btn-outline btn-sm" onclick="antiSpamAutoDetect()">🪄 Определить автоматически</button>
         <button type="button" class="btn btn-outline btn-sm" onclick="browseWindowsFolder('antiSpamKerioDir', 'Укажите папку установки Kerio Connect (например, C:\\Program Files\\Kerio\\MailServer)')">📁 Выбрать папку Kerio…</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="browseWindowsFolder('antiSpamRulesDir', 'Укажите папку правил SpamAssassin (например, ...\\plugins\\spamassassin\\rules)')">📁 Выбрать папку правил…</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="antiSpamDiagnose()" title="Показать все проверенные пути, найденные каталоги и подсказки">🔎 Что проверено</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="antiSpamDownloadRule()" title="Скачать kerio-antispam.cf — для установки вручную на другом сервере (Linux, другая машина, закрытый контур)">⬇ Скачать .cf</button>
         <span class="hint-text" id="antiSpamDirHint"></span>
       </div>
+
+      <div class="hint-text" style="margin-top:8px;line-height:1.6;">
+        💡 Если Kerio Connect стоит не на этом компьютере, впишите путь к папке правил <b>по сети</b> —
+        например <code>\\SERVER\c$\Program Files\Kerio\MailServer\plugins\spamassassin\rules</code>
+        (нужны права администратора на том сервере). Для Linux-сервера используйте кнопку «⬇ Скачать .cf»
+        и скопируйте файл в <code>/opt/kerio/mailserver/plugins/spamassassin/rules</code>.
+      </div>
+
+      <div id="antiSpamDiagBox" style="display:none;margin-top:14px;"></div>
 
       <div id="antiSpamActionResult" style="margin-top:14px;"></div>
     </div>
@@ -2541,7 +2553,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:1380px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.5.0</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.5.1</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -2617,7 +2629,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 <script>
   // Версия интерфейса. Должна совпадать с appVersion в version.go
   // (проверяется тестом TestVersionConsistency).
-  const APP_VERSION = '4.5.0';
+  const APP_VERSION = '4.5.1';
   let systemState = null;
   let currentCert = null;
   let allCerts = [];
@@ -5110,9 +5122,17 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
     }
     const hint = document.getElementById('antiSpamDirHint');
     if (hint) {
-      hint.textContent = st.kerioCandidates && st.kerioCandidates.length
-        ? 'Найдено установок Kerio: ' + st.kerioCandidates.length + ' — при необходимости выберите/впишите путь вручную.'
-        : 'Kerio Connect не найден автоматически — укажите папку установки вручную.';
+      if (st.rulesDir) {
+        hint.innerHTML = '✅ Каталог правил: <code>' + escapeHtml(st.rulesDir) + '</code>' +
+          (st.rulesDirSource ? ' <span class="label-hint">(' + escapeHtml(st.rulesDirSource) + ')</span>' : '');
+      } else if (st.kerioDir) {
+        hint.innerHTML = '⚠️ Папка Kerio найдена (<code>' + escapeHtml(st.kerioDir) + '</code>), но папки правил внутри нет — ' +
+          'нажмите «🔎 Что проверено», чтобы увидеть все проверенные пути.';
+      } else if (st.kerioCandidates && st.kerioCandidates.length) {
+        hint.textContent = 'Найдено установок Kerio: ' + st.kerioCandidates.length + ' — выберите папку правил вручную или нажмите «🔎 Что проверено».';
+      } else {
+        hint.textContent = 'Kerio Connect не найден автоматически — нажмите «🔎 Что проверено»: программа покажет все проверенные пути и что делать.';
+      }
     }
   }
 
@@ -5269,8 +5289,10 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
       showToast('Антиспам-база обновлена до ' + (d.version || ''));
       loadAntiSpamStatus();
     } catch (e) {
-      document.getElementById('antiSpamActionResult').innerHTML = '<div class="alert alert-err"><b>База не установлена:</b><br>' + escapeHtml(e.message) + '</div>';
+      document.getElementById('antiSpamActionResult').innerHTML = '<div class="alert alert-err"><b>База не установлена:</b><div style="white-space:pre-wrap;margin-top:6px;">' + escapeHtml(e.message) + '</div></div>';
       showToast(e.message, true);
+      // Путь не найден — сразу показываем, что именно проверено и что делать.
+      if (/каталог|папк|путь|SpamAssassin|Kerio/i.test(e.message)) antiSpamDiagnose(true);
     } finally {
       antiSpamBusy(false);
     }
@@ -5360,6 +5382,108 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
     }
   }
 
+  // -------------------------------------------------------------------------
+  // ДИАГНОСТИКА ПУТЕЙ KERIO (вкладка «Антиспам»)
+  // Когда автоматика не нашла папку правил, показываем не общую фразу, а
+  // конкретный список: какие пути проверены, что в них есть, что делать.
+  // -------------------------------------------------------------------------
+  async function antiSpamDiagnose(quiet) {
+    const box = document.getElementById('antiSpamDiagBox');
+    const dirs = antiSpamCollectDirs();
+    if (!quiet) {
+      box.style.display = 'block';
+      box.innerHTML = '<div class="hint-text">Проверяю каталоги Kerio и SpamAssassin…</div>';
+      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    try {
+      const q = new URLSearchParams({ kerioDir: dirs.kerioDir || '', rulesDir: dirs.rulesDir || '' });
+      const r = await fetch('/api/antispam/diagnose?' + q.toString());
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      antiSpamRenderDiagnostics(d);
+      return d;
+    } catch (e) {
+      if (!quiet) box.innerHTML = '<div class="alert alert-err">Диагностика не выполнена: ' + escapeHtml(e.message) + '</div>';
+      return null;
+    }
+  }
+
+  function antiSpamRenderDiagnostics(d) {
+    const box = document.getElementById('antiSpamDiagBox');
+    box.style.display = 'block';
+
+    const ok = !!d.rulesDir;
+    let html = '<div class="alert ' + (ok ? 'alert-ok' : 'alert-warn') + '">';
+    html += '<b>' + (ok ? '✅ ' : '⚠️ ') + escapeHtml(d.summary || '') + '</b>';
+    const bits = [];
+    bits.push(d.isWindows ? 'Windows' : (d.os || 'не Windows'));
+    bits.push(d.admin ? 'права администратора есть' : 'без прав администратора');
+    if (d.serviceName) bits.push('служба: ' + d.serviceName + ' (' + (d.serviceStatus || '?') + ')');
+    else bits.push('служба Kerio не найдена');
+    html += '<div class="hint-text" style="margin-top:6px;">' + bits.map(escapeHtml).join(' · ') + '</div>';
+    if (d.serviceCommand) {
+      html += '<div class="hint-text" style="margin-top:4px;">Команда запуска: <code>' + escapeHtml(d.serviceCommand) + '</code></div>';
+    }
+    html += '</div>';
+
+    if (Array.isArray(d.probes) && d.probes.length) {
+      html += '<div class="table-scroll" style="margin-top:12px;"><table class="data-table"><thead><tr>' +
+        '<th>Путь</th><th>Источник</th><th>Состояние</th></tr></thead><tbody>';
+      d.probes.forEach(p => {
+        let state = '<span style="color:#94a3b8;">папки нет</span>';
+        if (p.exists) {
+          if (p.rulesDir) state = '<span style="color:#34d399;">✅ правила: <code>' + escapeHtml(p.rulesDir) + '</code></span>';
+          else if (p.kind === 'rules') state = '<span style="color:#34d399;">✅ папка правил</span>';
+          else if (p.hasPlugins) state = '<span style="color:#f59e0b;">есть plugins, но нет spamassassin</span>';
+          else if (p.kind === 'unknown') state = '<span style="color:#f59e0b;">папка есть, признаков Kerio нет</span>';
+          else state = '<span style="color:#34d399;">✅ папка Kerio</span>';
+        }
+        html += '<tr><td><code>' + escapeHtml(p.path) + '</code></td><td>' + escapeHtml(p.source || '') + '</td><td>' + state + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+
+    if (Array.isArray(d.advice) && d.advice.length) {
+      html += '<div class="steps-list" style="margin-top:12px;line-height:1.65;">' +
+        d.advice.map(a => '<div>• ' + escapeHtml(a) + '</div>').join('') + '</div>';
+    }
+
+    html += '<div class="actions-row" style="justify-content:flex-start;gap:8px;margin-top:12px;">';
+    if (d.kerioDir) {
+      html += '<button type="button" class="btn btn-outline btn-sm" onclick="antiSpamFillDir(\'antiSpamKerioDir\', \'' + escapeHtml(d.kerioDir).replace(/'/g, "\\'") + '\')">⤵ Подставить папку Kerio</button>';
+    }
+    if (d.rulesDir) {
+      html += '<button type="button" class="btn btn-outline btn-sm" onclick="antiSpamFillDir(\'antiSpamRulesDir\', \'' + escapeHtml(d.rulesDir).replace(/'/g, "\\'") + '\')">⤵ Подставить папку правил</button>';
+    } else if (d.kerioDir) {
+      html += '<button type="button" class="btn btn-outline btn-sm" onclick="antiSpamFillDir(\'antiSpamRulesDir\', \'' + escapeHtml(d.kerioDir).replace(/'/g, "\\'") + '\\plugins\\spamassassin\\rules\')">⤵ Подставить plugins\\spamassassin\\rules</button>';
+    }
+    html += '<button type="button" class="btn btn-outline btn-sm" onclick="antiSpamDiagnose()">🔄 Проверить снова</button>';
+    html += '<button type="button" class="btn btn-outline btn-sm" onclick="antiSpamDownloadRule()">⬇ Скачать .cf</button>';
+    html += '<button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById(\'antiSpamDiagBox\').style.display=\'none\'">Скрыть</button>';
+    html += '</div>';
+    html += '<div class="hint-text" style="margin-top:6px;">Проверено путей: ' + (d.searchedDirs || 0) + ' · время: ' + (d.elapsedMs || 0) + ' мс</div>';
+
+    box.innerHTML = html;
+  }
+
+  function antiSpamFillDir(elementId, value) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    showToast('Путь подставлен — нажмите «Предпросмотр» или «Установить базу»');
+  }
+
+  function antiSpamDownloadRule() {
+    const a = document.createElement('a');
+    a.href = '/api/antispam/download-rule';
+    a.download = 'kerio-antispam.cf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast('Файл kerio-antispam.cf скачивается — положите его в папку правил Kerio вручную');
+  }
+
   async function antiSpamAutoDetect() {
     try {
       const r = await fetch('/api/antispam/status');
@@ -5370,9 +5494,15 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
       if (st.kerioDir) kerioInput.value = st.kerioDir;
       if (st.rulesDir) rulesInput.value = st.rulesDir;
       if (!st.kerioDir) {
-        showToast('Kerio Connect не найден автоматически — укажите папку установки вручную', true);
+        showToast('Kerio Connect не найден автоматически — смотрите отчёт «Что проверено» ниже', true);
+        antiSpamDiagnose(true);
+      } else if (!st.rulesDir) {
+        showToast('Папка Kerio найдена (' + st.kerioDir + '), но папки правил внутри нет — смотрите отчёт «Что проверено»', true);
+        antiSpamDiagnose(true);
       } else {
-        showToast('Найдено: ' + st.kerioDir);
+        showToast('Найдено: ' + st.rulesDir);
+        const diag = document.getElementById('antiSpamDiagBox');
+        if (diag) diag.style.display = 'none';
       }
       renderAntiSpamStatus(st);
     } catch (e) {

@@ -26,10 +26,34 @@ func RelaunchAsAdmin(_ []string) error {
 
 func ShowWindowsMessageBox(_, _ string) {}
 
+// PlatformKerioServiceImagePath — на Unix-системах аналога «sc qc» нет:
+// путь установки берём из стандартных каталогов и переменной окружения.
+func PlatformKerioServiceImagePath() (string, string) {
+	for _, p := range []string{"/opt/kerio/mailserver/mailserver", "/usr/local/kerio/mailserver/mailserver"} {
+		if fileExists(p) {
+			return "kerio-connect", p
+		}
+	}
+	return "", ""
+}
+
+// PlatformKerioRegistryDirs — реестра нет; используем стандартные пути Linux/macOS.
+func PlatformKerioRegistryDirs() []string {
+	return nil
+}
+
+// PlatformKerioSearchRoots — каталоги, которые просматриваются, если точный
+// путь установки неизвестен.
+func PlatformKerioSearchRoots() []string {
+	// Только каталоги самого Kerio: обход /opt или /usr/local целиком был бы
+	// слишком дорогим и всё равно не нашёл бы правил вне установки Kerio.
+	return []string{"/opt/kerio", "/usr/local/kerio"}
+}
+
 func PlatformCandidateKerioDirs() []string {
 	return []string{
 		"/opt/kerio/mailserver",
-		filepath.Join(DefaultCertsRoot(), "_mock_kerio_mailserver"),
+		"/usr/local/kerio/mailserver",
 	}
 }
 
