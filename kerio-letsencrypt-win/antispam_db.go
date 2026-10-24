@@ -45,6 +45,7 @@ const (
 
 var antiSpamListFiles = []string{
 	"spam-domains.txt",
+	"phishing-links.txt",
 	"spam-emails.txt",
 	"scam-subjects.txt",
 	"scam-phrases-ru.txt",
@@ -65,6 +66,21 @@ type AntiSpamManifest struct {
 	RuleFile         string            `json:"ruleFile"`
 	Credits          []string          `json:"credits"`
 	License          string            `json:"license"`
+	Sources          []AntiSpamSource  `json:"sources"`
+	SourcesOk        int               `json:"sourcesOk"`
+	SourcesFailed    int               `json:"sourcesFailed"`
+}
+
+// AntiSpamSource — состояние одного источника базы (из manifest.json).
+type AntiSpamSource struct {
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+	OK      bool   `json:"ok"`
+	Skipped bool   `json:"skipped"`
+	Count   int    `json:"count"`
+	Role    string `json:"role"`
+	Credit  string `json:"credit"`
+	Error   string `json:"error"`
 }
 
 func (m AntiSpamManifest) RuleSHA() string {
@@ -340,6 +356,7 @@ type AntiSpamStatus struct {
 	Groups            []AntiSpamRuleGroup    `json:"groups"`
 	ListsDir          string                 `json:"listsDir"`
 	ListsAvailable    bool                   `json:"listsAvailable"`
+	ListsFiles        int                    `json:"listsFiles"`
 	Backups           int                    `json:"backups"`
 	LastBackup        string                 `json:"lastBackup"`
 	ServiceStatus     string                 `json:"serviceStatus"`
@@ -409,7 +426,9 @@ func GetAntiSpamStatus(certsDir string) AntiSpamStatus {
 				}
 			}
 		}
-		res.ListsAvailable = got == len(antiSpamListFiles)
+		res.ListsFiles = got
+		// Старые базы не содержат phishing-links.txt — достаточно любого набора списков.
+		res.ListsAvailable = got > 0
 	}
 
 	if backups, err := filepath.Glob(filepath.Join(antiSpamBackupDir(certsDir), "*.cf")); err == nil {
@@ -730,6 +749,27 @@ func PreviewAntiSpamInstall(certsDir string) (*AntiSpamPreview, error) {
 	if preview.RestartNeeded {
 		preview.Notes = append(preview.Notes, "После установки требуется перезапуск службы Kerio MailServer (программа сделает это автоматически, если включена галочка).")
 	}
+	if m := remote.Manifest; len(m.Sources) > 0 {
+		var failed, skipped []string
+		for _, src := range m.Sources {
+			if !src.Enabled || src.OK {
+				continue
+			}
+			if src.Skipped {
+				skipped = append(skipped, src.Name)
+			} else {
+				failed = append(failed, src.Name)
+			}
+		}
+		note := fmt.Sprintf("Источники базы: %d активны", m.SourcesOk)
+		if len(failed) > 0 {
+			note += fmt.Sprintf(", %d недоступны (%s)", len(failed), strings.Join(failed, ", "))
+		}
+		if len(skipped) > 0 {
+			note += fmt.Sprintf(", %d требуют ключа (%s)", len(skipped), strings.Join(skipped, ", "))
+		}
+		preview.Notes = append(preview.Notes, note+".")
+	}
 	return preview, nil
 }
 
@@ -891,7 +931,11 @@ func InstallAntiSpamDB(certsDir string, opts AntiSpamInstallOptions) (*AntiSpamI
 	// Локальные списки для проверки письма (не критичны для работы антиспама)
 	listsDir := antiSpamListsDir(certsDir)
 	listErrors := 0
+	downloaded := 0
 	for _, name := range antiSpamListFiles {
+		if len(remote.Manifest.Files) > 0 && !containsString(remote.Manifest.Files, name) {
+			continue // файла нет в этой версии базы (например, старая схема без phishing-links.txt)
+		}
 		data, derr := verifyAndDownload(remote.BaseURL, name, remote.Manifest.SHA256[name])
 		if derr != nil {
 			listErrors++
@@ -900,11 +944,13 @@ func InstallAntiSpamDB(certsDir string, opts AntiSpamInstallOptions) (*AntiSpamI
 		}
 		if werr := writeFileAtomic(filepath.Join(listsDir, name), data, 0o644); werr != nil {
 			res.Warnings = append(res.Warnings, "не удалось сохранить "+name+": "+werr.Error())
+			continue
 		}
+		downloaded++
 	}
 	res.ListsDir = listsDir
 	if listErrors == 0 {
-		res.Steps = append(res.Steps, fmt.Sprintf("3. Локальные списки базы сохранены (%d файлов) для предварительной проверки писем.", len(antiSpamListFiles)))
+		res.Steps = append(res.Steps, fmt.Sprintf("3. Локальные списки базы сохранены (%d файлов) для предварительной проверки писем.", downloaded))
 	} else {
 		res.Steps = append(res.Steps, "3. Локальные списки сохранены частично — проверка писем может быть неполной.")
 	}
@@ -985,6 +1031,15 @@ func InstallAntiSpamDB(certsDir string, opts AntiSpamInstallOptions) (*AntiSpamI
 	}
 	res.OK = true
 	return res, nil
+}
+
+func containsString(list []string, want string) bool {
+	for _, item := range list {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func dirExists(p string) bool {
@@ -1460,6 +1515,11 @@ func TestEmailAgainstAntiSpamDB(certsDir, rawEmail string) (*AntiSpamEmailTestRe
 		return nil, fmt.Errorf("локальные списки базы не найдены. Сначала установите базу (кнопка «Установить базу с GitHub»).")
 	}
 	domains := readListSet(filepath.Join(listsDir, "spam-domains.txt"))
+	links := readListSet(filepath.Join(listsDir, "phishing-links.txt"))
+	if len(links) == 0 {
+		// старая схема базы: ссылки лежали в spam-domains.txt
+		links = domains
+	}
 	emails := readListSet(filepath.Join(listsDir, "spam-emails.txt"))
 	allow := readListSet(filepath.Join(listsDir, "allowlist.txt"))
 	subjects := readListSlice(filepath.Join(listsDir, "scam-subjects.txt"))
@@ -1523,7 +1583,7 @@ func TestEmailAgainstAntiSpamDB(certsDir, rawEmail string) (*AntiSpamEmailTestRe
 		if urlHits >= 2 {
 			break
 		}
-		if domains[h] {
+		if links[h] {
 			res.Matches = append(res.Matches, AntiSpamMatch{Group: "Ссылка в письме", Rule: "KCM_PHISH_URL", Value: h, Weight: 2.5})
 			urlHits++
 		}

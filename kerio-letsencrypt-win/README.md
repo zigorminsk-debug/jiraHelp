@@ -102,7 +102,7 @@ GOOS=windows GOARCH=amd64 go build -ldflags="-H=windowsgui -s -w" -o KerioCertMa
 2. Новые правила применяются **после перезапуска службы** `KerioMailServer` (программа делает это автоматически, если включена галочка и запущены права Администратора). Альтернатива без перезапуска — включить/выключить SURBL в Контент-фильтре и нажать «Применить».
 3. Перед записью всегда создаётся резервная копия, после записи файл проверяется по SHA-256; откат — одной кнопкой.
 4. Если GitHub недоступен (закрытый контур), используйте **«Импорт файла базы»**: скачайте `kerio-antispam.cf` со страницы релиза и укажите путь.
-5. Источники: URLhaus (abuse.ch), OpenPhish, Phishing Army, HaGeZi, Spamhaus DROP + курируемые списки; сборщик и формат — в каталоге `antispam-db/`.
+5. Источники: Phishing.Database (MIT), OpenPhish, ShadowWhisperer BlockLists, HaGeZi TIF, Dogino, Spamhaus DROP, FireHOL level1 + курируемые списки. URLhaus (abuse.ch) требует бесплатный Auth-Key — включается секретом `ABUSECH_AUTH_KEY`; phishing.army заменён на Phishing.Database из-за Cloudflare-заглушки. Сборщик и формат — в каталоге `antispam-db/`.
 
 ---
 

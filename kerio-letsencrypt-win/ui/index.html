@@ -1884,7 +1884,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
         <div>
           <div class="card-title">🛡️ Антиспам-база KCM с автообновлением с GitHub</div>
           <div class="card-subtitle">
-            База собирается автоматически каждый день из открытых фидов (URLhaus, OpenPhish, Phishing Army, HaGeZi, Spamhaus DROP)
+            База собирается автоматически каждый день из открытых фидов (Phishing.Database, OpenPhish, ShadowWhisperer, HaGeZi, Dogino, Spamhaus DROP, FireHOL)
             и курируемых списков мошеннических писем. Программа скачивает её с GitHub, проверяет <strong>SHA-256</strong>,
             показывает предпросмотр и устанавливает в <strong>Kerio Connect</strong> как правила SpamAssassin
             (<code>plugins\spamassassin\rules\kerio-antispam.cf</code>) — без сторонних программ и без передачи внутренних данных.
@@ -2019,7 +2019,9 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
         <div>4. <strong>Обновление:</strong> кнопка «Обновить базу в Kerio» или задание Планировщика. Перед записью — резервная копия в <code>&lt;certs&gt;\antispam\backup</code>, после записи — проверка SHA-256. Откат — одной кнопкой.</div>
         <div>5. <strong>Удаление:</strong> «Удалить базу» убирает .cf из Kerio (копия остаётся в резервных). Через 10 минут после перезапуска службы правила перестают действовать.</div>
         <div>6. <strong>Ручная установка без программы:</strong> скачайте <code>kerio-antispam.cf</code> со <a href="https://github.com/zigorminsk-debug/jiraHelp/releases/tag/antispam-db-latest" target="_blank" rel="noopener">страницы релиза</a>, положите в папку правил и перезапустите службу <code>KerioMailServer</code>.</div>
-        <div>7. <strong>Источники и лицензии:</strong> URLhaus (abuse.ch, CC0), OpenPhish public feed, Phishing Army (CC BY-NC 4.0), HaGeZi DNS blocklists, Spamhaus DROP. Курируемые списки и код сборщика — в репозитории <code>antispam-db/</code>.</div>
+        <div>7. <strong>Источники и лицензии:</strong> Phishing.Database (MIT), OpenPhish, ShadowWhisperer BlockLists (Unlicense), HaGeZi TIF, Dogino Discord-Phishing (MIT), Spamhaus DROP, FireHOL level1. Курируемые списки и код сборщика — в репозитории <code>antispam-db/</code>.</div>
+        <div>8. <strong>URLhaus и phishing.army:</strong> abuse.ch с 21.10.2026 закрыл анонимные выгрузки (<code>410 Gone</code>) — фид URLhaus включается автоматически, если в репозитории задан секрет <code>ABUSECH_AUTH_KEY</code> (бесплатный, для некоммерческого использования). phishing.army отдаёт Cloudflare-заглушку вместо списка и заменён на Phishing.Database; такие заглушки сборщик теперь распознаёт и показывает как ошибку источника, а не как «0 записей».</div>
+        <div>9. <strong>Что где ищется:</strong> домены отправителей — только в заголовке <code>From</code> (+3.2), домены фишинговых ссылок — только в URI письма (+2.5). Поэтому массовые фишинг-лендинги на бесплатном хостинге не приводят к блокировке самого хостинга.</div>
       </div>
       <div class="alert alert-info" style="margin-top:12px;">
         База не заменяет антивирус и не блокирует легитимные рассылки по политическим или коммерческим признакам — только технические индикаторы спама, фишинга и вредоносных ссылок.
@@ -4732,9 +4734,23 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
       html += '<div class="hint-text" style="margin-top:6px;">Источник: ' + escapeHtml(d.source || '') + ' · проверено: ' + escapeHtml(d.checkedAt || '') +
         ' · сгенерирована: ' + escapeHtml(m.generatedAt || '') + '</div></div>';
       const c = m.counts || {};
-      html += '<div class="hint-text" style="margin-top:8px;">В базе: домены <b>' + (c.domains || 0) + '</b>, адреса <b>' + (c.emails || 0) +
-        '</b>, темы <b>' + (c.subjects || 0) + '</b>, фразы <b>' + (c.phrases || 0) + '</b>, ссылки <b>' + (c.urls || 0) +
-        '</b>, IP <b>' + (c.ips || 0) + '</b>.</div>';
+      html += '<div class="hint-text" style="margin-top:8px;">В базе: домены отправителей <b>' + (c.domains || 0) + '</b>, адреса <b>' + (c.emails || 0) +
+        '</b>, темы <b>' + (c.subjects || 0) + '</b>, фразы <b>' + (c.phrases || 0) + '</b>, домены ссылок <b>' + (c.urls || 0) +
+        '</b>, IP/CIDR <b>' + (c.ips || 0) + '</b>.</div>';
+      if (Array.isArray(m.sources) && m.sources.length) {
+        const bad = m.sources.filter(s => s.enabled && !s.ok);
+        const skipped = bad.filter(s => s.skipped);
+        const failed = bad.filter(s => !s.skipped);
+        if (skipped.length) {
+          html += '<div class="alert alert-info" style="margin-top:8px;">🔑 Требуют ключа: <b>' +
+            skipped.map(s => escapeHtml(s.name)).join(', ') + '</b>. Для URLhaus достаточно добавить секрет ' +
+            '<code>ABUSECH_AUTH_KEY</code> в настройках репозитория — фид включится автоматически.</div>';
+        }
+        if (failed.length) {
+          html += '<div class="alert alert-warn" style="margin-top:8px;">⚠ Недоступные источники: <b>' +
+            failed.map(s => escapeHtml(s.name) + ' — ' + escapeHtml(s.error || 'ошибка')).join('; ') + '</b>. База собрана из остальных источников.</div>';
+        }
+      }
       if (d.updateAvailable) {
         html += '<div class="actions-row" style="justify-content:flex-start;margin-top:10px;"><button type="button" class="btn btn-blue" onclick="antiSpamPreview()">👁 Проверить, что изменится</button></div>';
       }

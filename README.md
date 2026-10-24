@@ -62,7 +62,12 @@
 
 **Что внутри базы:** домены отправителей (+3.2), адреса отправителей (+4.5), мотивы в теме письма (+1.8), фразы мошеннических писем (+1.5), домены фишинговых ссылок (+2.5), IP/CIDR источников в `Received` (+3.0) и белый список доверенных отправителей (−6.0). Очки складываются с собственными правилами Kerio (SPF/DKIM/DMARC, DNSBL, байесовский фильтр).
 
-**Источники:** URLhaus (abuse.ch, CC0), OpenPhish public feed, Phishing Army (CC BY-NC 4.0), HaGeZi DNS blocklists, Spamhaus DROP + курируемые списки в `antispam-db/sources/`. Исходники сборщика и формат базы — в каталоге [`antispam-db/`](antispam-db/README.md).
+**Источники:** Phishing.Database (MIT), OpenPhish, ShadowWhisperer BlockLists (Unlicense), HaGeZi TIF, Dogino Discord-Phishing, Spamhaus DROP, FireHOL level1 + курируемые списки в `antispam-db/sources/`.
+
+- **URLhaus** (abuse.ch) с 21.10.2026 требует личный бесплатный **Auth-Key** — публичные выгрузки отвечают `410 Gone`. Фид поддерживается «из коробки»: добавьте секрет `ABUSECH_AUTH_KEY` в настройках репозитория, и он включится автоматически.
+- **phishing.army** заменён на **Phishing.Database** — сайт отдаёт Cloudflare-заглушку вместо списка. Сборщик теперь распознаёт такие заглушки и помечает источник как недоступный, а не пишет «0 записей».
+
+Домены разделены на **отправителей** (правила `From:`, +3.2) и **ссылки/лендинги** (правила `uri`, +2.5). Исходники сборщика и формат базы — в каталоге [`antispam-db/`](antispam-db/README.md).
 
 **Ручная установка без программы:** скачайте `kerio-antispam.cf` со [страницы релиза](https://github.com/zigorminsk-debug/jiraHelp/releases/tag/antispam-db-latest), скопируйте в `<Kerio>\plugins\spamassassin\rules\` и перезапустите службу `KerioMailServer`.
 

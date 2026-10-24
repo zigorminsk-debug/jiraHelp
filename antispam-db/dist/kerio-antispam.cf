@@ -1,12 +1,10 @@
 # ============================================================================
 # KCM AntiSpam DB for Kerio Connect
-# Версия базы: 2026.10.24-0820
-# Сгенерировано: 2026-10-24 08:20:14 UTC
+# Версия базы: 2026.10.24-0851
+# Сгенерировано: 2026-10-24 08:51:01 UTC
 # Установлено программой KerioCertManager (Zakharevich Igor, ziv@csl.by)
 # Удалить базу: удалите этот файл из MailServer/plugins/spamassassin/rules/
 # ============================================================================
-
-# --- Домены отправителей из базы спама/фишинга (score 3.2) ---
 
 # --- Шаблоны мошеннических тем писем (score 1.8) ---
 header   KCM_SCAM_SUBJECT_001   Subject =~ /(account will be suspended|bitcoin giveaway|claim your prize|crypto giveaway|double your bitcoin|earn money fast|final notice|inheritance|investment opportunity|invoice overdue|lottery winner|payment failed|suspicious sign-in|unclaimed funds|unusual activity|verify your account|work from home|you have won|your password expires|аккаунт заблокирован|ваш аккаунт будет заблокирован|ваш приз|ваша карта заблокирована|возврат средств|выиграли)/i
@@ -27,4 +25,4 @@ describe KCM_ALLOW_FROM_001   Доверенный отправитель (бе�
 score    KCM_ALLOW_FROM_001   -6.0
 
 # Статистика базы:
-#   домены=0 emails=0 urls=0 ips=0 subjects=39 phrases=23 allow=58
+#   отправители=0 ссылки=0 emails=0 ips=0 subjects=39 phrases=23 allow=58

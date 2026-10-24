@@ -1,6 +1,6 @@
-# Антиспам-база KCM 2026.10.24-0820
+# Антиспам-база KCM 2026.10.24-0851
 
-Сгенерирована: 2026-10-24T08:20:14+00:00
+Сгенерирована: 2026-10-24T08:51:01+00:00
 
 | Группа правил | Записей | Очки SpamAssassin |
 |---|---:|---|
@@ -12,18 +12,18 @@
 | IP/CIDR источников | 0 | +3.0 |
 | Белый список | 58 | −6.0 |
 
+## Источники
+
+
 ## Файлы
 
 - `kerio-antispam.cf` — готовые правила SpamAssassin для Kerio Connect
-- `spam-domains.txt`, `spam-emails.txt`, `scam-subjects.txt`, `scam-phrases-ru.txt`, `threat-ips.txt`, `allowlist.txt` — исходные списки
+- `spam-domains.txt`, `phishing-links.txt`, `spam-emails.txt`, `scam-subjects.txt`, `scam-phrases-ru.txt`, `threat-ips.txt`, `allowlist.txt` — исходные списки
 - `manifest.json` — версия, размеры и SHA-256 каждого файла
 
 ## Установка
 
 1. В KerioCertManager откройте вкладку «🛡️ Антиспам-база KCM (GitHub)» и нажмите «Установить / Обновить базу в Kerio».
 2. Либо вручную: скопируйте `kerio-antispam.cf` в `<Kerio>\plugins\spamassassin\rules\` и перезапустите службу KerioMailServer.
-
-## Источники
-
 
 _Данные предоставляются «как есть». База не заменяет антивирус и не фильтрует легитимные рассылки по политическим/коммерческим признакам._

@@ -1,12 +1,12 @@
 {
-  "schema": 1,
-  "version": "2026.10.24-0820",
-  "generatedAt": "2026-10-24T08:20:14+00:00",
+  "schema": 2,
+  "version": "2026.10.24-0851",
+  "generatedAt": "2026-10-24T08:51:01+00:00",
   "minClientVersion": "4.4",
   "counts": {
     "domains": 0,
-    "emails": 0,
     "urls": 0,
+    "emails": 0,
     "ips": 0,
     "subjects": 39,
     "phrases": 23,
@@ -15,6 +15,7 @@
   "files": [
     "allowlist.txt",
     "kerio-antispam.cf",
+    "phishing-links.txt",
     "scam-phrases-ru.txt",
     "scam-subjects.txt",
     "spam-domains.txt",
@@ -22,25 +23,29 @@
     "threat-ips.txt"
   ],
   "sha256": {
-    "spam-domains.txt": "2a7349b652160c458dc90884a3f892a13a2d03bab23891724619e5366d770dd3",
-    "spam-emails.txt": "d79eee54e336cf7f08179541915319bd632e9a57d134058b18cf402c1d1ca950",
-    "scam-subjects.txt": "11fc23bf5ba4378bd3eadbed62ddb75cc7e816619b1c3d9c173c17a82e14e631",
-    "scam-phrases-ru.txt": "9474280a641f3f37e8e81ea62adca37899a8fd2f01c61857e92590a6431798d6",
-    "threat-ips.txt": "c57a5eef78f5b0af55c4654a7acbb1bfb1f2a586957cc1b13d56b6788ab0fb2f",
-    "allowlist.txt": "d58ba69b35b6f7c4618332b0252a35cdcbf9a032ccbf8bf0e1f7a0faf96910cb",
-    "kerio-antispam.cf": "7f35b4a16cc115c9d8a448b26057093f3c5f4473a777e860fa0cd5cb7a9ea239"
+    "spam-domains.txt": "bf4bb8846d4bcbce344beb34e084ef99ed53f9550d766eeae63a2a01f9f891b3",
+    "phishing-links.txt": "a362285f19bf98d75b5a56ba51357679bd19c19c538d74b12a316f1b196ae794",
+    "spam-emails.txt": "1e2f2934a5e46e0ce7aab8780ac3527bb2a5de8ced3507ae5c692659a50e4834",
+    "scam-subjects.txt": "3d3a5724022eb4b792c57ebcfea9bc05c043ae829576bcda56f99f1aea2b8d35",
+    "scam-phrases-ru.txt": "44ffaaa6cefcdcb1e98a61d3512d0cb04abf1f5e0bd58af4e184fce74382f433",
+    "threat-ips.txt": "374f4446797f24d929d6e50bdaed339f29c78ecf6377aa1ab9257d1b05c3d538",
+    "allowlist.txt": "eac1c3549f27a2ef69acbfa3866a3cb3ae7a49135b457043297da4946dd610a3",
+    "kerio-antispam.cf": "3241e71c6c3153e69e4550fe69f38eac2fdf56b47e4e81043b5e3fde949fc063"
   },
   "sizes": {
     "spam-domains.txt": 91,
+    "phishing-links.txt": 93,
     "spam-emails.txt": 90,
     "scam-subjects.txt": 1065,
     "scam-phrases-ru.txt": 974,
     "threat-ips.txt": 89,
     "allowlist.txt": 747,
-    "kerio-antispam.cf": 4226
+    "kerio-antispam.cf": 4143
   },
   "ruleFile": "kerio-antispam.cf",
   "sources": [],
+  "sourcesOk": 0,
+  "sourcesFailed": 0,
   "credits": [],
   "license": "Данные: см. credits. Код сборщика: MIT."
 }

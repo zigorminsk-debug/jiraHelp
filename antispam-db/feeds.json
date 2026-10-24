@@ -1,38 +1,84 @@
 {
-  "schema": 1,
+  "schema": 2,
+  "updatedAt": "2026-10-24",
+  "notes": "Все источники бесплатны и не требуют ключей, кроме URLhaus (нужен личный Auth-Key abuse.ch). phishing.army отключён: сайт отдаёт Cloudflare anti-bot заглушку вместо списка.",
   "feeds": [
     {
-      "name": "urlhaus",
-      "url": "https://urlhaus.abuse.ch/downloads/text_recent/",
-      "type": "urls",
-      "enabled": false,
-      "limit": 8000,
-      "credit": "abuse.ch URLhaus (CC0)",
-      "note": "HTTP 410: bulk-выгрузка URLhaus закрыта, включается вручную при наличии доступа"
+      "name": "phishing-database-domains",
+      "url": "https://raw.githubusercontent.com/Phishing-Database/Phishing.Database/master/phishing-domains-ACTIVE.txt",
+      "type": "plain-domains",
+      "role": "links",
+      "enabled": true,
+      "limit": 12000,
+      "priority": 10,
+      "credit": "Phishing.Database (MIT)",
+      "license": "MIT"
     },
     {
       "name": "openphish",
       "url": "https://openphish.com/feed.txt",
       "type": "urls",
+      "role": "links",
       "enabled": true,
       "limit": 4000,
-      "credit": "OpenPhish public feed"
+      "priority": 20,
+      "credit": "OpenPhish public feed",
+      "license": "публичный фид"
     },
     {
-      "name": "phishing-army",
-      "url": "https://phishing.army/download/phishing_army_blocklist_extended.txt",
+      "name": "shadowwhisperer-scam",
+      "url": "https://raw.githubusercontent.com/ShadowWhisperer/BlockLists/master/Lists/Scam",
       "type": "plain-domains",
+      "role": "senders",
       "enabled": true,
-      "limit": 12000,
-      "credit": "Phishing Army (CC BY-NC 4.0)"
+      "limit": 7500,
+      "priority": 20,
+      "credit": "ShadowWhisperer BlockLists — Scam (Unlicense)",
+      "license": "Unlicense"
     },
     {
       "name": "hagezi-tif",
       "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/tif.mini.txt",
       "type": "adblock",
+      "role": "links",
       "enabled": true,
-      "limit": 14000,
-      "credit": "HaGeZi Threat Intelligence Feed"
+      "limit": 8000,
+      "priority": 30,
+      "credit": "HaGeZi Threat Intelligence Feed (mini)",
+      "license": "см. репозиторий HaGeZi"
+    },
+    {
+      "name": "dogino-phishing-domains",
+      "url": "https://raw.githubusercontent.com/Dogino/Discord-Phishing-URLs/main/pihole-phishing-adlist.txt",
+      "type": "adblock",
+      "role": "links",
+      "enabled": true,
+      "limit": 6000,
+      "priority": 30,
+      "credit": "Dogino/Discord-Phishing-URLs",
+      "license": "MIT"
+    },
+    {
+      "name": "shadowwhisperer-malware",
+      "url": "https://raw.githubusercontent.com/ShadowWhisperer/BlockLists/master/Lists/Malware",
+      "type": "plain-domains",
+      "role": "links",
+      "enabled": true,
+      "limit": 6000,
+      "priority": 40,
+      "credit": "ShadowWhisperer BlockLists — Malware (Unlicense)",
+      "license": "Unlicense"
+    },
+    {
+      "name": "dogino-scam-urls",
+      "url": "https://raw.githubusercontent.com/Dogino/Discord-Phishing-URLs/main/scam-urls.txt",
+      "type": "urls",
+      "role": "links",
+      "enabled": true,
+      "limit": 3000,
+      "priority": 40,
+      "credit": "Dogino/Discord-Phishing-URLs — scam URLs",
+      "license": "MIT"
     },
     {
       "name": "spamhaus-drop",
@@ -40,31 +86,55 @@
       "type": "ips",
       "enabled": true,
       "limit": 4000,
-      "credit": "Spamhaus DROP List"
+      "priority": 10,
+      "credit": "Spamhaus DROP List",
+      "license": "см. условия Spamhaus"
+    },
+    {
+      "name": "firehol-level1",
+      "url": "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset",
+      "type": "ips",
+      "enabled": true,
+      "limit": 5000,
+      "priority": 20,
+      "credit": "FireHOL level1 (агрегат DSHIELD/FEODO/DROP/bogons)",
+      "license": "см. репозиторий firehol/blocklist-ipsets"
+    },
+    {
+      "name": "urlhaus",
+      "url": "https://urlhaus-api.abuse.ch/v1/urls/recent/limit/1000/",
+      "type": "json-urls",
+      "role": "links",
+      "enabled": true,
+      "limit": 1000,
+      "priority": 15,
+      "auth_env": "ABUSECH_AUTH_KEY",
+      "headers": {
+        "Auth-Key": "{key}"
+      },
+      "credit": "abuse.ch URLhaus (нужен бесплатный Auth-Key, некоммерческое использование)",
+      "license": "abuse.ch Terms (non-commercial)",
+      "note": "abuse.ch закрыл анонимные выгрузки 21.10.2026 (HTTP 410). Работает при заданном секрете ABUSECH_AUTH_KEY."
+    },
+    {
+      "name": "phishing-army",
+      "url": "https://phishing.army/download/phishing_army_blocklist_extended.txt",
+      "type": "plain-domains",
+      "role": "links",
+      "enabled": false,
+      "limit": 12000,
+      "credit": "Phishing Army (CC BY-NC 4.0)",
+      "note": "отключён: Cloudflare отдаёт заглушку «One moment, please...» вместо списка (0 записей). Замена — Phishing.Database ACTIVE."
     },
     {
       "name": "stevenblack-unified",
       "url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
       "type": "hosts",
+      "role": "links",
       "enabled": false,
       "limit": 8000,
-      "credit": "StevenBlack/hosts (MIT)"
-    },
-    {
-      "name": "dogino-phishing-domains",
-      "url": "https://raw.githubusercontent.com/Dogino/Discord-Phishing-URLs/main/pihole-phishing-adlist.txt",
-      "type": "adblock",
-      "enabled": true,
-      "limit": 10000,
-      "credit": "Dogino/Discord-Phishing-URLs"
-    },
-    {
-      "name": "dogino-scam-urls",
-      "url": "https://raw.githubusercontent.com/Dogino/Discord-Phishing-URLs/main/scam-urls.txt",
-      "type": "urls",
-      "enabled": true,
-      "limit": 4000,
-      "credit": "Dogino/Discord-Phishing-URLs"
+      "credit": "StevenBlack/hosts (MIT)",
+      "note": "отключён: преимущественно реклама/трекеры, не спам-письма"
     }
   ]
 }

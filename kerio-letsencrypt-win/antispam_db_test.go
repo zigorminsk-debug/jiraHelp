@@ -99,7 +99,8 @@ func TestAntiSpamEmailDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := map[string]string{
-		"spam-domains.txt":    "evil-phish.com\n",
+		"spam-domains.txt":    "scam-sender.com\n",
+		"phishing-links.txt":  "evil-phish.com\n",
 		"spam-emails.txt":     "bad@evil-phish.com\n",
 		"scam-subjects.txt":   "аккаунт будет заблокирован\n",
 		"scam-phrases-ru.txt": "оплатите комиссию\n",
@@ -127,6 +128,15 @@ func TestAntiSpamEmailDryRun(t *testing.T) {
 	}
 	if res.FromDomain != "evil-phish.com" {
 		t.Fatalf("fromDomain = %q", res.FromDomain)
+	}
+	linkHit := false
+	for _, m := range res.Matches {
+		if m.Rule == "KCM_PHISH_URL" {
+			linkHit = true
+		}
+	}
+	if !linkHit {
+		t.Fatalf("expected KCM_PHISH_URL match from phishing-links.txt, got %#v", res.Matches)
 	}
 	if res.RulesHit < 5 {
 		t.Fatalf("expected >= 5 matched groups, got %d (%#v)", res.RulesHit, res.Matches)
@@ -189,6 +199,7 @@ score    KCM_ALLOW_FROM_001         -6.0
 	files := map[string][]byte{
 		antiSpamRuleFileName:  []byte(cf),
 		"spam-domains.txt":    []byte("evil.com\n"),
+		"phishing-links.txt":  []byte("phish.example\n"),
 		"spam-emails.txt":     []byte("bad@evil.com\n"),
 		"scam-subjects.txt":   []byte("выигрыш\n"),
 		"scam-phrases-ru.txt": []byte("оплатите комиссию\n"),

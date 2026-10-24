@@ -33,6 +33,9 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
           PYTHONUNBUFFERED: "1"
+          # Необязательный бесплатный ключ abuse.ch: включает фид URLhaus.
+          # Добавьте секрет ABUSECH_AUTH_KEY в Settings → Secrets → Actions.
+          ABUSECH_AUTH_KEY: ${{ secrets.ABUSECH_AUTH_KEY }}
         run: |
           set +e
           python3 antispam-db/tools/build_db.py --out antispam-db/dist > /tmp/db-build.log 2>&1
@@ -107,7 +110,7 @@ jobs:
 
           # Санитарная проверка: домены из белого списка не должны попасть в чёрный
           allow = {l.strip().lower() for l in open(os.path.join(dist, "allowlist.txt"), encoding="utf-8") if l.strip() and not l.startswith("#")}
-          for fname in ("spam-domains.txt", "spam-emails.txt"):
+          for fname in ("spam-domains.txt", "phishing-links.txt", "spam-emails.txt"):
               for line in open(os.path.join(dist, fname), encoding="utf-8"):
                   item = line.strip().lower()
                   if not item or item.startswith("#"):
@@ -144,6 +147,7 @@ jobs:
             antispam-db/dist/kerio-antispam.cf \
             antispam-db/dist/manifest.json \
             antispam-db/dist/spam-domains.txt \
+            antispam-db/dist/phishing-links.txt \
             antispam-db/dist/spam-emails.txt \
             antispam-db/dist/scam-subjects.txt \
             antispam-db/dist/scam-phrases-ru.txt \
@@ -180,16 +184,33 @@ jobs:
           print("| Группа | Записей |")
           print("|---|---:|")
           labels = {
-              "domains": "Домены отправителей",
+              "domains": "Домены отправителей (From)",
               "emails": "Адреса отправителей",
               "subjects": "Мотивы в теме",
               "phrases": "Фразы в теле",
-              "urls": "Фишинговые ссылки",
+              "urls": "Домены фишинговых ссылок (uri)",
               "ips": "IP/CIDR источников",
               "allowlist": "Белый список",
           }
           for k, label in labels.items():
               print(f"| {label} | {m['counts'].get(k, 0)} |")
           print()
-          print("Ставьте лайк базе на GitHub — она обновляется каждый день в 03:17 UTC.")
+          print("### Источники")
+          print()
+          print("| Источник | Статус | Записей |")
+          print("|---|---|---:|")
+          for src in m.get("sources", []):
+              if src.get("ok"):
+                  status = "✅ ok"
+              elif not src.get("enabled"):
+                  status = "⏸ отключён"
+              elif src.get("skipped"):
+                  status = "🔑 нужен ключ"
+              else:
+                  status = "⚠️ " + str(src.get("error", "недоступен"))[:60]
+              print(f"| {src.get('name')} | {status} | {src.get('count', 0)} |")
+          print()
+          print(f"Активных источников: **{m.get('sourcesOk', 0)}**, недоступных: **{m.get('sourcesFailed', 0)}**.")
+          print()
+          print("База обновляется каждый день в 03:17 UTC.")
           PY
