@@ -7,6 +7,7 @@ on:
       - arena/f70f3591-jirahelp
     paths:
       - 'kerio-letsencrypt-win/**'
+      - 'FAQ.md'
       - '.github/workflows/build-windows.yml'
 
 permissions:
