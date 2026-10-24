@@ -794,66 +794,6 @@ func finishImplicitTLSOnConn(rawConn net.Conn, p PortProbeResult, sniHost string
 	return p
 }
 
-func checkDNSBLLists(ip net.IP) []RBLCheckEntry {
-	ip4 := ip.To4()
-	if ip4 == nil || ip.IsPrivate() || ip.IsLoopback() {
-		return nil
-	}
-	rev := fmt.Sprintf("%d.%d.%d.%d", ip4[3], ip4[2], ip4[1], ip4[0])
-
-	providers := []struct {
-		name string
-		zone string
-		url  string
-	}{
-		{"Spamhaus ZEN", "zen.spamhaus.org", "https://check.spamhaus.org/"},
-		{"Barracuda Reputation", "b.barracudacentral.org", "https://www.barracudacentral.org/rbl/removal-request"},
-		{"SpamCop Blocking List", "bl.spamcop.net", "https://www.spamcop.net/bl.shtml"},
-		{"SORBS DNSBL", "dnsbl.sorbs.net", "http://www.sorbs.net/lookup.shtml"},
-		{"UCEPROTECT Level 1", "dnsbl-1.uceprotect.net", "https://www.uceprotect.net/en/rblcheck.php"},
-		{"PSBL (Passive Spam Block)", "psbl.surriel.com", "https://psbl.org/"},
-		{"WPBL (Weighted Private)", "db.wpbl.info", "http://wpbl.info/cgi-bin/detail.cgi"},
-		{"Mailspike BL", "bl.mailspike.net", "https://mailspike.org/iplookup.html"},
-		{"NiX Spam (Heise)", "ix.dnsbl.manitu.net", "https://www.dnsbl.manitu.net/"},
-		{"SpamRATS All", "all.spamrats.com", "https://www.spamrats.com/lookup.php"},
-		{"0SPAM Project", "bl.0spam.org", "https://0spam.org/check"},
-	}
-
-	out := make([]RBLCheckEntry, len(providers))
-	var wg sync.WaitGroup
-	// Use system resolver / direct authoritative lookup where possible (8.8.8.8 triggers 127.255.255.254 on Spamhaus)
-	sysRes := net.DefaultResolver
-	for i, prv := range providers {
-		wg.Add(1)
-		go func(idx int, name, zone, delist string) {
-			defer wg.Done()
-			entry := RBLCheckEntry{
-				Provider:  name,
-				Zone:      zone,
-				DelistURL: delist,
-			}
-			q := rev + "." + zone
-			ctx, cancel := context.WithTimeout(context.Background(), 2200*time.Millisecond)
-			ips, err := sysRes.LookupIPAddr(ctx, q)
-			cancel()
-			if err == nil && len(ips) > 0 {
-				for _, hit := range ips {
-					h4 := hit.IP.To4()
-					// Filter 127.255.255.x open-resolver rate-limit / policy codes (NOT actual spam listings!)
-					if h4 != nil && h4[0] == 127 && !(h4[1] == 255 && h4[2] == 255) {
-						entry.Listed = true
-						entry.ReturnCode = h4.String()
-						break
-					}
-				}
-			}
-			out[idx] = entry
-		}(i, prv.name, prv.zone, prv.url)
-	}
-	wg.Wait()
-	return out
-}
-
 func parseDKIMPublicKeyBits(txt string) (algo string, bits int) {
 	algo = "rsa"
 	var pB64 string
@@ -2198,7 +2138,7 @@ func RunMailDeliverabilityAudit(req MailAuditRequest, log LogFunc) (*MailAuditRe
 	}
 
 	// =========================================================================
-	// CHECK 8: DNSBL SPAM BLACKLISTS (11 GLOBAL RBLs)
+	// CHECK 8: DNSBL SPAM BLACKLISTS (16 GLOBAL RBLs, единый список — dnsblProviders)
 	// =========================================================================
 	var listedIn []RBLCheckEntry
 	for _, b := range rbls {

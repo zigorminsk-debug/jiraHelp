@@ -13,9 +13,16 @@ on:
 permissions:
   contents: write
 
+# Один билд на ветку за раз: пересобранные бинарники не могут «откатиться»
+# из-за гонки двух параллельных запусков.
+concurrency:
+  group: win-exe-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,6 +64,26 @@ jobs:
           fi
           exit $rc
 
+      - name: Verify built EXE version matches source
+        run: |
+          set -e
+          VER=$(awk -F'"' '/^const appVersion = "/{print $2; exit}' kerio-letsencrypt-win/version.go)
+          case "$VER" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::Не удалось прочитать appVersion из version.go"; exit 1 ;;
+          esac
+          echo "appVersion из исходников: $VER"
+          python3 - "$VER" <<'PY'
+          import sys
+          ver = sys.argv[1]
+          data = open('KerioCertManager.exe', 'rb').read()
+          pat = (ver + '.0').encode('utf-16-le')
+          n = data.count(pat)
+          print(f'UTF-16-строк "{ver}.0" в EXE: {n}')
+          if n != 4:
+              sys.exit(f'ERROR: версия EXE не совпадает с version.go ({n} != 4)')
+          PY
+
       - name: Package ZIP
         run: |
           set -e
@@ -83,14 +110,29 @@ jobs:
           set -e
           git config user.name "kerio-ci"
           git config user.email "ci@csl.by"
-          git add -f KerioCertManager.exe KerioCertManager-Windows-x64.zip
-          if git diff --cached --quiet; then
-            echo "Binaries are up to date"
-            exit 0
-          fi
-          git commit -m "CI: rebuild KerioCertManager.exe from ${GITHUB_SHA::7}"
-          git pull --rebase origin "${GITHUB_REF_NAME}" || true
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          # Артефакты всегда переживают пересинхронизацию с origin.
+          mkdir -p /tmp/kcm-artifacts
+          cp KerioCertManager.exe KerioCertManager-Windows-x64.zip /tmp/kcm-artifacts/
+          for attempt in 1 2 3 4 5; do
+            echo "== попытка зафиксировать бинарники: $attempt =="
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
+            cp /tmp/kcm-artifacts/KerioCertManager.exe .
+            cp /tmp/kcm-artifacts/KerioCertManager-Windows-x64.zip .
+            git add -f KerioCertManager.exe KerioCertManager-Windows-x64.zip
+            if git diff --cached --quiet; then
+              echo "Бинарники уже актуальны — коммит не нужен"
+              exit 0
+            fi
+            git commit -m "CI: rebuild KerioCertManager.exe from ${GITHUB_SHA::7}"
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              echo "Готово: пересобранные бинарники запушены"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Не удалось зафиксировать пересобранные бинарники после 5 попыток"
+          exit 1
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

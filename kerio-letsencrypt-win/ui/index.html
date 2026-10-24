@@ -671,7 +671,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.4.1 • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span>
+        <span class="brand-badge">Windows Native GUI v4.4.2 • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -1317,7 +1317,7 @@
             Комплексная диагностика почтового сервера, доставляемости и подробный Хелп по устранению проблем
           </div>
           <div class="card-subtitle">
-            Проверяет <strong>MX + A, обратную зону провайдера PTR (FCrDNS), SPF, подпись DKIM (Kerio <code>mail._domainkey</code>), DMARC, порты 25/465/587/993/995/443, SSL-цепочку, баннер HELO, защиту от Open Relay и 11 спам-баз</strong> — и прямо под каждой найденной ошибкой выдаёт <strong>подробную пошаговую инструкцию с готовыми записями для копирования!</strong>
+            Проверяет <strong>MX + A, обратную зону провайдера PTR (FCrDNS), SPF, подпись DKIM (Kerio <code>mail._domainkey</code>), DMARC, порты 25/465/587/993/995/443, SSL-цепочку, баннер HELO, защиту от Open Relay и 16 спам-баз</strong> — и прямо под каждой найденной ошибкой выдаёт <strong>подробную пошаговую инструкцию с готовыми записями для копирования!</strong>
           </div>
         </div>
       </div>
@@ -1371,14 +1371,14 @@
         </div>
         <div class="field" style="display:flex;align-items:flex-end;">
           <div id="wanAutoInfoBanner" style="width:100%;padding:9px 12px;border-radius:8px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);font-size:12.5px;color:#a7f3d0;">
-            🌐 <strong>Умное автоопределение внешнего IP включено:</strong> программа сама обходит локальный офисный Split-DNS (<code>10.x.x.x</code>) через зашифрованный DNS-over-HTTPS и автоматически находит белый IP сервера для PTR, SPF и 11 спам-баз!
+            🌐 <strong>Умное автоопределение внешнего IP включено:</strong> программа сама обходит локальный офисный Split-DNS (<code>10.x.x.x</code>) через зашифрованный DNS-over-HTTPS и автоматически находит белый IP сервера для PTR, SPF и 16 спам-баз!
           </div>
         </div>
       </div>
 
       <div class="actions-row" style="justify-content:space-between;">
         <div style="font-size:12.5px;color:var(--text-secondary);">
-          💡 <strong>Важно:</strong> даже если справа указан локальный VPN IP (<code>10.146.100.14</code>), записи <strong>DNS, PTR, SPF и 11 спам-баз RBL</strong> всё равно проверяются по реальному <strong>внешнему белому IP</strong> вашего домена!
+          💡 <strong>Важно:</strong> даже если справа указан локальный VPN IP (<code>10.146.100.14</code>), записи <strong>DNS, PTR, SPF и 16 спам-баз RBL</strong> всё равно проверяются по реальному <strong>внешнему белому IP</strong> вашего домена!
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
           <button type="button" class="btn btn-outline" id="exportAuditHtmlBtn" style="display:none;" onclick="exportMailAuditHTML()">
@@ -1440,7 +1440,7 @@
         <div id="mailChecksList"></div>
       </div>
 
-      <!-- 3. PORTS + SSL MATRIX & 11 DNSBL BLACKLISTS -->
+      <!-- 3. PORTS + SSL MATRIX & 16 DNSBL BLACKLISTS -->
       <div class="workspace-grid">
         <div class="card">
           <div class="card-header">
@@ -1456,7 +1456,7 @@
           <div class="card-header" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
             <div>
               <div class="card-title">🚫 Репутация IP (16 RBL баз) + Репутация Домена (4 DBL базы)</div>
-              <div class="card-subtitle">Spamhaus ZEN/DBL, Barracuda, SpamCop, SORBS, Backscatterer, BlockList.de, SURBL, URIBL</div>
+              <div class="card-subtitle">IP: Spamhaus ZEN, Barracuda, SpamCop, SORBS, Backscatterer, BlockList.de, UCEPROTECT, PSBL, WPBL, Mailspike, NiX Spam, SpamRATS, 0SPAM, Truncate GBUdb, LashBack, DroneBL • Домен: Spamhaus DBL, SURBL, URIBL, SEM</div>
             </div>
             <button type="button" class="btn btn-primary btn-sm" onclick="openDelistTabFromAudit()">
               🚑 Готовые письма разблокировки →
@@ -2145,7 +2145,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:1380px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.4.1</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.4.2</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -2219,6 +2219,9 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 </div>
 
 <script>
+  // Версия интерфейса. Должна совпадать с appVersion в version.go
+  // (проверяется тестом TestVersionConsistency).
+  const APP_VERSION = '4.4.2';
   let systemState = null;
   let currentCert = null;
   let allCerts = [];
@@ -4391,7 +4394,7 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
       { title: '7. Отчёты об ошибках шифрования почты (SMTP TLS-RPT)', type: 'TXT', host: '_smtp._tls', val: tlsRptVal }
     ];
 
-    __lastGeneratedDnsPack = `; === ГОТОВЫЙ НАБОР DNS-ЗАПИСЕЙ ДЛЯ ДОМЕНА ${dom} (Kerio SSL & Mail Suite v4.0) ===\n` +
+    __lastGeneratedDnsPack = `; === ГОТОВЫЙ НАБОР DNS-ЗАПИСЕЙ ДЛЯ ДОМЕНА ${dom} (Kerio SSL & Mail Suite v${APP_VERSION}) ===\n` +
       records.map(r => `; ${r.title}\n${r.host}\tIN\t${r.type}\t${r.val}\n`).join('\n');
 
     const cardsBox = document.getElementById('dnsGeneratedCardsBox');

@@ -123,6 +123,28 @@ func explainDNSBLReturnCode(providerID, code string) string {
 	return ""
 }
 
+// dnsblProviders — единый список RBL-зон, которые проверяет аудит почты.
+// Подпись в UI «(N RBL баз)» сверяется с длиной этого среза тестом
+// TestBlacklistCountsMatchUI — так счётчик не может разойтись с кодом.
+var dnsblProviders = []rblProviderSpec{
+	{"spamhaus", "Spamhaus ZEN (SBL+XBL+PBL)", "zen.spamhaus.org", "https://check.spamhaus.org/results/?query=%s"},
+	{"barracuda", "Barracuda Reputation (BRBL)", "b.barracudacentral.org", "https://www.barracudacentral.org/rbl/removal-request"},
+	{"spamcop", "SpamCop Blocking List", "bl.spamcop.net", "https://www.spamcop.net/w3m?action=checkblock&ip=%s"},
+	{"sorbs", "SORBS DNSBL", "dnsbl.sorbs.net", "http://www.sorbs.net/cgi-bin/support"},
+	{"backscatterer", "Backscatterer (Обратный спам NDR)", "ips.backscatterer.org", "https://ips.backscatterer.org/?ip=%s"},
+	{"blocklistde", "BlockList.de (Атаки / Брутфорс)", "bl.blocklist.de", "https://www.blocklist.de/en/delist.html"},
+	{"uceprotect", "UCEPROTECT Level 1", "dnsbl-1.uceprotect.net", "https://www.uceprotect.net/en/rblcheck.php?ipr=%s"},
+	{"psbl", "PSBL (Passive Spam Block)", "psbl.surriel.com", "https://psbl.org/listing?ip=%s"},
+	{"wpbl", "WPBL (Weighted Private)", "db.wpbl.info", "http://wpbl.info/cgi-bin/detail.cgi?ip=%s"},
+	{"mailspike", "Mailspike Reputation BL", "bl.mailspike.net", "https://mailspike.org/iplookup.html"},
+	{"nixspam", "NiX Spam (Heise Germany)", "ix.dnsbl.manitu.net", "https://www.dnsbl.manitu.net/?value=%s"},
+	{"spamrats", "SpamRATS All (No-PTR / Bot)", "all.spamrats.com", "https://www.spamrats.com/lookup.php?ip=%s"},
+	{"zerospam", "0SPAM Project", "bl.0spam.org", "https://0spam.org/check"},
+	{"truncate", "Truncate GBUdb", "truncate.gbudb.net", "http://www.gbudb.com/truncate/index.jsp"},
+	{"lashback", "LashBack Unsubscribe BL", "ubl.unsubscore.com", "https://blacklist.lashback.com/"},
+	{"dronebl", "DroneBL (Заражённые хосты / NAT)", "dnsbl.dronebl.org", "https://dronebl.org/lookup?ip=%s"},
+	}
+
 func checkExpandedDNSBLLists(ip net.IP) []RBLCheckEntry {
 	ip4 := ip.To4()
 	if ip4 == nil || ip.IsPrivate() || ip.IsLoopback() {
@@ -131,30 +153,12 @@ func checkExpandedDNSBLLists(ip net.IP) []RBLCheckEntry {
 	ipStr := ip4.String()
 	rev := fmt.Sprintf("%d.%d.%d.%d", ip4[3], ip4[2], ip4[1], ip4[0])
 
-	providers := []rblProviderSpec{
-		{"spamhaus", "Spamhaus ZEN (SBL+XBL+PBL)", "zen.spamhaus.org", "https://check.spamhaus.org/results/?query=%s"},
-		{"barracuda", "Barracuda Reputation (BRBL)", "b.barracudacentral.org", "https://www.barracudacentral.org/rbl/removal-request"},
-		{"spamcop", "SpamCop Blocking List", "bl.spamcop.net", "https://www.spamcop.net/w3m?action=checkblock&ip=%s"},
-		{"sorbs", "SORBS DNSBL", "dnsbl.sorbs.net", "http://www.sorbs.net/cgi-bin/support"},
-		{"backscatterer", "Backscatterer (Обратный спам NDR)", "ips.backscatterer.org", "https://ips.backscatterer.org/?ip=%s"},
-		{"blocklistde", "BlockList.de (Атаки / Брутфорс)", "bl.blocklist.de", "https://www.blocklist.de/en/delist.html"},
-		{"uceprotect", "UCEPROTECT Level 1", "dnsbl-1.uceprotect.net", "https://www.uceprotect.net/en/rblcheck.php?ipr=%s"},
-		{"psbl", "PSBL (Passive Spam Block)", "psbl.surriel.com", "https://psbl.org/listing?ip=%s"},
-		{"wpbl", "WPBL (Weighted Private)", "db.wpbl.info", "http://wpbl.info/cgi-bin/detail.cgi?ip=%s"},
-		{"mailspike", "Mailspike Reputation BL", "bl.mailspike.net", "https://mailspike.org/iplookup.html"},
-		{"nixspam", "NiX Spam (Heise Germany)", "ix.dnsbl.manitu.net", "https://www.dnsbl.manitu.net/?value=%s"},
-		{"spamrats", "SpamRATS All (No-PTR / Bot)", "all.spamrats.com", "https://www.spamrats.com/lookup.php?ip=%s"},
-		{"zerospam", "0SPAM Project", "bl.0spam.org", "https://0spam.org/check"},
-		{"truncate", "Truncate GBUdb", "truncate.gbudb.net", "http://www.gbudb.com/truncate/index.jsp"},
-		{"lashback", "LashBack Unsubscribe BL", "ubl.unsubscore.com", "https://blacklist.lashback.com/"},
-		{"dronebl", "DroneBL (Заражённые хосты / NAT)", "dnsbl.dronebl.org", "https://dronebl.org/lookup?ip=%s"},
-	}
 
-	out := make([]RBLCheckEntry, len(providers))
+	out := make([]RBLCheckEntry, len(dnsblProviders))
 	var wg sync.WaitGroup
 	sysRes := net.DefaultResolver
 
-	for i, prv := range providers {
+	for i, prv := range dnsblProviders {
 		wg.Add(1)
 		go func(idx int, spec rblProviderSpec) {
 			defer wg.Done()
@@ -207,18 +211,21 @@ func checkExpandedDNSBLLists(ip net.IP) []RBLCheckEntry {
 	return out
 }
 
+// domainRBLProviders — единый список доменных чёрных списков (DBL/SURBL/URIBL/SEM).
+// Подпись в UI «(N DBL базы)» сверяется с его длиной тестом TestBlacklistCountsMatchUI.
+var domainRBLProviders = []rblProviderSpec{
+	{"dbl", "Spamhaus DBL (Репутация домена)", "dbl.spamhaus.org", "https://check.spamhaus.org/results/?query=%s"},
+	{"surbl", "SURBL Multi (Ссылки в письмах)", "multi.surbl.org", "http://www.surbl.org/surbl-analysis"},
+	{"uribl", "URIBL Multi (Доменный фильтр)", "multi.uribl.com", "https://lookup.uribl.com/"},
+	{"sem", "SpamEatingMonkey URI", "uribl.spameatingmonkey.net", "https://spameatingmonkey.com/lookup/%s"},
+}
+
 // Check domain blacklists (DBL / SURBL / URIBL / SEM)
 func checkDomainBlacklists(domain string) []RBLCheckEntry {
-	specs := []rblProviderSpec{
-		{"dbl", "Spamhaus DBL (Репутация домена)", "dbl.spamhaus.org", "https://check.spamhaus.org/results/?query=%s"},
-		{"surbl", "SURBL Multi (Ссылки в письмах)", "multi.surbl.org", "http://www.surbl.org/surbl-analysis"},
-		{"uribl", "URIBL Multi (Доменный фильтр)", "multi.uribl.com", "https://lookup.uribl.com/"},
-		{"sem", "SpamEatingMonkey URI", "uribl.spameatingmonkey.net", "https://spameatingmonkey.com/lookup/%s"},
-	}
-	out := make([]RBLCheckEntry, len(specs))
+	out := make([]RBLCheckEntry, len(domainRBLProviders))
 	var wg sync.WaitGroup
 	sysRes := net.DefaultResolver
-	for i, sp := range specs {
+	for i, sp := range domainRBLProviders {
 		wg.Add(1)
 		go func(idx int, spec rblProviderSpec) {
 			defer wg.Done()

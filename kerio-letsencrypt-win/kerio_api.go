@@ -38,7 +38,7 @@ const (
 	kerioAdminPort      = 4040
 	kerioAdminPath      = "/admin/api/jsonrpc/"
 	kerioUploadPath     = "/admin/api/jsonrpc/upload/"
-	kerioClientUserAgent = "KerioCertManager/4.4.1 (Windows)"
+	kerioClientUserAgent = "KerioCertManager/" + appVersion + " (Windows)"
 )
 
 // KerioEndpoint — адрес административного JSON-RPC интерфейса Kerio Connect.
@@ -499,7 +499,7 @@ func (c *KerioClient) Login(user, password, domainHint string) error {
 			"application": map[string]any{
 				"name":    "KerioCertManager",
 				"vendor":  "CSL.BY",
-				"version": "4.4.1",
+				"version": appVersion,
 			},
 		})
 		if err != nil {
