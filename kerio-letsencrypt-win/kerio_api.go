@@ -134,10 +134,7 @@ func kerioErrFix(err error) string {
 // ---------------------------------------------------------------------------
 
 func kerioHTTPClient(timeout time.Duration) *http.Client {
-	var jar cookiejar.Jar
-	if j, err := cookiejar.New(nil); err == nil {
-		jar = *j
-	}
+	jar, _ := cookiejar.New(nil)
 	transport := &http.Transport{
 		// Никаких прокси: админка Kerio почти всегда во внутренней сети.
 		Proxy: nil,
@@ -154,7 +151,7 @@ func kerioHTTPClient(timeout time.Duration) *http.Client {
 	}
 	return &http.Client{
 		Transport: transport,
-		Jar:       &jar,
+		Jar:       jar,
 		Timeout:   timeout,
 		// Не идём по редиректам: Kerio отправляет 302 на страницу логина,
 		// и Go иначе превратит POST в GET и вернёт HTML вместо JSON.
