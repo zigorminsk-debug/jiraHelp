@@ -672,6 +672,9 @@
 
   /* clip, а не hidden: не создаёт scroll-контейнер и не ломает sticky-шапку */
   html, body { max-width: 100%; overflow-x: clip; }
+  /* Широкие таблицы прокручиваются внутри карточки, а не растягивают страницу */
+  .table-scroll { width: 100%; max-width: 100%; overflow-x: auto; }
+  .table-scroll > .data-table { min-width: 420px; }
 
   /* Две подписи вкладки: короткая по умолчанию, полная — на очень широких
      мониторах (4K+), где все 8 длинных названий помещаются в одну строку. */
@@ -5145,6 +5148,44 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
       box.style.display = 'block';
     }
   }
+
+  // --- Адаптивность: широкие таблицы получают собственную горизонтальную прокрутку,
+  //     чтобы на узком окне не обрезались колонки с кнопками (см. п. 2.8 ФАК).
+  function wrapWideTables(root) {
+    (root || document).querySelectorAll('table.data-table').forEach(t => {
+      if (t.parentElement && t.parentElement.classList.contains('table-scroll')) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'table-scroll';
+      t.parentElement.insertBefore(wrap, t);
+      wrap.appendChild(t);
+    });
+  }
+  wrapWideTables(document);
+  let tableWrapScheduled = false;
+  const tableObserver = new MutationObserver(mutations => {
+    // Реагируем только если в DOM реально появилась таблица .data-table,
+    // иначе наблюдатель молча игнорирует шум (лог-строки, тосты и т.п.).
+    let hasNewTable = false;
+    for (const m of mutations) {
+      for (const n of m.addedNodes) {
+        if (n.nodeType === 1 && (n.matches('table.data-table') || n.querySelector('table.data-table'))) {
+          hasNewTable = true;
+          break;
+        }
+      }
+      if (hasNewTable) break;
+    }
+    if (!hasNewTable || tableWrapScheduled) return;
+    tableWrapScheduled = true;
+    requestAnimationFrame(() => {
+      tableWrapScheduled = false;
+      wrapWideTables(document);
+    });
+  });
+  document.addEventListener('DOMContentLoaded', () => {
+    wrapWideTables(document);
+    tableObserver.observe(document.body, { childList: true, subtree: true });
+  });
 
   initApp();
 </script>
