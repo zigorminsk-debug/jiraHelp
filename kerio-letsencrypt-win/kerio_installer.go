@@ -245,10 +245,8 @@ func installViaKerioAdminAPI(rec *IssuedCertRecord, cfg KerioInstallConfig, log 
 		return "", kerioInstallHint(&KerioAPIError{
 			Kind: "rights", Method: "Session.whoAmI",
 			Message: fmt.Sprintf("учётная запись %s вошла, но не является администратором Kerio Connect (роль: %s)", who.LoginName, who.Role),
-			Fix: "1) Configuration → Administration → Administrators — добавьте эту учётку в администраторы.
-" +
-				"2) Используйте мастер-администратора (обычно admin), а не пользователя домена.
-" +
+			Fix: "1) Configuration → Administration → Administrators — добавьте эту учётку в администраторы.\n" +
+				"2) Используйте мастер-администратора (обычно admin), а не пользователя домена.\n" +
 				"3) Делегированный администратор без прав на SSL-сертификаты импорт выполнить не сможет.",
 		})
 	}
@@ -478,19 +476,12 @@ func kerioInstallHint(err error) error {
 		msg = fmt.Sprintf("%s: %s", ke.Method, msg)
 	}
 	if ke.Fix != "" {
-		msg += "
-
-Как исправить:
-" + ke.Fix
+		msg += "\n\nКак исправить:\n" + ke.Fix
 	}
 	if ke.Raw != "" {
-		msg += "
-
-Ответ сервера Kerio: " + ke.Raw
+		msg += "\n\nОтвет сервера Kerio: " + ke.Raw
 	}
-	msg += "
-
-Подробная проверка — кнопка «🩺 Диагностика подключения к Kerio»."
+	msg += "\n\nПодробная проверка — кнопка «🩺 Диагностика подключения к Kerio»."
 	return errors.New(msg)
 }
 
