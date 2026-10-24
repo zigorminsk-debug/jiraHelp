@@ -676,6 +676,202 @@
   .table-scroll { width: 100%; max-width: 100%; overflow-x: auto; }
   .table-scroll > .data-table { min-width: 420px; }
 
+  /* =====================================================================
+     ВСТРОЕННАЯ ИНСТРУКЦИЯ (вкладка «ФАК»)
+     Документ рендерится сервером из FAQ.md; здесь только оформление:
+     оглавление слева, текст справа, поиск с подсветкой, печать в PDF.
+     ===================================================================== */
+  .help-pill-row { margin: 0 0 14px; }
+  .help-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--blue-soft);
+    border: 1px solid rgba(59, 130, 246, 0.45);
+    color: #bfdbfe;
+    font-family: inherit; font-size: 12.4px; font-weight: 600;
+    padding: 7px 13px; border-radius: 99px; cursor: pointer;
+    max-width: 100%; text-align: left; line-height: 1.35;
+  }
+  .help-pill:hover { background: rgba(59, 130, 246, 0.26); border-color: var(--blue); }
+  [data-theme="light"] .help-pill { color: #1e40af; }
+  .faq-toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin: 2px 0 16px;
+  }
+  .faq-search-wrap { position: relative; flex: 1 1 340px; min-width: 200px; }
+  .faq-search-wrap input { padding-left: 34px; padding-right: 32px; }
+  .faq-search-ico {
+    position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+    font-size: 13px; opacity: 0.75; pointer-events: none;
+  }
+  .faq-search-clear {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    display: none; background: transparent; border: none; cursor: pointer;
+    color: var(--text-secondary); font-size: 14px; padding: 4px 6px; border-radius: 6px;
+  }
+  .faq-search-clear:hover { color: var(--danger); background: var(--bg-elevated); }
+  .faq-search-clear.show { display: block; }
+
+  .faq-layout {
+    display: grid;
+    grid-template-columns: 290px minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+  .faq-toc {
+    position: sticky;
+    top: 74px;
+    max-height: calc(100vh - 150px);
+    overflow: auto;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px;
+  }
+  .faq-toc-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--text-muted); font-weight: 800; padding: 4px 8px 8px;
+  }
+  .faq-toc-item {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    background: transparent; border: none; color: var(--text-secondary);
+    font-size: 12.4px; line-height: 1.35; padding: 6px 8px; border-radius: 7px;
+    font-family: inherit;
+  }
+  .faq-toc-item:hover { background: var(--bg-elevated); color: var(--text-main); }
+  .faq-toc-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+  .faq-toc-item .faq-toc-num { color: var(--text-muted); font-weight: 700; margin-right: 5px; }
+  .faq-toc-item.active .faq-toc-num { color: var(--accent); }
+  .faq-toc-group { margin-bottom: 2px; }
+  .faq-toc-sub {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    background: transparent; border: none; color: var(--text-muted);
+    font-size: 11.6px; line-height: 1.3; padding: 3px 8px 3px 22px;
+    border-radius: 6px; font-family: inherit;
+  }
+  .faq-toc-sub:hover { color: var(--text-main); background: var(--bg-elevated); }
+
+  .faq-doc {
+    max-width: 100%;
+    min-width: 0;
+    font-size: 13.8px;
+    line-height: 1.65;
+    color: var(--text-main);
+  }
+  .faq-doc .md-h { scroll-margin-top: 84px; }
+  .faq-doc .md-h1 {
+    font-size: 20px; margin: 0 0 10px; line-height: 1.3;
+    padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft);
+  }
+  .faq-doc .md-h2 {
+    font-size: 17px; margin: 30px 0 12px; line-height: 1.35;
+    padding-bottom: 7px; border-bottom: 1px solid var(--border);
+  }
+  .faq-doc .md-h2:first-child, .faq-doc .md-h1 + .md-h2 { margin-top: 18px; }
+  .faq-doc .md-h3 { font-size: 14.6px; margin: 22px 0 8px; color: var(--text-main); }
+  .faq-doc .md-h4 { font-size: 13.6px; margin: 16px 0 6px; color: var(--text-secondary); }
+  .faq-doc .md-p { margin: 0 0 11px; }
+  .faq-doc .md-list { margin: 0 0 12px; padding-left: 22px; }
+  .faq-doc .md-list li { margin: 4px 0; }
+  .faq-doc .md-list .md-list { margin: 4px 0 2px; }
+  .faq-doc .md-quote {
+    margin: 0 0 14px;
+    padding: 10px 14px;
+    border-left: 3px solid var(--accent);
+    background: var(--bg-elevated);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    color: var(--text-secondary);
+  }
+  .faq-doc .md-quote > :last-child { margin-bottom: 0; }
+  .faq-doc .md-hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+  .faq-doc .md-code {
+    background: var(--bg-code);
+    color: #e2e8f0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+    margin: 0 0 14px;
+    overflow-x: auto;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12.5px;
+    line-height: 1.5;
+    white-space: pre;
+  }
+  .faq-doc .md-code code { background: none; padding: 0; color: inherit; border: none; }
+  .faq-doc code {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    padding: 1px 5px;
+    border-radius: 5px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12.4px;
+    word-break: break-word;
+    color: var(--text-main);
+  }
+  .faq-doc .md-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 14px;
+    font-size: 12.6px;
+  }
+  .faq-doc .md-table th,
+  .faq-doc .md-table td {
+    border: 1px solid var(--border);
+    padding: 7px 9px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .faq-doc .md-table th { background: var(--bg-elevated); font-weight: 700; white-space: nowrap; }
+  .faq-doc .md-table tbody tr:nth-child(even) { background: rgba(148, 163, 184, 0.05); }
+  .faq-doc a { color: var(--blue); text-decoration: none; border-bottom: 1px dotted rgba(59, 130, 246, 0.5); }
+  .faq-doc a:hover { border-bottom-style: solid; }
+  .faq-doc strong { color: var(--text-main); font-weight: 700; }
+  mark.md-hit { background: #fbbf24; color: #111827; border-radius: 3px; padding: 0 2px; }
+  .faq-sec { scroll-margin-top: 84px; }
+  .faq-sec.faq-flash { animation: faqFlash 1.6s ease-out 1; }
+  @keyframes faqFlash { from { background: var(--accent-soft); } to { background: transparent; } }
+  .faq-empty { padding: 28px 8px; text-align: center; color: var(--text-secondary); font-size: 13.5px; }
+
+  /* --- Узкие окна: оглавление уезжает наверх и становится компактным --- */
+  @media (max-width: 1180px) {
+    .faq-layout { grid-template-columns: 1fr; }
+    .faq-toc {
+      position: static;
+      max-height: 240px;
+      margin-bottom: 6px;
+    }
+    .faq-toc-list-cols { columns: 2; column-gap: 10px; }
+  }
+  @media (max-width: 700px) {
+    .faq-doc { font-size: 13.2px; }
+    .faq-doc .md-h1 { font-size: 18px; }
+    .faq-doc .md-h2 { font-size: 15.6px; }
+    .faq-doc .md-table { font-size: 12px; }
+    .faq-toc-list-cols { columns: 1; }
+  }
+
+  /* --- Печать: только текст инструкции, без шапки, вкладок и подсветки --- */
+  @media print {
+    body { background: #fff !important; }
+    .topbar, .nav-tabs, footer, .faq-toolbar, .faq-toc, #toastBox,
+    #helpFirstRunBanner, #expiringCertAlertBanner { display: none !important; }
+    .container { max-width: none; padding: 0; }
+    .card { border: none; box-shadow: none; padding: 0; margin: 0; background: #fff !important; }
+    .faq-layout { display: block; }
+    .faq-doc, .faq-doc .md-p, .faq-doc .md-list li { color: #111 !important; font-size: 11.5pt; }
+    .faq-doc .md-h1, .faq-doc .md-h2, .faq-doc .md-h3 { color: #111 !important; }
+    .faq-doc .md-code { background: #f5f5f5 !important; color: #111 !important; border-color: #ccc; }
+    .faq-doc .md-table th { background: #eee !important; }
+    .faq-doc .md-table th, .faq-doc .md-table td { border-color: #bbb; color: #111; }
+    .faq-doc .md-quote { background: #f7f7f7; color: #222; }
+    .faq-doc a { color: #111; border-bottom: none; }
+    mark.md-hit { background: none; color: inherit; }
+    .faq-sec h2 { page-break-after: avoid; }
+    .faq-sec table, .faq-doc tr { page-break-inside: avoid; }
+  }
+
   /* Две подписи вкладки: короткая по умолчанию, полная — на очень широких
      мониторах (4K+), где все 8 длинных названий помещаются в одну строку. */
   .nav-tabs .lbl-full { display: none; }
@@ -764,7 +960,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.4.3<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
+        <span class="brand-badge">Windows Native GUI v4.5.0<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -829,7 +1025,23 @@
   <button type="button" class="nav-tab" data-tab="tools" title="Инструменты админа (Заголовки / DNS)">
     <span class="tab-ico">🧰</span><span class="lbl-full">Инструменты админа (Заголовки / DNS)</span><span class="lbl-short">Инструменты</span>
   </button>
+  <button type="button" class="nav-tab" data-tab="help" title="Встроенная инструкция (полный ФАК) — с поиском и печатью">
+    <span class="tab-ico">📖</span><span class="lbl-full">Встроенная инструкция (ФАК)</span><span class="lbl-short">ФАК</span>
+  </button>
 </nav>
+
+<!-- Первый запуск: подсказка про встроенную инструкцию (показывается один раз) -->
+<div id="helpFirstRunBanner" style="display:none;max-width:1380px;margin:14px auto 0;padding:0 24px;">
+  <div style="background:rgba(59,130,246,0.14);border:1.5px solid #3b82f6;border-radius:10px;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div style="font-size:13.5px;color:#bfdbfe;font-weight:600;">
+      📖 <strong>Впервые здесь?</strong> В программу встроена полная инструкция на русском — 19 разделов простым языком, с поиском, оглавлением и печатью.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button type="button" class="btn btn-primary btn-sm" onclick="openHelpSection('2-первый-запуск')">Открыть инструкцию →</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="hideHelpFirstRunBanner(true)">Понятно</button>
+    </div>
+  </div>
+</div>
 
 <!-- Global Expiring SSL Warning Banner (auto-shown if any certificate expires within 14 days) -->
 <div id="expiringCertAlertBanner" style="display:none;max-width:1380px;margin:14px auto 0;padding:0 24px;">
@@ -844,6 +1056,12 @@
 
   <!-- TAB 1: ISSUE CERTIFICATE -->
   <section id="tab-issue" class="tab-page active">
+
+    <div class="help-pill-row">
+      <button type="button" class="help-pill" onclick="openHelpSection('3-вкладка-1--выпуск-сертификата')" title="Открыть встроенную инструкцию на разделе 3">
+        📖 Подробно в инструкции — раздел 3. Выпуск сертификата
+      </button>
+    </div>
     <div class="workspace-grid">
 
       <!-- LEFT COLUMN: INPUT FORM -->
@@ -1230,6 +1448,12 @@
 
   <!-- TAB 2: KERIO CONNECT INTEGRATION -->
   <section id="tab-kerio" class="tab-page">
+
+    <div class="help-pill-row">
+      <button type="button" class="help-pill" onclick="openHelpSection('4-вкладка-2--установка-в-kerio-connect')" title="Открыть встроенную инструкцию на разделе 4">
+        📖 Подробно в инструкции — раздел 4. Установка в Kerio Connect
+      </button>
+    </div>
     <div class="workspace-grid">
       <div class="card">
         <div class="card-header">
@@ -1345,6 +1569,12 @@
 
   <!-- TAB 3: CERTIFICATE VAULT & AUTO-RENEWAL -->
   <section id="tab-vault" class="tab-page">
+
+    <div class="help-pill-row">
+      <button type="button" class="help-pill" onclick="openHelpSection('8-вкладка-6--сертификаты-и-автопродление')" title="Открыть встроенную инструкцию на разделе 8">
+        📖 Подробно в инструкции — раздел 8. Сертификаты и автопродление
+      </button>
+    </div>
     <div class="card">
       <div class="card-header">
         <div>
@@ -1402,6 +1632,12 @@
 
   <!-- TAB 4: FULL MAIL SERVER & ANTI-SPAM DELIVERABILITY AUDIT -->
   <section id="tab-mailcheck" class="tab-page">
+
+    <div class="help-pill-row">
+      <button type="button" class="help-pill" onclick="openHelpSection('5-вкладка-3--проверка-почты-и-антиспам')" title="Открыть встроенную инструкцию на разделе 5">
+        📖 Подробно в инструкции — раздел 5. Проверка почты и антиспам
+      </button>
+    </div>
     <div class="card">
       <div class="card-header">
         <div>
@@ -1735,6 +1971,12 @@
 
   <!-- TAB 5: DEDICATED BLACKLIST REMOVAL & READY-TO-SEND APPEAL GENERATOR CENTER -->
   <section id="tab-delist" class="tab-page">
+
+    <div class="help-pill-row">
+      <button type="button" class="help-pill" onclick="openHelpSection('6-вкладка-4--выход-из-блэклистов')" title="Открыть встроенную инструкцию на разделе 6">
+        📖 Подробно в инструкции — раздел 6. Выход из блэклистов
+      </button>
+    </div>
     <div class="card" style="border:2px solid rgba(239,68,68,0.55);">
       <div class="card-header">
         <div>
@@ -1836,6 +2078,12 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 
   <!-- TAB 5.5: DOMAIN & IP SANCTIONS, OFAC CA POLICY & GEO-BLOCKING CHECKER -->
   <section id="tab-sanctions" class="tab-page">
+
+    <div class="help-pill-row">
+      <button type="button" class="help-pill" onclick="openHelpSection('7-вкладка-5--санкции-и-гео-блокировки')" title="Открыть встроенную инструкцию на разделе 7">
+        📖 Подробно в инструкции — раздел 7. Санкции и гео-блокировки
+      </button>
+    </div>
     <div class="card">
       <div class="card-header" style="flex-wrap:wrap;gap:12px;">
         <div>
@@ -1971,6 +2219,12 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
        v4.4: АВТООБНОВЛЯЕМАЯ АНТИСПАМ-БАЗА KCM С GITHUB
        ================================================================== -->
   <section id="tab-antispam" class="tab-page">
+
+    <div class="help-pill-row">
+      <button type="button" class="help-pill" onclick="openHelpSection('9-вкладка-7--антиспам-база-kcm')" title="Открыть встроенную инструкцию на разделе 9">
+        📖 Подробно в инструкции — раздел 9. Антиспам-база KCM
+      </button>
+    </div>
 
     <div class="card">
       <div class="card-header" style="flex-wrap:wrap;gap:12px;">
@@ -2124,6 +2378,12 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 
   <section id="tab-tools" class="tab-page">
 
+    <div class="help-pill-row">
+      <button type="button" class="help-pill" onclick="openHelpSection('10-вкладка-8--инструменты-админа')" title="Открыть встроенную инструкцию на разделе 10">
+        📖 Подробно в инструкции — раздел 10. Инструменты админа
+      </button>
+    </div>
+
     <!-- TOOL 1: RFC-822 EMAIL HEADER & HOP LATENCY ANALYZER -->
     <div class="card">
       <div class="card-header" style="flex-wrap:wrap;gap:10px;">
@@ -2231,6 +2491,49 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 
   </section>
 
+  <!-- TAB 9: BUILT-IN INSTRUCTION (полный ФАК, вкомпилированный в .exe) -->
+  <section id="tab-help" class="tab-page">
+
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:10px;">
+        <div>
+          <div class="card-title">📖 Встроенная инструкция — полный ФАК на русском</div>
+          <div class="card-subtitle" id="faqMeta">
+            Тот же документ, что лежит рядом с программой (<code>FAQ-Полная-инструкция.md</code>) — но всегда под рукой и с поиском.
+            Работает без интернета: текст вкомпилирован в <code>.exe</code> этой версии.
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="faqDownload('md')" title="Скачать инструкцию как Markdown-файл (для печати, почты, общего диска)">⬇ Скачать .md</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="faqDownload('html')" title="Скачать автономный HTML — открывается в любом браузере без программы">⬇ Скачать HTML</button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="faqPrint()" title="Печать или сохранение в PDF">🖨 Печать / PDF</button>
+        </div>
+      </div>
+
+      <div class="faq-toolbar">
+        <div class="faq-search-wrap">
+          <span class="faq-search-ico">🔍</span>
+          <input type="text" id="faqSearchInput" placeholder="Поиск по инструкции: сертификат, PTR, SPF, порт 4040, блэклист, санкции…"
+                 autocomplete="off" spellcheck="false">
+          <button type="button" class="faq-search-clear" id="faqSearchClear" onclick="faqClearSearch()" title="Очистить поиск">✕</button>
+        </div>
+        <span class="label-hint" id="faqSearchInfo" style="white-space:nowrap;"></span>
+        <button type="button" class="btn btn-outline btn-sm" onclick="faqScrollTop()" title="В начало инструкции">↑ Наверх</button>
+      </div>
+
+      <div class="faq-layout">
+        <aside class="faq-toc" id="faqToc" aria-label="Оглавление инструкции">
+          <div class="faq-toc-title">Оглавление</div>
+          <div id="faqTocList"><div class="hint-text" style="padding:6px 8px;">Загрузка…</div></div>
+        </aside>
+        <article class="faq-doc" id="faqDoc">
+          <div class="hint-text" style="padding:20px 0;">Загрузка инструкции…</div>
+        </article>
+      </div>
+    </div>
+
+  </section>
+
 </main>
 
 <!-- Persistent Developer Attribution & Icon Chooser Footer -->
@@ -2238,7 +2541,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:1380px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.4.3</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.5.0</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -2314,7 +2617,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 <script>
   // Версия интерфейса. Должна совпадать с appVersion в version.go
   // (проверяется тестом TestVersionConsistency).
-  const APP_VERSION = '4.4.3';
+  const APP_VERSION = '4.5.0';
   let systemState = null;
   let currentCert = null;
   let allCerts = [];
@@ -2359,6 +2662,12 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
     }
     if (tabName === 'antispam') {
       loadAntiSpamStatus();
+    }
+    if (tabName === 'help') {
+      loadHelpDoc().catch(err => {
+        const box = document.getElementById('faqDoc');
+        if (box) box.innerHTML = '<div class="alert alert-err">Не удалось открыть инструкцию: ' + escapeHtml(err.message) + '</div>';
+      });
     }
   }
   document.querySelectorAll('.nav-tab').forEach(btn => {
@@ -5185,6 +5494,286 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
   document.addEventListener('DOMContentLoaded', () => {
     wrapWideTables(document);
     tableObserver.observe(document.body, { childList: true, subtree: true });
+  });
+
+  // =========================================================================
+  // ВСТРОЕННАЯ ИНСТРУКЦИЯ (вкладка «ФАК»)
+  // Документ приходит с сервера (/api/help/doc) уже разобранным на разделы:
+  // html + оглавление + «плоский» текст для поиска. Ничего не грузится из сети,
+  // поэтому инструкция открывается и на сервере без интернета.
+  // =========================================================================
+  const faqState = { doc: null, loading: null, query: '', activeAnchor: '', plain: {}, tocText: {}, observer: null };
+
+  async function loadHelpDoc(force) {
+    if (faqState.doc && !force) return faqState.doc;
+    if (faqState.loading) return faqState.loading;
+    faqState.loading = (async () => {
+      try {
+        const r = await fetch('/api/help/doc');
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'не удалось загрузить инструкцию');
+        faqState.doc = d;
+        faqState.plain = {};
+        faqState.tocText = {};
+        (d.sections || []).forEach(sec => { faqState.plain[sec.anchor] = sec.plain || ''; });
+        renderFaqDoc(d);
+        return d;
+      } finally {
+        faqState.loading = null;
+      }
+    })();
+    return faqState.loading;
+  }
+
+  function faqSectionNumber(title) {
+    const m = /^(\d+(?:\.\d+)?)[.)]?\s+/.exec(title || '');
+    return m ? m[1] : '';
+  }
+
+  function renderFaqDoc(d) {
+    const docBox = document.getElementById('faqDoc');
+    const tocBox = document.getElementById('faqTocList');
+    if (!docBox || !tocBox) return;
+
+    const meta = document.getElementById('faqMeta');
+    if (meta) {
+      meta.innerHTML = 'Тот же документ, что лежит рядом с программой (<code>FAQ-Полная-инструкция.md</code>), — но всегда под рукой и с поиском. ' +
+        'Работает без интернета: текст вкомпилирован в <code>.exe</code> этой версии.' +
+        ' <span class="label-hint">Разделов: <strong>' + (d.sections || []).length + '</strong> • ' +
+        'объём: ' + Math.round((d.bytes || 0) / 1024) + ' КБ • SHA-256: <code>' + escapeHtml((d.sha256 || '').slice(0, 12)) + '…</code></span>';
+    }
+
+    // Разделы: каждый — отдельный блок, чтобы работали поиск и подсветка.
+    docBox.innerHTML = (d.sections || []).map(sec => {
+      const num = faqSectionNumber(sec.title);
+      return '<section class="faq-sec" data-anchor="' + escapeHtml(sec.anchor) + '">' + sec.html + '</section>';
+    }).join('') || '<div class="faq-empty">Инструкция пуста.</div>';
+
+    docBox.insertAdjacentHTML('beforeend', '<div class="faq-empty" id="faqEmpty" style="display:none;">Ничего не найдено. Попробуйте другое слово: <strong>PTR</strong>, <strong>SPF</strong>, <strong>порт 4040</strong>, <strong>блэклист</strong>.</div>');
+
+    // Оглавление: разделы 1-го уровня + подразделы.
+    // Сам блок «Содержание» в оглавление не попадает (он дублирует его же),
+    // а титульный раздел документа называется «Начало».
+    const tocSections = (d.sections || []).filter(sec => !/^Содержание$/i.test((sec.title || '').trim()));
+    tocBox.innerHTML = tocSections.map(sec => {
+      const num = faqSectionNumber(sec.title);
+      const isDocTitle = sec.level === 1 && !num;
+      const title = isDocTitle ? 'Начало документа' : (num ? sec.title.replace(/^\d+(?:\.\d+)?[.)]?\s+/, '') : sec.title);
+      const subs = (sec.subs || []).map(sb => {
+        const snum = faqSectionNumber(sb.text);
+        const stitle = snum ? sb.text.replace(/^\d+(?:\.\d+)?[.)]?\s+/, '') : sb.text;
+        return '<button type="button" class="faq-toc-sub" data-anchor="' + escapeHtml(sb.anchor) + '" title="' + escapeHtml(sb.text) + '">' +
+          (snum ? '<strong>' + escapeHtml(snum) + '</strong> ' : '') + escapeHtml(stitle) + '</button>';
+      }).join('');
+      faqState.tocText[sec.anchor] = ((sec.title || '') + ' ' + (sec.plain || '')).toLowerCase();
+      return '<div class="faq-toc-group" data-anchor="' + escapeHtml(sec.anchor) + '">' +
+        '<button type="button" class="faq-toc-item" data-anchor="' + escapeHtml(sec.anchor) + '" title="' + escapeHtml(sec.title) + '">' +
+        (num ? '<span class="faq-toc-num">' + escapeHtml(num) + '</span>' : '<span class="faq-toc-num">•</span>') +
+        escapeHtml(title) + '</button>' + subs + '</div>';
+    }).join('');
+
+    tocBox.classList.add('faq-toc-list-cols');
+    tocBox.querySelectorAll('[data-anchor]').forEach(btn => {
+      btn.addEventListener('click', () => faqScrollToAnchor(btn.dataset.anchor));
+    });
+    initFaqObserver();
+  }
+
+  function faqScrollToAnchor(anchor) {
+    const el = document.getElementById(anchor);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const sec = el.closest('.faq-sec');
+    if (sec) {
+      sec.classList.remove('faq-flash');
+      void sec.offsetWidth;
+      sec.classList.add('faq-flash');
+    }
+    faqSetActiveToc(anchor);
+  }
+
+  function faqSetActiveToc(anchor) {
+    faqState.activeAnchor = anchor;
+    const items = Array.from(document.querySelectorAll('#faqTocList .faq-toc-item'));
+    let matched = false;
+    items.forEach(b => {
+      const on = b.dataset.anchor === anchor;
+      b.classList.toggle('active', on);
+      if (on) matched = true;
+    });
+    if (matched) return;
+    // Перешли на подраздел (например, 3.6) — подсвечиваем его раздел целиком.
+    const el = document.getElementById(anchor);
+    const sec = el && el.closest ? el.closest('.faq-sec') : null;
+    if (sec) {
+      items.forEach(b => b.classList.toggle('active', b.dataset.anchor === sec.dataset.anchor));
+    }
+  }
+
+  function initFaqObserver() {
+    if (faqState.observer) faqState.observer.disconnect();
+    if (!('IntersectionObserver' in window)) return;
+    const items = Array.from(document.querySelectorAll('#faqDoc .faq-sec'));
+    faqState.observer = new IntersectionObserver(entries => {
+      const visible = entries.filter(e => e.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if (visible.length > 0) faqSetActiveToc(visible[0].target.dataset.anchor);
+    }, { rootMargin: '-84px 0px -70% 0px', threshold: 0 });
+    items.forEach(i => faqState.observer.observe(i));
+  }
+
+  // Открыть инструкцию сразу на нужном разделе (используется кнопками на вкладках).
+  async function openHelpSection(anchor) {
+    hideHelpFirstRunBanner(true);
+    switchTab('help');
+    try { await loadHelpDoc(); } catch (e) { showToast('Инструкция не загрузилась: ' + e.message, true); return; }
+    faqClearSearch();
+    requestAnimationFrame(() => faqScrollToAnchor(anchor));
+  }
+
+  function faqClearMarks(root) {
+    root.querySelectorAll('mark.md-hit').forEach(m => {
+      m.parentNode.replaceChild(document.createTextNode(m.textContent), m);
+    });
+    root.normalize();
+  }
+
+  function faqHighlight(root, q) {
+    if (!q) return 0;
+    const lower = q.toLowerCase();
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const targets = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.nodeValue && node.nodeValue.toLowerCase().includes(lower)) targets.push(node);
+    }
+    let hits = 0;
+    targets.forEach(textNode => {
+      const text = textNode.nodeValue;
+      const low = text.toLowerCase();
+      const frag = document.createDocumentFragment();
+      let i = 0;
+      let idx;
+      while ((idx = low.indexOf(lower, i)) !== -1) {
+        if (idx > i) frag.appendChild(document.createTextNode(text.slice(i, idx)));
+        const mark = document.createElement('mark');
+        mark.className = 'md-hit';
+        mark.textContent = text.slice(idx, idx + q.length);
+        frag.appendChild(mark);
+        i = idx + q.length;
+        hits++;
+      }
+      if (i < text.length) frag.appendChild(document.createTextNode(text.slice(i)));
+      textNode.parentNode.replaceChild(frag, textNode);
+    });
+    return hits;
+  }
+
+  function faqApplyFilter() {
+    const docBox = document.getElementById('faqDoc');
+    if (!docBox || !faqState.doc) return;
+    const raw = faqState.query.trim();
+    const q = raw.toLowerCase();
+    const clearBtn = document.getElementById('faqSearchClear');
+    if (clearBtn) clearBtn.classList.toggle('show', raw.length > 0);
+
+    let visible = 0;
+    faqClearMarks(docBox);
+    docBox.querySelectorAll('.faq-sec').forEach(sec => {
+      const text = (faqState.plain[sec.dataset.anchor] || '').toLowerCase();
+      const match = !q || text.includes(q);
+      sec.style.display = match ? '' : 'none';
+      if (match) visible++;
+    });
+    document.querySelectorAll('#faqTocList .faq-toc-group').forEach(g => {
+      const t = faqState.tocText[g.dataset.anchor] || '';
+      g.style.display = (!q || t.includes(q)) ? '' : 'none';
+    });
+
+    let hits = 0;
+    if (q) {
+      docBox.querySelectorAll('.faq-sec').forEach(sec => {
+        if (sec.style.display !== 'none') hits += faqHighlight(sec, raw);
+      });
+    }
+    const info = document.getElementById('faqSearchInfo');
+    if (info) info.textContent = q ? (visible + ' разд. • ' + hits + ' совпад.') : '';
+    const empty = document.getElementById('faqEmpty');
+    if (empty) empty.style.display = (q && visible === 0) ? 'block' : 'none';
+  }
+
+  function faqClearSearch() {
+    const input = document.getElementById('faqSearchInput');
+    faqState.query = '';
+    if (input) input.value = '';
+    faqApplyFilter();
+  }
+
+  function faqScrollTop() {
+    const box = document.getElementById('faqDoc');
+    if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function faqDownload(kind) {
+    const url = kind === 'html' ? '/api/help/print?download=1' : '/api/help/download';
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast(kind === 'html' ? 'Инструкция сохраняется как автономный HTML-файл' : 'Инструкция сохраняется как FAQ-Полная-инструкция.md');
+  }
+
+  function faqPrint() {
+    switchTab('help');
+    loadHelpDoc().then(() => {
+      setTimeout(() => {
+        try {
+          window.print();
+        } catch (e) {
+          showToast('Печать недоступна в этом окружении — сохраняю HTML для печати', true);
+          faqDownload('html');
+        }
+      }, 150);
+    }).catch(() => faqDownload('html'));
+  }
+
+  function hideHelpFirstRunBanner(remember) {
+    const b = document.getElementById('helpFirstRunBanner');
+    if (b) b.style.display = 'none';
+    if (remember) {
+      try { localStorage.setItem('kerio_help_hint_seen', '1'); } catch (e) { /* приватный режим */ }
+    }
+  }
+
+  (function initHelpHint() {
+    let seen = false;
+    try { seen = localStorage.getItem('kerio_help_hint_seen') === '1'; } catch (e) { /* нет localStorage */ }
+    const b = document.getElementById('helpFirstRunBanner');
+    if (b && !seen) b.style.display = 'block';
+  })();
+
+  // Ctrl+F внутри вкладки «ФАК» открывает поиск по инструкции, а не поиск по странице.
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+      const helpTab = document.getElementById('tab-help');
+      if (helpTab && helpTab.classList.contains('active')) {
+        e.preventDefault();
+        const input = document.getElementById('faqSearchInput');
+        if (input) { input.focus(); input.select(); }
+      }
+    }
+    if (e.key === 'Escape' && document.activeElement && document.activeElement.id === 'faqSearchInput') {
+      faqClearSearch();
+    }
+  });
+
+  let faqSearchTimer = null;
+  document.getElementById('faqSearchInput').addEventListener('input', (e) => {
+    faqState.query = e.target.value;
+    clearTimeout(faqSearchTimer);
+    faqSearchTimer = setTimeout(faqApplyFilter, 130);
   });
 
   initApp();

@@ -28,6 +28,13 @@ var embeddedIconICO []byte
 //go:embed ui/icons/*
 var embeddedIconsFS embed.FS
 
+// Встроенная инструкция: тот же FAQ.md, что лежит рядом с .exe и в ZIP-архиве.
+// Файл ui/FAQ.md — ТОЧНАЯ копия корневого FAQ.md (синхронизируется скриптом
+// sync-faq.sh, равенство проверяет TestEmbeddedFAQMatchesRoot).
+//
+//go:embed ui/FAQ.md
+var embeddedFAQMD []byte
+
 func iconSlugByID(iconID int) string {
 	switch iconID {
 	case 2:
@@ -833,6 +840,10 @@ func buildRouter() http.Handler {
 		zw := zip.NewWriter(&buf)
 		fw, _ := zw.Create("KerioCertManager.exe")
 		_, _ = fw.Write(exeBytes)
+		// Инструкция кладётся рядом с .exe и открывается кнопкой в самой программе.
+		if fq, err := zw.Create("FAQ-Полная-инструкция.md"); err == nil {
+			_, _ = fq.Write(embeddedFAQMD)
+		}
 		rw, _ := zw.Create("ПРОЧТИ_МЕНЯ_WINDOWS.txt")
 		_, _ = rw.Write([]byte(strings.Join([]string{
 			"======================================================================",
@@ -1185,6 +1196,9 @@ func buildRouter() http.Handler {
 		}
 		writeJSON(w, 200, res)
 	})
+
+	// Встроенная инструкция (ФАК) и её экспорт в .md / печатный HTML.
+	registerHelpRoutes(mux)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/ping" {
