@@ -5,9 +5,10 @@
       "name": "urlhaus",
       "url": "https://urlhaus.abuse.ch/downloads/text_recent/",
       "type": "urls",
-      "enabled": true,
+      "enabled": false,
       "limit": 8000,
-      "credit": "abuse.ch URLhaus (CC0)"
+      "credit": "abuse.ch URLhaus (CC0)",
+      "note": "HTTP 410: bulk-выгрузка URLhaus закрыта, включается вручную при наличии доступа"
     },
     {
       "name": "openphish",
@@ -27,10 +28,10 @@
     },
     {
       "name": "hagezi-tif",
-      "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/tif.txt",
-      "type": "plain-domains",
+      "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/tif.mini.txt",
+      "type": "adblock",
       "enabled": true,
-      "limit": 12000,
+      "limit": 14000,
       "credit": "HaGeZi Threat Intelligence Feed"
     },
     {
@@ -48,6 +49,22 @@
       "enabled": false,
       "limit": 8000,
       "credit": "StevenBlack/hosts (MIT)"
+    },
+    {
+      "name": "dogino-phishing-domains",
+      "url": "https://raw.githubusercontent.com/Dogino/Discord-Phishing-URLs/main/pihole-phishing-adlist.txt",
+      "type": "adblock",
+      "enabled": true,
+      "limit": 10000,
+      "credit": "Dogino/Discord-Phishing-URLs"
+    },
+    {
+      "name": "dogino-scam-urls",
+      "url": "https://raw.githubusercontent.com/Dogino/Discord-Phishing-URLs/main/scam-urls.txt",
+      "type": "urls",
+      "enabled": true,
+      "limit": 4000,
+      "credit": "Dogino/Discord-Phishing-URLs"
     }
   ]
 }
