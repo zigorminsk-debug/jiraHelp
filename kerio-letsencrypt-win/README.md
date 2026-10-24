@@ -1,4 +1,4 @@
-# Kerio SSL, Mail Audit, Delist, Sanctions & AntiSpam DB Suite v4.4 (Windows Desktop GUI)
+# Kerio SSL, Mail Audit, Delist, Sanctions & AntiSpam DB Suite v4.4.1 (Windows Desktop GUI)
 
 **Разработчик:** **Zakharevich Igor** • ✉ [`ziv@csl.by`](mailto:ziv@csl.by) • ☎ `+375293371412`
 
