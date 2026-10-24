@@ -63,6 +63,7 @@ jobs:
           mkdir -p "dist/Значки на выбор"
           cp KerioCertManager.exe dist/
           cp kerio-letsencrypt-win/README.md "dist/README-Инструкция.md"
+          cp FAQ.md "dist/FAQ-Полная-инструкция.md"
           cp kerio-letsencrypt-win/ui/icons/emerald-shield.ico "dist/Значки на выбор/1-Emerald-Shield-SSL.ico"
           cp kerio-letsencrypt-win/ui/icons/emerald-shield.png "dist/Значки на выбор/1-Emerald-Shield-SSL.png"
           cp kerio-letsencrypt-win/ui/icons/kerio-amber.ico "dist/Значки на выбор/2-Kerio-Amber-Key.ico"
