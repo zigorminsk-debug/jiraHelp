@@ -681,6 +681,34 @@
      Документ рендерится сервером из FAQ.md; здесь только оформление:
      оглавление слева, текст справа, поиск с подсветкой, печать в PDF.
      ===================================================================== */
+  /* Карточка «Где включается база в Kerio» (вкладка «Антиспам») */
+  .kerio-steps { display: grid; gap: 10px; margin-bottom: 14px; }
+  .kerio-step {
+    display: flex; gap: 11px; align-items: flex-start;
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 11px 13px;
+  }
+  .kerio-step-num {
+    flex: 0 0 24px; width: 24px; height: 24px; border-radius: 7px;
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 12px; font-weight: 800; display: inline-flex;
+    align-items: center; justify-content: center;
+  }
+  .kerio-step-title { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+  .kerio-step-body { font-size: 12.6px; line-height: 1.6; color: var(--text-secondary); }
+  .kerio-step-body code { font-size: 11.8px; }
+  .kerio-manage-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  }
+  .kerio-manage-col {
+    background: var(--bg-surface); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 12px 14px;
+  }
+  .kerio-manage-title { font-size: 12.6px; font-weight: 800; margin-bottom: 8px; }
+  .kerio-manage-list { margin: 0; padding-left: 18px; font-size: 12.4px; line-height: 1.65; color: var(--text-secondary); }
+  .kerio-manage-list li { margin: 3px 0; }
+  @media (max-width: 900px) { .kerio-manage-grid { grid-template-columns: 1fr; } }
+
   .help-pill-row { margin: 0 0 14px; }
   .help-pill {
     display: inline-flex; align-items: center; gap: 7px;
@@ -960,7 +988,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.5.1<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
+        <span class="brand-badge">Windows Native GUI v4.5.2<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -2297,6 +2325,107 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
       <div id="antiSpamActionResult" style="margin-top:14px;"></div>
     </div>
 
+    <!-- Где включается база в Kerio и как ей управлять из самого Kerio -->
+    <div class="card" id="antiSpamKerioControlCard">
+      <div class="card-header" style="flex-wrap:wrap;gap:10px;">
+        <div>
+          <div class="card-title">🎛 Где база включается в Kerio и как управлять ею из Kerio</div>
+          <div class="card-subtitle">
+            База KCM — это файл правил <code>kerio-antispam.cf</code> для встроенного SpamAssassin. Отдельной галочки «база KCM»
+            в Kerio нет: включают её <strong>общий спам-фильтр + файл в папке правил + перезапуск службы</strong>,
+            а из Kerio настраивают, как её очки влияют на письма.
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-primary btn-sm" onclick="antiSpamOpenKerioAdmin()" title="Открыть консоль администрирования Kerio Connect в браузере">🌐 Открыть WebAdmin Kerio</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="openHelpSection('917-включение-и-управление-базой-из-kerio-webadmin')">📖 Подробно — раздел 9.17</button>
+        </div>
+      </div>
+
+      <div class="alert alert-warn" style="margin-bottom:14px;">
+        <b>⚠️ Сначала проверьте главный выключатель.</b> В Kerio: <code>Конфигурация → Спам-фильтр → Фильтр спама</code> →
+        вкладка <b>«Оценка пригодности сообщений к спаму»</b> → галочка <b>«Включить оценку пригодности сообщений к спаму»</b> → <b>«Сохранить»</b>.
+        Если она снята, SpamAssassin не считает очки вообще — и база, и Kerio Anti-spam молчат, письма проходят без проверки.
+      </div>
+
+      <div class="kerio-steps">
+        <div class="kerio-step">
+          <div class="kerio-step-num">1</div>
+          <div>
+            <div class="kerio-step-title">Файл базы на месте</div>
+            <div class="kerio-step-body">
+              Вкладка «Антиспам» → «🔎 Что проверено»: должно быть <code>✅ Каталог правил найден:
+              …\plugins\spamassassin\rules</code>. Нет файла — установите кнопкой выше.
+              Kerio читает <b>только</b> файлы из этой папки.
+            </div>
+          </div>
+        </div>
+        <div class="kerio-step">
+          <div class="kerio-step-num">2</div>
+          <div>
+            <div class="kerio-step-title">Перезапуск службы (Kerio не перечитывает правила на лету)</div>
+            <div class="kerio-step-body">
+              WebAdmin → <b>Службы</b> → <b>Kerio Connect Engine</b> → «Остановить» / «Запустить»
+              (или на сервере <code>services.msc</code> → <b>KerioMailServer</b> → «Перезапустить»).
+              Почта недоступна 5–15 секунд — это нормально. В программе это делает галочка
+              «Перезапускать службу Kerio MailServer» после установки.
+            </div>
+          </div>
+        </div>
+        <div class="kerio-step">
+          <div class="kerio-step-num">3</div>
+          <div>
+            <div class="kerio-step-title">Пороги: как очки базы влияют на письма</div>
+            <div class="kerio-step-body">
+              <b>Показатель маркировки</b> — когда пометить как спам (оставьте 5–6).
+              <b>Показатель блокировки</b> — когда считать спамом; <b>не ставьте 6</b>, рекомендуем <b>10–15</b>,
+              иначе 1–2 правила базы вместе с чужим SPF уже «утопят» нормальное письмо.
+              Включите префикс темы <code>**SPAM**</code> и карантинный адрес — тогда письма не теряются.
+            </div>
+          </div>
+        </div>
+        <div class="kerio-step">
+          <div class="kerio-step-num">4</div>
+          <div>
+            <div class="kerio-step-title">Проверка результата</div>
+            <div class="kerio-step-body">
+              Откройте письмо в Kerio WebMail → «Показать исходное сообщение» → строка
+              <code>X-Spam-Status: Yes, hits=7.4 required=6.0 tests=KCM_SPAM_FROM_DOMAIN_001,…</code>.
+              Если в <code>tests=</code> есть <code>KCM_…</code> — база работает.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="kerio-manage-grid">
+        <div class="kerio-manage-col">
+          <div class="kerio-manage-title" style="color:#34d399;">✅ Управляется из Kerio</div>
+          <ul class="kerio-manage-list">
+            <li>Включить/выключить весь спам-фильтр (верхняя галочка)</li>
+            <li>Пороги маркировки и блокировки</li>
+            <li>Префикс темы, карантин, отказ отправителю</li>
+            <li>Белый список отправителей — вкладка <b>«Черные списки»</b></li>
+            <li>Свои правила с очками — вкладка <b>«Пользовательские правила»</b></li>
+            <li>Маршрутизация по <code>X-Spam-Status</code> — <b>«Фильтры сообщений»</b></li>
+          </ul>
+        </div>
+        <div class="kerio-manage-col">
+          <div class="kerio-manage-title" style="color:#f59e0b;">🔧 Управляется из программы</div>
+          <ul class="kerio-manage-list">
+            <li>Установка и обновление базы</li>
+            <li>Откат на предыдущую версию</li>
+            <li>Удаление базы (с резервной копией)</li>
+            <li>Список правил и групп, добавление своих доменов</li>
+            <li>Автообновление по расписанию Планировщика</li>
+          </ul>
+          <div class="hint-text" style="margin-top:8px;">
+            В Kerio <b>нет</b> интерфейса для содержимого <code>kerio-antispam.cf</code> — это нормально:
+            Kerio только исполняет правила SpamAssassin.
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="card" id="antiSpamPreviewCard" style="display:none;">
       <div class="card-header" style="flex-wrap:wrap;gap:10px;">
         <div>
@@ -2553,7 +2682,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:1380px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.5.1</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.5.2</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -2629,7 +2758,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 <script>
   // Версия интерфейса. Должна совпадать с appVersion в version.go
   // (проверяется тестом TestVersionConsistency).
-  const APP_VERSION = '4.5.1';
+  const APP_VERSION = '4.5.2';
   let systemState = null;
   let currentCert = null;
   let allCerts = [];
@@ -5387,6 +5516,24 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
   // Когда автоматика не нашла папку правил, показываем не общую фразу, а
   // конкретный список: какие пути проверены, что в них есть, что делать.
   // -------------------------------------------------------------------------
+  // Открыть консоль администрирования Kerio Connect (WebAdmin) в браузере.
+  // Адрес берём из полей вкладки «Установка в Kerio» — они же сохраняются в настройках.
+  function antiSpamOpenKerioAdmin() {
+    const hostEl = document.getElementById('kerioApiHost');
+    const portEl = document.getElementById('kerioApiPort');
+    let host = ((hostEl && hostEl.value) || '').trim() || '127.0.0.1';
+    const port = parseInt((portEl && portEl.value) || '4040', 10) || 4040;
+    // Если в поле «127.0.0.1» — подсказываем, что с другого ПК нужен реальный адрес.
+    const url = 'https://' + host + ':' + port + '/admin/';
+    try {
+      const w = window.open(url, '_blank');
+      if (!w) window.location.href = url;
+    } catch (e) {
+      window.location.href = url;
+    }
+    showToast('Открываю ' + url + ' — если браузер не открылся, скопируйте адрес вручную');
+  }
+
   async function antiSpamDiagnose(quiet) {
     const box = document.getElementById('antiSpamDiagBox');
     const dirs = antiSpamCollectDirs();

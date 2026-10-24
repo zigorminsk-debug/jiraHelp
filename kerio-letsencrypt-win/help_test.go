@@ -295,3 +295,32 @@ func TestUIHelpTabWiring(t *testing.T) {
 		}
 	}
 }
+
+// TestUIKerioControlCard — карточка «Где включается база в Kerio» должна
+// ссылаться на существующий раздел инструкции 9.17 и на кнопку WebAdmin.
+func TestUIKerioControlCard(t *testing.T) {
+	ui := readRepoFile(t, "ui/index.html")
+
+	for _, want := range []string{
+		`id="antiSpamKerioControlCard"`,
+		`function antiSpamOpenKerioAdmin(`,
+		`openHelpSection('917-включение-и-управление-базой-из-kerio-webadmin')`,
+		`Включить оценку пригодности сообщений к спаму`,
+		`Показатель блокировки`,
+		`X-Spam-Status`,
+		`файл правил <code>kerio-antispam.cf</code>`,
+	} {
+		if !strings.Contains(ui, want) {
+			t.Errorf("ui/index.html: нет %q — карточка управления из Kerio развалилась", want)
+		}
+	}
+
+	// Раздел 9.17 обязан существовать в самой инструкции.
+	anchors := map[string]bool{}
+	for _, h := range HelpDocument().Headings {
+		anchors[h.Anchor] = true
+	}
+	if !anchors["917-включение-и-управление-базой-из-kerio-webadmin"] {
+		t.Fatalf("в FAQ нет раздела 9.17 (якорь 917-включение-и-управление-базой-из-kerio-webadmin)")
+	}
+}
