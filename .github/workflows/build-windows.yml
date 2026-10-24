@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -72,6 +74,21 @@ jobs:
           cd dist
           zip -r ../KerioCertManager-Windows-x64.zip . > /dev/null
           cd ..
+
+      - name: Commit rebuilt binaries to the branch
+        if: github.event_name == 'push'
+        run: |
+          set -e
+          git config user.name "kerio-ci"
+          git config user.email "ci@csl.by"
+          git add -f KerioCertManager.exe KerioCertManager-Windows-x64.zip
+          if git diff --cached --quiet; then
+            echo "Binaries are up to date"
+            exit 0
+          fi
+          git commit -m "CI: rebuild KerioCertManager.exe from ${GITHUB_SHA::7}"
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
