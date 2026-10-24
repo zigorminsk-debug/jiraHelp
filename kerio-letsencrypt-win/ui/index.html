@@ -670,7 +670,8 @@
   }
   ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
-  html, body { max-width: 100%; overflow-x: hidden; }
+  /* clip, а не hidden: не создаёт scroll-контейнер и не ломает sticky-шапку */
+  html, body { max-width: 100%; overflow-x: clip; }
 
   /* Две подписи вкладки: короткая по умолчанию, полная — на очень широких
      мониторах (4K+), где все 8 длинных названий помещаются в одну строку. */
