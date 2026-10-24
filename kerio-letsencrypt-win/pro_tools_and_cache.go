@@ -116,6 +116,21 @@ type SavedUISettings struct {
 	AuditDomain      string `json:"auditDomain"`
 	AuditMailHost    string `json:"auditMailHost"`
 	AuditTargetIP    string `json:"auditTargetIp"`
+
+	// Автообновление программы (см. updater.go).
+	AutoCheckUpdates bool   `json:"autoCheckUpdates"`
+	LastUpdateCheck  string `json:"lastUpdateCheck,omitempty"`
+	SkippedVersion   string `json:"skippedVersion,omitempty"`
+
+	// Kerio Connect на Linux (удалённое управление по SSH, см. linux_remote.go).
+	LinuxHost      string `json:"linuxHost,omitempty"`
+	LinuxPort      int    `json:"linuxPort,omitempty"`
+	LinuxUser      string `json:"linuxUser,omitempty"`
+	LinuxKeyPath   string `json:"linuxKeyPath,omitempty"`
+	LinuxKerioDir  string `json:"linuxKerioDir,omitempty"`
+	LinuxService   string `json:"linuxService,omitempty"`
+	LinuxKnownHost string `json:"linuxKnownHost,omitempty"`
+	LinuxSudo      bool   `json:"linuxSudo"`
 }
 
 type AuditHistoryItem struct {
@@ -144,7 +159,9 @@ var settingsMu sync.Mutex
 func LoadSavedUISettings(baseDir string) SavedUISettings {
 	settingsMu.Lock()
 	defer settingsMu.Unlock()
-	var s SavedUISettings
+	// Автопроверка обновлений включена по умолчанию: администратор сервера
+	// обычно не следит за релизами, а узнавать о новой версии полезно.
+	s := SavedUISettings{AutoCheckUpdates: true}
 	b, err := os.ReadFile(filepath.Join(baseDir, "ui_settings.json"))
 	if err == nil {
 		_ = json.Unmarshal(b, &s)

@@ -1,10 +1,11 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package main
 
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
@@ -109,4 +110,16 @@ func PlatformApplyWindowIcon(_ int) {}
 
 func RunDesktopWindow(_ string) bool {
 	return false
+}
+
+// startDetached запускает новую копию программы после обновления
+// (на не-Windows системах файл не подменяется автоматически, но функция
+// нужна для единообразия).
+func startDetached(exe string, args []string) error {
+	cmd := exec.Command(exe, args...)
+	cmd.Dir = filepath.Dir(exe)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
 }

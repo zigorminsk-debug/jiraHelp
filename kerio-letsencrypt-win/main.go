@@ -472,7 +472,9 @@ func buildRouter() http.Handler {
 			})
 			return
 		}
-		var s SavedUISettings
+		// Частичное обновление: поля, которых нет в запросе, сохраняют
+		// прежние значения (например, флаги автообновления программы).
+		s := LoadSavedUISettings(defDir)
 		if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
 			writeErr(w, 400, err)
 			return
@@ -1279,6 +1281,9 @@ func buildRouter() http.Handler {
 	// Встроенная инструкция (ФАК) и её экспорт в .md / печатный HTML.
 	registerHelpRoutes(mux)
 
+	// v4.6.0: автообновление программы и управление Kerio на Linux по SSH.
+	registerV46Routes(mux)
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/ping" {
 			touchActivity()
@@ -1311,7 +1316,70 @@ func main() {
 	serverOnly := flag.Bool("server-only", false, "Не открывать окно браузера автоматически")
 	certsDirFlag := flag.String("certs-dir", "", "Папка хранения сертификатов")
 	antiSpamFlag := flag.Bool("antispam-update", false, "Тихое обновление антиспам-базы KCM с GitHub (для Планировщика Windows)")
+	versionFlag := flag.Bool("version", false, "Показать версию программы и выйти")
+	checkUpdateFlag := flag.Bool("check-update", false, "Проверить обновления программы и вывести результат в JSON")
+	installTasksFlag := flag.Bool("install-tasks", false, "Зарегистрировать задания автопродления и автообновления базы (Планировщик Windows или cron)")
+	removeTasksFlag := flag.Bool("remove-tasks", false, "Удалить задания автопродления и автообновления базы")
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("KerioCertManager %s (%s/%s)\n", appVersion, runtime.GOOS, runtime.GOARCH)
+		return
+	}
+
+	if *checkUpdateFlag {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		info, err := CheckForUpdate(ctx, DefaultCertsRoot())
+		cancel()
+		out, _ := json.MarshalIndent(info, "", "  ")
+		fmt.Println(string(out))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Ошибка проверки обновлений: %v\n", err)
+			os.Exit(2)
+		}
+		return
+	}
+
+	if *installTasksFlag {
+		msg1, err1 := PlatformInstallAutoRenewTask(24)
+		if err1 != nil {
+			fmt.Fprintf(os.Stderr, "Автопродление: %v\n", err1)
+		} else {
+			fmt.Println(msg1)
+		}
+		msg2, err2 := PlatformInstallAntiSpamTask(24)
+		if err2 != nil {
+			fmt.Fprintf(os.Stderr, "Антиспам-база: %v\n", err2)
+		} else {
+			fmt.Println(msg2)
+		}
+		if err1 != nil || err2 != nil {
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *removeTasksFlag {
+		msg1, err1 := PlatformRemoveAutoRenewTask()
+		msg2, err2 := PlatformRemoveAntiSpamTask()
+		if err1 != nil {
+			fmt.Fprintf(os.Stderr, "Автопродление: %v\n", err1)
+		} else {
+			fmt.Println(msg1)
+		}
+		if err2 != nil {
+			fmt.Fprintf(os.Stderr, "Антиспам-база: %v\n", err2)
+		} else {
+			fmt.Println(msg2)
+		}
+		if err1 != nil && err2 != nil {
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Убираем остатки прошлых автообновлений (*.exe.old, update-tmp).
+	CleanupOldBinaries()
 
 	if *antiSpamFlag {
 		certsDir := *certsDirFlag
@@ -1374,6 +1442,32 @@ func main() {
 	actualAddr := ln.Addr().String()
 	appURL := "http://" + actualAddr + "/"
 	logHub.Emit("info", "Программа Kerio Connect Let's Encrypt SSL Manager готова к работе.")
+
+	// Проверка обновлений «на старте» (не чаще раза в 6 часов, можно
+	// отключить в настройках). Работает в фоне, чтобы окно открылось сразу.
+	go func() {
+		time.Sleep(2500 * time.Millisecond)
+		certsDir := DefaultCertsRoot()
+		if !ShouldAutoCheck(certsDir) {
+			return
+		}
+		ctx, cancelCheck := context.WithTimeout(context.Background(), 40*time.Second)
+		defer cancelCheck()
+		info, err := CheckForUpdate(ctx, certsDir)
+		if err != nil {
+			logHub.Emit("warning", "Проверка обновлений не удалась (это не мешает работе): "+err.Error())
+			return
+		}
+		if info.Available {
+			if info.Skipped {
+				logHub.Emit("info", "Версия "+info.Latest+" доступна, но вы её пропустили.")
+				return
+			}
+			logHub.Emit("update", fmt.Sprintf("Доступна новая версия KerioCertManager %s — можно обновиться в один клик (у вас %s).", info.Latest, appVersion))
+		} else {
+			logHub.Emit("info", "Обновлений нет: у вас последняя версия "+appVersion+".")
+		}
+	}()
 
 	srv := &http.Server{
 		Handler: buildRouter(),

@@ -213,6 +213,12 @@ func installViaKerioFilesystem(rec *IssuedCertRecord, cfg KerioInstallConfig, lo
 	}
 
 	if cfg.RestartService {
+		// Службы может не быть вовсе: Kerio в Docker, нестандартная сборка,
+		// тестовый каталог. Тогда файлы уже на месте — это успех, а не ошибка.
+		if PlatformKerioServiceStatus() == "NOT_INSTALLED" {
+			log("warning", "Служба Kerio на этом компьютере не обнаружена — файлы установлены, перезапустите Kerio вручную.")
+			return fmt.Sprintf("Сертификат и ключ скопированы в %s (активный профиль: %s). Служба Kerio не найдена — перезапустите её вручную.", sslDir, activeBase), nil
+		}
 		log("info", "Запуск службы KerioMailServer с новым SSL-сертификатом...")
 		if err := PlatformControlKerioService("start"); err != nil {
 			return "", fmt.Errorf("файлы скопированы в %s, но не удалось перезапустить службу KerioMailServer: %w", sslDir, err)

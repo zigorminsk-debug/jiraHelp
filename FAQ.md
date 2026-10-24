@@ -1,4 +1,4 @@
-# 📘 Большой ФАК: KerioCertManager v4.5.2 — всё простыми словами
+# 📘 Большой ФАК: KerioCertManager v4.6.0 — всё простыми словами
 
 **Разработчик:** Zakharevich Igor · ✉ ziv@csl.by · ☎ +375293371412
 
@@ -27,6 +27,8 @@
 17. [Словарик](#17-словарик)
 18. [Шпаргалка по всем кнопкам](#18-шпаргалка-по-всем-кнопкам)
 19. [Встроенная инструкция (эта вкладка)](#19-встроенная-инструкция-эта-вкладка)
+20. [Kerio Connect на Linux](#20-kerio-connect-на-linux)
+21. [Установщик и автообновление программы](#21-установщик-и-автообновление-программы)
 
 **Обозначения в тексте:**
 
@@ -51,7 +53,9 @@
 - **проверяет почту** по 20+ параметрам и пишет по-русски, что именно сломано и как починить;
 - помогает **выйти из спам-чёрных списков**, генерируя готовые письма в поддержку;
 - проверяет **санкционные и гео-ограничения** для домена и IP;
-- **ставит и обновляет антиспам-базу** в Kerio Connect с GitHub.
+- **ставит и обновляет антиспам-базу** в Kerio Connect с GitHub;
+- **работает с Kerio Connect на Linux** — и на самом Linux-сервере, и по SSH с Windows-машины;
+- **сама проверяет обновления** и обновляется в один клик (или ставится установщиком `Setup.exe`).
 
 ### 1.2 Аналогии, чтобы стало понятно
 
@@ -131,9 +135,9 @@
 
 Версию можно посмотреть в трёх местах — они всегда должны совпадать:
 
-1. **В окне программы** — плашка в шапке: `Windows Native GUI v4.5.2` и та же версия в подвале.
-2. **По файлу** — правой кнопкой по `KerioCertManager.exe` → **Свойства → Подробно**: `Версия файла` и `Версия продукта` = **4.5.2.0**.
-3. **В интерфейсе Kerio** — в журнале подключения: `KerioCertManager/4.5.2 (Windows)`.
+1. **В окне программы** — плашка в шапке: `Windows Native GUI v4.6.0` и та же версия в подвале.
+2. **По файлу** — правой кнопкой по `KerioCertManager.exe` → **Свойства → Подробно**: `Версия файла` и `Версия продукта` = **4.6.0.0**.
+3. **В интерфейсе Kerio** — в журнале подключения: `KerioCertManager/4.6.0 (Windows)`.
 
 Если версии не совпадают, значит файл скачан не оттуда или сборка устарела — скачайте заново и замените `.exe` целиком (рядом лежащая папка `certs` сохранится).
 
@@ -982,6 +986,155 @@ abuse.ch 21 октября 2026 закрыл бесплатные выгрузк
 
 ---
 
+### 9.18 Куда именно класть антиспам-базу на Linux
+
+Это самый частый вопрос: «файл скачал, а куда его положить?». Ответ короткий — в каталог **правил SpamAssassin**, который находится внутри каталога Kerio Connect.
+
+**Основной путь (99 % установок):**
+
+```
+/opt/kerio/mailserver/plugins/spamassassin/rules/kerio-antispam.cf
+```
+
+**Если такого каталога нет** (старые сборки Kerio 8–9):
+
+```
+/opt/kerio/mailserver/plugins/spamserver/spamassassin/rules/kerio-antispam.cf
+```
+
+Если Kerio ставили не в `/opt`, смотрите `/usr/local/kerio/mailserver/...` — программа проверяет оба варианта автоматически.
+
+**Как убедиться, что вы нашли правильное место**
+
+Выполните на сервере от root:
+
+```bash
+ls -la /opt/kerio/mailserver/plugins/spamassassin/rules | head -30
+```
+
+В этой папке уже лежат штатные файлы Kerio (`*.cf`, `*.cf.new`, иногда `user_prefs`). Если папка пустая — перепутали путь. Быстрая проверка «где вообще лежат правила»:
+
+```bash
+find /opt /usr/local -type d -path "*spamassassin/rules" 2>/dev/null
+```
+
+#### Права и владелец — самое важное
+
+Kerio Connect на Linux работает **не от root**, а от пользователя `kerio` (иногда `kerio-connect`). Поэтому:
+
+```bash
+# владелец файла и папки
+chown kerio:kerio /opt/kerio/mailserver/plugins/spamassassin/rules/kerio-antispam.cf
+chown kerio:kerio /opt/kerio/mailserver/plugins/spamassassin/rules
+
+# права: файл читают все служебные процессы Kerio → 644, каталог → 755
+chmod 644 /opt/kerio/mailserver/plugins/spamassassin/rules/kerio-antispam.cf
+chmod 755 /opt/kerio/mailserver/plugins/spamassassin/rules
+```
+
+| Права | Почему так | Что будет при других |
+|---|---|---|
+| файл `644` (`-rw-r--r--`) | Kerio читает его под своим пользователем | `600` — Kerio не увидит файл, правило «молча не работает» |
+| каталог `755` (`drwxr-xr-x`) | нужно право «войти» в каталог | `700` — чтение изнутри запрещено для не-владельца |
+| владелец `kerio:kerio` | так живут все штатные файлы Kerio | `root:root` при `644` тоже работает, но при обновлении Kerio права могут сброситься |
+
+Проверить, от кого работает сервер:
+
+```bash
+ps -o user,cmd -C mailserver
+# или
+systemctl show kerio-connect -p User
+```
+
+💡 **Про `sudo -u`.** Класть файл нужно **от root** (только root может писать в `/opt/kerio`), а вот проверять чтение полезно «глазами Kerio»:
+
+```bash
+sudo -u kerio head -5 /opt/kerio/mailserver/plugins/spamassassin/rules/kerio-antispam.cf
+```
+
+Если команда выполнилась и показала `# KCM ...` — Kerio файл увидит. Если ответ «Permission denied» — вернитесь к `chown`/`chmod` выше.
+
+#### SELinux (Red Hat / Alma / Rocky / CentOS)
+
+При включённом SELinux файл, скопированный «вручную», получает неверную метку и не читается. Признак: права в порядке, а правила не работают, в `/var/log/audit/audit.log` есть `denied` для `mailserver`.
+
+```bash
+getenforce                            # Enforcing?
+ls -Z /opt/kerio/mailserver/plugins/spamassassin/rules | head
+restorecon -Rv /opt/kerio/mailserver/plugins/spamassassin/rules
+```
+
+Если `restorecon` не помог (Kerio стоит вне стандартных путей), скопируйте метку с соседнего штатного файла:
+
+```bash
+chcon --reference=/opt/kerio/mailserver/plugins/spamassassin/rules/*.cf       /opt/kerio/mailserver/plugins/spamassassin/rules/kerio-antispam.cf
+```
+
+Крайний вариант (только на время диагностики) — `setenforce 0`, проверить, заработало ли, и **вернуть** `setenforce 1`.
+
+#### Kerio Connect в Docker
+
+Если Kerio запущен в контейнере, файл надо класть **внутрь контейнера** (или в смонтированный том — тогда на хосте, в каталоге тома):
+
+```bash
+docker ps --format '{{.Names}}	{{.Image}}' | grep -i kerio
+docker cp kerio-antispam.cf <контейнер>:/opt/kerio/mailserver/plugins/spamassassin/rules/
+docker exec -u root <контейнер> chown kerio:kerio /opt/kerio/mailserver/plugins/spamassassin/rules/kerio-antispam.cf
+docker exec -u root <контейнер> chmod 644 /opt/kerio/mailserver/plugins/spamassassin/rules/kerio-antispam.cf
+docker restart <контейнер>
+```
+
+⚠️ `docker cp` живёт до пересоздания контейнера. Для постоянного хранения положите файл в том, который смонтирован в `/opt/kerio` (посмотрите `docker inspect <контейнер> | grep -A3 Mounts`).
+
+#### Перезапуск и проверка
+
+Правила `.cf` читаются **при старте** SpamAssassin, поэтому после установки:
+
+```bash
+systemctl restart kerio-connect     # или: /etc/init.d/kerio-connect restart
+systemctl is-active kerio-connect   # ждём: active
+```
+
+Проверка «правило реально работает»: отправьте себе тестовое письмо с явно спамным содержимым и откройте в Kerio WebAdmin **исходное сообщение** — в заголовках должна появиться строка вида:
+
+```
+X-Spam-Status: Yes, hits=7.4 required=6.0 tests=KCM_SPAM_FROM_DOMAIN,KCM_PHISH_URL
+```
+
+Если `X-Spam-Status` есть, но без `KCM_…` — файл на месте, но не прочитан: вернитесь к правам/SELinux и перезапустите службу ещё раз.
+
+#### Как это сделать, не заходя на сервер
+
+Вкладка **🧰 Инструменты** → карточка **🐧 Kerio Connect на Linux**. Укажите адрес, логин и пароль (или ключ), нажмите **🛡 Установить антиспам-базу** — программа сама найдёт каталог, загрузит файл, сверит SHA-256 **на сервере**, выставит права и перезапустит службу. Подробно — [раздел 20](#20-kerio-connect-на-linux).
+
+Если SSH недоступен: кнопка **📥 Скачать shell-скрипт** отдаёт `install-kcm-antispam.sh`, который делает всё то же самое на сервере одной командой `sudo sh install-kcm-antispam.sh`.
+
+#### Автообновление базы на Linux (cron)
+
+Из программы (нужен root на сервере): вкладка «Антиспам» → **✅ Включить автообновление**. Будет создан файл `/etc/cron.d/kerio-cert-manager-antispam`:
+
+```
+10 4 * * * root /opt/kerio-cert-manager/KerioCertManager --antispam-update >/dev/null 2>&1
+```
+
+Вручную то же самое:
+
+```bash
+sudo /opt/kerio-cert-manager/KerioCertManager --antispam-update
+```
+
+#### Откат
+
+Каждая установка сохраняет предыдущую версию рядом с файлом (`kerio-antispam.cf.backup-YYYYMMDD-HHMMSS`) — вернуть можно так:
+
+```bash
+ls /opt/kerio/mailserver/plugins/spamassassin/rules/kerio-antispam.cf.backup-*
+sudo cp -p /opt/kerio/mailserver/plugins/spamassassin/rules/kerio-antispam.cf.backup-20261024-041000            /opt/kerio/mailserver/plugins/spamassassin/rules/kerio-antispam.cf
+sudo systemctl restart kerio-connect
+```
+
+---
+
 ## 10. Вкладка 8 — Инструменты админа
 
 ### 10.1 Анализатор заголовков письма (RFC-822)
@@ -1048,6 +1201,12 @@ abuse.ch 21 октября 2026 закрыл бесплатные выгрузк
 | `KerioCertManager.exe --server-only` | Запустить только локальный сервер без окна (для отладки/превью) |
 | `KerioCertManager.exe --listen 127.0.0.1:18080` | Явно указать адрес и порт интерфейса |
 | `KerioCertManager.exe --certs-dir D:\certs` | Указать папку сертификатов |
+| `KerioCertManager.exe --version` | Показать версию и выйти |
+| `KerioCertManager.exe --check-update` | Проверить обновления и напечатать JSON (для мониторинга) |
+| `KerioCertManager.exe --install-tasks` | Создать задания автопродления и автообновления базы (Планировщик или cron) |
+| `KerioCertManager.exe --remove-tasks` | Удалить эти задания |
+
+На Linux те же флаги работают без изменений (например, `sudo ./KerioCertManager --install-tasks` создаст файлы в `/etc/cron.d`).
 
 Пример создания задания вручную (если нужно своё расписание):
 
@@ -1073,6 +1232,10 @@ schtasks /Create /F /RU SYSTEM /RL HIGHEST /TN MyAntiSpamUpdate ^
 | `certs\antispam\backup\` | Резервные копии предыдущих версий базы |
 | `C:\Program Files\Kerio\MailServer\plugins\spamassassin\rules\kerio-antispam.cf` | Установленная база в Kerio |
 | `C:\Program Files\Kerio\MailServer\sslcert\` | Сертификаты, которые использует Kerio |
+| `/opt/kerio/mailserver/plugins/spamassassin/rules/kerio-antispam.cf` | Установленная база в Kerio **на Linux** |
+| `/opt/kerio/mailserver/sslcert/` | Сертификаты Kerio **на Linux** (`server.crt`, `server.key`) |
+| `/etc/cron.d/kerio-cert-manager-autorenew` | Задание автопродления на Linux |
+| `/etc/cron.d/kerio-cert-manager-antispam` | Задание обновления базы на Linux |
 
 > ⚠️ В папке `certs` лежат **приватные ключи**. Не копируйте её в облака/мессенджеры. Сделайте архив с паролем, если нужно передать.
 
@@ -1104,6 +1267,11 @@ schtasks /Create /F /RU SYSTEM /RL HIGHEST /TN MyAntiSpamUpdate ^
 | **Антивирус ругается на exe** | Это ложное срабатывание (Go-бинарник без подписи). Добавить в исключения; собрать самому из исходников при недоверии |
 | **Забыл пароль администратора Kerio** | Программа его не хранит. Сброс — через Kerio WebAdmin/службу, не через программу |
 | **Кириллический домен не принимается** | Программа сама переводит в Punycode; убедитесь, что в DNS создана запись для `xn--...` |
+| **Баннер обновления не появляется** | Проверка выключена, прошло меньше 6 часов или нет доступа к GitHub → «🧰 Инструменты → 🔍 Проверить сейчас» |
+| **Обновление не может заменить файл** | Программа в `Program Files`, запущена без прав администратора → закройте и запустите от имени Администратора |
+| **SSH: `Permission denied (publickey,password)`** | Неверный логин/ключ или вход закрыт → см. 20.4 и 20.9 |
+| **SSH: `sudo: a terminal is required`** | Входите под `root` или настройте `NOPASSWD` → см. 20.9 |
+| **Linux: база установлена, но нет `KCM_…`** | Права/SELinux/не перезапустили службу → см. 9.18 |
 
 ---
 
@@ -1209,6 +1377,16 @@ schtasks /Create /F /RU SYSTEM /RL HIGHEST /TN MyAntiSpamUpdate ^
 | 🔬 **Проверить письмо по антиспам-базе** | Антиспам | Dry-run письма |
 | 🔬 **Разобрать маршрут письма** | Инструменты | Анализ заголовков |
 | 💾 **Скачать пакет DNS-записей** | Инструменты | Готовые DNS-записи |
+| ⬇ **Обновить сейчас** | Баннер сверху | Скачать обновление, проверить SHA-256 и перезапуститься |
+| **Пропустить версию** / **✕** | Баннер сверху | Не напоминать о версии / скрыть до перезапуска |
+| 🔍 **Проверить сейчас** | Инструменты | Ручная проверка обновлений программы |
+| ↩ **Сбросить пропущенные версии** | Инструменты | Снова показывать пропущенную версию |
+| 🧹 **Почистить временные файлы** | Инструменты | Удалить `*.exe.old` и `update-tmp` |
+| 🐧 **Проверить сервер** | Инструменты (Linux) | Подключиться по SSH и показать каталоги/службу |
+| 🛡 **Установить антиспам-базу** | Инструменты (Linux) | Залить `.cf` в `/opt/kerio/mailserver/...` по SSH |
+| 🔐 **Установить сертификат** | Инструменты (Linux) | Положить `server.crt`/`server.key` в `sslcert` по SSH |
+| 🔄 **Перезапустить Kerio** | Инструменты (Linux) | `systemctl restart kerio-connect` по SSH |
+| 📥 **Скачать shell-скрипт** | Инструменты (Linux) | `install-kcm-antispam.sh` для установки без SSH |
 
 ---
 
@@ -1260,6 +1438,363 @@ schtasks /Create /F /RU SYSTEM /RL HIGHEST /TN MyAntiSpamUpdate ^
 
 ---
 
+## 20. Kerio Connect на Linux
+
+Раньше программа была «только для Windows»: она искала Kerio в `C:\Program Files\Kerio\MailServer` и перезапускала службу через `sc`. Но **большинство установок Kerio Connect в мире — Linux**, и админ часто сидит за Windows. В версии 4.6.0 это исправлено двумя способами.
+
+### 20.1 Два способа «дружить» с Linux
+
+| Способ | Когда подходит | Что нужно |
+|---|---|---|
+| **A. Программа на Windows → Kerio на Linux по SSH** | Рабочее место админа — Windows, сервер — Linux | Доступ по SSH (порт 22) с машины админа до сервера |
+| **B. Программа прямо на Linux-сервере** | Сервер без Windows рядом, или хочется всё в одном месте | Сборка под Linux, запуск с `--server-only` |
+
+Оба способа работают с теми же каталогами Kerio и той же службой `kerio-connect` — разница только в том, где запущена программа.
+
+### 20.2 Где Kerio Connect живёт на Linux
+
+| Что | Путь по умолчанию | Как проверить |
+|---|---|---|
+| Каталог установки | `/opt/kerio/mailserver` | `ls -la /opt/kerio/mailserver` |
+| Альтернатива | `/usr/local/kerio/mailserver` | `ls -la /usr/local/kerio/mailserver` |
+| Бинарник сервера | `/opt/kerio/mailserver/mailserver` | `ps -o user,cmd -C mailserver` |
+| Правила SpamAssassin | `/opt/kerio/mailserver/plugins/spamassassin/rules` | `ls` — там лежат `*.cf` |
+| Альтернатива (старые сборки) | `.../plugins/spamserver/spamassassin/rules` | `find /opt -type d -path "*spamassassin/rules"` |
+| Сертификаты SSL | `/opt/kerio/mailserver/sslcert` | `ls -la .../sslcert` |
+| Конфигурация | `/opt/kerio/mailserver/mailserver.cfg` | `grep -i ssl .../mailserver.cfg` |
+| Логи | `/opt/kerio/mailserver/store/logs` (и `syslog`) | `tail -f /var/log/messages` |
+| Служба systemd | `kerio-connect.service` | `systemctl status kerio-connect` |
+| Служба init.d | `/etc/init.d/kerio-connect` | `ls -la /etc/init.d/kerio*` |
+
+💡 На некоторых сборках служба называется `kerio` или `keriomailserver` — программа проверяет все три имени.
+
+### 20.3 Управление службой
+
+```bash
+systemctl status kerio-connect      # состояние
+sudo systemctl restart kerio-connect  # перезапуск (после новых правил/сертификата)
+sudo systemctl stop kerio-connect     # остановка (на время ручной замены sslcert)
+sudo systemctl start kerio-connect    # запуск
+journalctl -u kerio-connect -n 100 --no-pager   # последние 100 строк лога
+```
+
+Если systemd нет (старый дистрибутив, OpenVZ-контейнер):
+
+```bash
+sudo /etc/init.d/kerio-connect restart
+sudo service kerio-connect restart
+```
+
+⚠️ **Не убивайте процесс через `kill -9`.** Kerio держит состояние в памяти; жёсткое убийство может потребовать переиндексации почтовых ящиков.
+
+### 20.4 Вариант A: управление по SSH из Windows
+
+Откройте вкладку **🧰 Инструменты** → карточка **🐧 Kerio Connect на Linux**.
+
+**Шаг 1. Заполнить подключение.** Сервер (IP или имя), порт (по умолчанию 22), пользователь (`root` или ваш админский), пароль **или** путь к приватному ключу. Пароль нигде не сохраняется — он живёт в памяти только на время операции.
+
+**Шаг 2. Нажать «🔍 Проверить сервер».** Программа подключится и покажет:
+
+- версию ОС и ядра;
+- каталог Kerio и каталог правил SpamAssassin (найденные автоматически);
+- имя службы и её состояние (`active` / `inactive`);
+- установлена ли уже база и какого размера;
+- отпечаток ключа сервера (SHA256) — при следующем подключении программа сравнит его и предупредит, если сервер подменили.
+
+**Шаг 3. Нажать «🛡 Установить антиспам-базу».** Что произойдёт на сервере:
+
+1. файл `kerio-antispam.cf` будет загружен в каталог правил;
+2. рядом сохранится резервная копия предыдущей версии;
+3. SHA-256 будет посчитан **на сервере** и сверен с локальным (защита от «битой» передачи);
+4. права выставляются автоматически (`644`, владелец `kerio:kerio`);
+5. служба `kerio-connect` перезапускается.
+
+**Шаг 4. Проверить результат.** В журнале карточки будет строка вида:
+
+```
+Файл загружен: /opt/kerio/mailserver/plugins/spamassassin/rules/kerio-antispam.cf (185 432 байт), SHA-256 подтверждён на сервере.
+Служба kerio-connect перезапущена — правила применены.
+```
+
+**Кнопка «🔐 Установить сертификат»** кладёт `server.crt` и `server.key` выбранного сертификата в `/opt/kerio/mailserver/sslcert` с правами `644` / `600` и владельцем `kerio:kerio`, после чего (по галочке) перезапускает службу.
+
+**Кнопка «🔄 Перезапустить Kerio»** — просто `systemctl restart kerio-connect` (или init.d-скрипт) с понятной ошибкой, если прав не хватает.
+
+**Кнопка «📥 Скачать shell-скрипт»** — файл `install-kcm-antispam.sh`. Он делает то же самое, но **на самом сервере**, без SSH из программы: полезно в закрытом контуре, где открыты только 80/443.
+
+```bash
+sudo sh install-kcm-antispam.sh
+# или с локальным файлом (без интернета):
+sudo sh install-kcm-antispam.sh ./kerio-antispam.cf
+```
+
+#### Что нужно на стороне сервера, чтобы SSH работал
+
+```bash
+# 1. SSH-сервер запущен
+systemctl status ssh      # Debian/Ubuntu
+systemctl status sshd     # RHEL-семейство
+
+# 2. Вход root разрешён (или используйте обычного пользователя + sudo)
+grep -E "^(PermitRootLogin|PasswordAuthentication)" /etc/ssh/sshd_config
+
+# 3. Порт не закрыт фаерволом
+firewall-cmd --list-ports            # firewalld
+ufw status                           # ufw
+
+# 4. Пользователь может sudo без пароля (если входите не root)
+sudo -n true && echo "sudo без пароля работает"
+```
+
+💡 Галочка «Использовать `sudo -n`» включает режим, когда программа выполняет команды через `sudo -n` (без запроса пароля). Если на сервере `sudo` требует пароль — либо входите под `root`, либо добавьте строку в `sudoers`:
+
+```
+kcmadm ALL=(ALL) NOPASSWD: /bin/systemctl restart kerio-connect, /usr/bin/install, /bin/chown, /bin/chmod
+```
+
+### 20.5 Вариант B: программа прямо на Linux
+
+Программа собирается под Linux без внешних зависимостей (один бинарник):
+
+```bash
+# из исходников (Go 1.22+)
+git clone https://github.com/zigorminsk-debug/jiraHelp
+cd jiraHelp/kerio-letsencrypt-win
+go build -mod=vendor -o KerioCertManager .
+sudo install -m 0755 KerioCertManager /opt/kerio-cert-manager/KerioCertManager
+```
+
+Запуск как сервиса (без окна, интерфейс — в браузере по адресу `http://127.0.0.1:17840`):
+
+```bash
+sudo /opt/kerio-cert-manager/KerioCertManager --server-only
+```
+
+Готовый unit для systemd — `/etc/systemd/system/kerio-cert-manager.service`:
+
+```ini
+[Unit]
+Description=KerioCertManager (SSL + antispam for Kerio Connect)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/kerio-cert-manager/KerioCertManager --server-only --listen 127.0.0.1:17840
+Restart=on-failure
+RestartSec=5
+# сертификаты и настройки лежат рядом с бинарником
+WorkingDirectory=/opt/kerio-cert-manager
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now kerio-cert-manager
+systemctl status kerio-cert-manager
+```
+
+⚠️ Интерфейс слушает **только localhost**. Если нужен доступ с другого компьютера — не открывайте порт в интернет, а используйте SSH-туннель:
+
+```bash
+ssh -L 17840:127.0.0.1:17840 admin@mail.company.by
+# затем в браузере на своей машине: http://127.0.0.1:17840
+```
+
+🖥️ На Linux нет WebView2-окна (оно есть только в Windows-сборке), поэтому интерфейс открывается в браузере. Это ожидаемо.
+
+### 20.6 Сертификаты на Linux
+
+Программа кладёт в `/opt/kerio/mailserver/sslcert` два файла:
+
+| Файл | Что внутри | Права |
+|---|---|---|
+| `server.crt` | сертификат + цепочка (fullchain) | `644`, владелец `kerio:kerio` |
+| `server.key` | приватный ключ (RSA 2048, PKCS#1) | `600`, владелец `kerio:kerio` |
+
+Вручную то же самое:
+
+```bash
+sudo install -m 644 -o kerio -g kerio server.crt /opt/kerio/mailserver/sslcert/server.crt
+sudo install -m 600 -o kerio -g kerio server.key /opt/kerio/mailserver/sslcert/server.key
+sudo systemctl restart kerio-connect
+```
+
+Дальше в Kerio WebAdmin: **Конфигурация → SSL-сертификаты → Добавить → Импорт из файла** → выберите `server.crt` и `server.key` (либо «Использовать существующий» — Kerio подхватит файлы из `sslcert`). Подробнее про окно Kerio — [раздел 9.17](#917-включение-и-управление-базой-из-kerio-webadmin) и [раздел 4](#4-вкладка-2--установка-в-kerio-connect).
+
+⚠️ Имя активного профиля может быть не `server`, а `cert_1` — тогда Kerio читает `cert_1.crt`/`cert_1.key`. Посмотреть активное имя:
+
+```bash
+grep -i -A3 "ssl" /opt/kerio/mailserver/mailserver.cfg | head -20
+```
+
+### 20.7 Задания по расписанию (cron)
+
+| Задание | Файл | Когда запускается |
+|---|---|---|
+| Автопродление сертификатов | `/etc/cron.d/kerio-cert-manager-autorenew` | ежедневно в 03:15 |
+| Обновление антиспам-базы | `/etc/cron.d/kerio-cert-manager-antispam` | ежедневно в 04:10 |
+
+Включить/выключить можно из интерфейса (кнопки «Включить автопродление» и «Включить автообновление») либо командой:
+
+```bash
+sudo /opt/kerio-cert-manager/KerioCertManager --install-tasks   # создать оба задания
+sudo /opt/kerio-cert-manager/KerioCertManager --remove-tasks    # удалить
+```
+
+Проверить, что задания есть:
+
+```bash
+ls -la /etc/cron.d/kerio-cert-manager-*
+cat /etc/cron.d/kerio-cert-manager-antispam
+```
+
+Проверить, что задание реально сработало:
+
+```bash
+grep kerio-cert-manager /var/log/cron        # RHEL-семейство
+grep CRON /var/log/syslog | grep kerio       # Debian/Ubuntu
+```
+
+⚠️ Файлы в `/etc/cron.d` должны принадлежать `root` и **не** быть доступны на запись группе/остальным (`644`), иначе cron их игнорирует. В конце файла обязательна пустая строка.
+
+### 20.8 Порты и фаервол
+
+| Порт | Зачем | Откуда должен быть доступен |
+|---|---|---|
+| 22 | SSH (управление из программы) | только с вашей рабочей машины |
+| 80 / 443 | сайт и Let's Encrypt (HTTP-01 / TLS-ALPN-01) | из интернета |
+| 25 / 465 / 587 / 993 / 995 / 143 | почта | из интернета |
+| 4040 | Kerio WebAdmin / Admin API | только из вашей сети |
+| 17840 | локальный интерфейс KerioCertManager | только `127.0.0.1` |
+
+Открыть порты (примеры):
+
+```bash
+# firewalld
+sudo firewall-cmd --permanent --add-service=http --add-service=https --add-service=smtp --add-service=smtps
+sudo firewall-cmd --reload
+
+# ufw
+sudo ufw allow 80,443/tcp
+sudo ufw allow 25,465,587,993,995/tcp
+sudo ufw reload
+```
+
+Если Let's Encrypt не может достучаться по порту 80 (провайдер режет), используйте **DNS-01** — он работает без открытых портов (см. раздел 3.6).
+
+### 20.9 Типичные ошибки на Linux
+
+| Сообщение / симптом | Причина | Решение |
+|---|---|---|
+| `Permission denied (publickey,password)` | неверный логин/ключ, или вход закрыт | проверьте `sshd_config`, попробуйте `ssh -v user@host` в терминале |
+| `sudo: a terminal is required to read the password` | `sudo` требует пароль | входите под `root` или настройте `NOPASSWD` (см. 20.4) |
+| `sudo: sorry, you must have a tty to run sudo` | в `sudoers` стоит `requiretty` | закомментируйте `Defaults requiretty` или используйте `root` |
+| `Host key verification failed` | ключ сервера изменился | если сервер не переустанавливали — проверьте, не подменён ли хост; после переустановки предупреждение ожидаемо |
+| `Нет связи с host:22` | фаервол/DNS/неверный порт | `nc -vz host 22`, `firewall-cmd --list-ports` |
+| `Каталог Kerio не найден` | Kerio в нестандартном месте | укажите путь вручную, например `/data/kerio/mailserver` |
+| `не удалось определить каталог правил SpamAssassin` | старая сборка Kerio | укажите путь `.../plugins/spamserver/spamassassin/rules` вручную |
+| Правила установлены, но `X-Spam-Status` без `KCM_…` | файл не прочитан: права/SELinux/не перезапустили | см. 9.18 и 20.6 |
+| `systemctl: command not found` | нет systemd | программа автоматически пробует `/etc/init.d/kerio-connect` |
+| `Job for kerio-connect.service failed` | ошибка в конфигурации Kerio | `journalctl -u kerio-connect -n 100 --no-pager` |
+
+---
+
+## 21. Установщик и автообновление программы
+
+Начиная с версии 4.6.0 у программы есть **два способа установки** и **встроенное автообновление**.
+
+### 21.1 Что положить рядом с программой — не нужно
+
+Раньше программа была одним `.exe`, который можно было положить куда угодно. Такой режим остался (портативная версия), но теперь есть и настоящий установщик.
+
+| Файл в релизе | Что это | Кому |
+|---|---|---|
+| `KerioCertManager-Setup-<версия>.exe` | **Установщик** (Inno Setup): ярлыки, меню «Пуск», деинсталлятор | Большинству: поставил и забыл |
+| `KerioCertManager.exe` | Портативная программа (один файл) | Если нельзя ставить программы / нужна флешка |
+| `KerioCertManager-Windows-x64.zip` | Архив: программа + инструкция + иконки | Для передачи коллеге целиком |
+
+### 21.2 Установка
+
+1. Скачайте `KerioCertManager-Setup-4.6.0.exe` со страницы релиза.
+2. Запустите двойным щелчком. Установщик запросит права администратора (это нормально: программа управляет службой Kerio и заданиями Планировщика).
+3. Нажмите «Далее» → «Установить». По умолчанию программа ставится в `C:\Program Files\KerioCertManager`.
+4. Поставьте галочку «Создать ярлык на рабочем столе», если нужен.
+5. Готово: в меню «Пуск» появится **KerioCertManager**, рядом — ярлыки на инструкцию.
+
+**Тихая установка** (для развёртывания групповой политикой):
+
+```bat
+KerioCertManager-Setup-4.6.0.exe /S /D=C:\KerioCertManager
+```
+
+- `/S` — без вопросов и окон;
+- `/D=...` — папка установки (пишется **последним**, без кавычек).
+
+**Удаление:** «Параметры → Приложения → KerioCertManager → Удалить» (или `Uninstall` в меню «Пуск»).
+
+⚠️ **Что удаляется, а что нет:** программа удаляется, задания Планировщика (`KerioLetsEncryptAutoRenew`, `KerioCertManager_AntiSpamDB`) снимаются автоматически, а вот папка с сертификатами и настройками (`certs`) **остаётся** — чтобы вы случайно не потеряли приватные ключи. Удалите её вручную, если она больше не нужна.
+
+### 21.3 Автообновление: как это работает
+
+1. При запуске (и далее не чаще одного раза в 6 часов) программа тихо спрашивает GitHub: «какая последняя версия?».
+2. Если версия новее вашей — сверху появляется **зелёный баннер**: «Вышла новая версия», список изменений и кнопки.
+3. **⬇ Обновить сейчас** — программа скачивает новый `.exe`, сверяет SHA-256 с тем, что указан в релизе, и только после этого:
+   - переименовывает текущий файл в `KerioCertManager.exe.old`;
+   - записывает новый;
+   - перезапускает себя с теми же параметрами;
+   - при следующем старте удаляет `.old`.
+4. **Пропустить версию** — баннер про эту версию больше не появится (но следующая, более новая, снова покажется).
+5. **✕** — скрыть до следующего запуска.
+
+| Настройка | Где | Значение по умолчанию |
+|---|---|---|
+| Проверять обновления автоматически | 🧰 Инструменты → «Обновления программы» | включено |
+| Интервал проверки | фиксированный | 6 часов |
+| Пропущенная версия | там же, кнопка «↩ Сбросить пропущенные версии» | не задана |
+
+**Почему обновление безопасно:**
+
+- проверяется **SHA-256** — если файл по дороге подменили или он скачался битым, обновление отменяется;
+- проверяется, что скачался действительно `.exe` (сигнатура `MZ`);
+- старый файл не удаляется, а переименовывается — при сбое его легко вернуть;
+- сертификаты, настройки и база лежат в отдельных файлах и **не затрагиваются**.
+
+### 21.4 Если обновление не работает
+
+| Симптом | Причина | Решение |
+|---|---|---|
+| Баннер не появляется | проверка отключена, или прошло меньше 6 часов, или нет интернета | 🧰 Инструменты → «🔍 Проверить сейчас» |
+| «Проверка не удалась… rate limit» | GitHub ограничивает анонимные запросы (403/429) | подождите 10–60 минут, проверьте вручную на странице релизов |
+| «Не удалось скачать обновление» | прокси/фаервол блокирует `github.com` | скачайте `Setup.exe` вручную с сайта релизов |
+| «не удалось заменить программу (нет прав на папку)» | программа лежит в `Program Files`, а запущена без прав администратора | закройте программу и запустите от имени Администратора, либо обновитесь через `Setup.exe` |
+| После обновления открылась старая версия | запустился ярлык на старый `.exe` | удалите старый файл, ярлык из установщика указывает на актуальный |
+| Антивирус ругается на новый файл | эвристика на свежий неподписанный `.exe` | добавьте папку в исключения; SHA-256 из релиза подтверждает подлинность |
+
+**Проверка версии из командной строки:**
+
+```bat
+"C:\Program Files\KerioCertManager\KerioCertManager.exe" --version
+"C:\Program Files\KerioCertManager\KerioCertManager.exe" --check-update
+```
+
+Вторая команда печатает JSON с полями `latest`, `available`, `exeUrl`, `exeSha256` — удобно для скриптов мониторинга.
+
+### 21.5 Где хранятся настройки после установки
+
+| Путь | Что там |
+|---|---|
+| `C:\Program Files\KerioCertManager\KerioCertManager.exe` | сама программа |
+| `C:\Program Files\KerioCertManager\certs\` | сертификаты, настройки, история, база |
+| `C:\Program Files\KerioCertManager\FAQ.md`, `README.md` | инструкция рядом |
+| `%ProgramData%\Microsoft\Windows\Start Menu\Programs\KerioCertManager` | ярлыки меню «Пуск» |
+
+💡 Если нужен полный контроль над папкой сертификатов — запускайте программу с `--certs-dir D:\certs` (например, чтобы сертификаты лежали на защищённом диске).
+
+---
+
 **Разработчик:** Zakharevich Igor · ✉ ziv@csl.by · ☎ +375293371412
 
-_Документ актуален для версии 4.5.2. Программа развивается — проверяйте обновления на GitHub._
+_Документ актуален для версии 4.6.0. Программа развивается — проверяйте обновления на GitHub._

@@ -178,3 +178,83 @@ jobs:
         run: |
           gh release view kerio-latest > /dev/null 2>&1 || gh release create kerio-latest --title "KerioCertManager latest build" --notes "Automated build of the current branch" || true
           gh release upload kerio-latest KerioCertManager.exe KerioCertManager-Windows-x64.zip --clobber || true
+
+  # ---------------------------------------------------------------------------
+  # Установщик (.exe) собирается отдельным job на Windows-раннере: Inno Setup
+  # требует Windows. Получаем уже собранную программу из артефакта build и
+  # упаковываем её в настоящий Setup с ярлыками, деинсталлятором и /S.
+  # ---------------------------------------------------------------------------
+  installer:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Download built EXE
+        uses: actions/download-artifact@v4
+        with:
+          name: KerioCertManager-build
+          path: .
+
+      - name: Sanity check of downloaded files
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "KerioCertManager.exe")) { throw "Нет KerioCertManager.exe в артефакте" }
+          $size = (Get-Item "KerioCertManager.exe").Length
+          Write-Host "KerioCertManager.exe: $size байт"
+          $ver = (Get-Content "kerio-letsencrypt-win/version.go" | Select-String 'const appVersion = "(.+)"').Matches[0].Groups[1].Value
+          Write-Host "appVersion: $ver"
+          $iss = Get-Content "installer/KerioCertManager-Setup.iss" -Raw
+          if ($iss -notmatch "MyAppVersion `"$ver`"") { throw "Версия в .iss не совпадает с version.go ($ver)" }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe не найден после установки Inno Setup" }
+          Write-Host "ISCC: $iscc"
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "installer\KerioCertManager-Setup.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC завершился с кодом $LASTEXITCODE" }
+          Get-ChildItem "installer\output" | Format-Table Name, Length
+
+      - name: Verify installer
+        shell: pwsh
+        run: |
+          $ver = (Get-Content "kerio-letsencrypt-win/version.go" | Select-String 'const appVersion = "(.+)"').Matches[0].Groups[1].Value
+          $setup = "installer\output\KerioCertManager-Setup-$ver.exe"
+          if (-not (Test-Path $setup)) { throw "Установщик не создан: $setup" }
+          $size = (Get-Item $setup).Length
+          if ($size -lt 2000000) { throw "Установщик подозрительно мал: $size байт" }
+          $sha = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
+          Write-Host "Setup: $setup ($size байт), SHA-256: $sha"
+          "SETUP_PATH=$setup" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SETUP_SHA=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Attach installer to the release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$env:GITHUB_REF_NAME" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create "$env:GITHUB_REF_NAME" --title "KerioCertManager $env:GITHUB_REF_NAME" --notes "Автоматическая сборка $env:GITHUB_REF_NAME"
+          }
+          gh release upload "$env:GITHUB_REF_NAME" "$env:SETUP_PATH" --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Не удалось приложить установщик к релизу" }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KerioCertManager-setup
+          path: installer/output/*.exe
+          retention-days: 14

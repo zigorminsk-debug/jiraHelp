@@ -974,6 +974,58 @@
     .container { padding-top: 12px; }
     .card { margin-bottom: 12px; }
   }
+
+  /* ===== v4.6.0: баннер обновления программы ===== */
+  .update-banner {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: linear-gradient(90deg, rgba(16,185,129,0.14), rgba(59,130,246,0.10));
+    border: 1px solid rgba(16,185,129,0.45);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin: 0 0 14px;
+  }
+  .update-banner .ub-icon { font-size: 24px; line-height: 1; }
+  .ub-body { flex: 1 1 340px; min-width: 200px; }
+  .ub-title { font-size: 13.5px; font-weight: 700; color: var(--text-main); }
+  .ub-title .ub-cur { font-weight: 500; color: var(--text-secondary); font-size: 12.5px; }
+  .ub-notes {
+    margin: 6px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.55;
+    color: var(--text-secondary); max-height: 92px; overflow: auto;
+  }
+  .ub-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  @media (max-width: 720px) {
+    .update-banner { flex-direction: column; align-items: stretch; gap: 10px; }
+    .ub-actions .btn { width: 100%; justify-content: center; }
+  }
+
+  /* ===== v4.6.0: карточка «Kerio на Linux» ===== */
+  .linux-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px; margin-bottom: 14px;
+  }
+  .linux-grid .field { margin-bottom: 0; }
+  .kcm-log {
+    background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 10px 12px;
+    font-size: 12.4px; line-height: 1.7; max-height: 260px; overflow: auto;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .kcm-log .ok { color: #34d399; font-weight: 600; }
+  .kcm-log .warn { color: #fbbf24; font-weight: 600; }
+  .kcm-log .err { color: #f87171; font-weight: 600; }
+  .kcm-log .muted { color: var(--text-secondary); }
+  .kcm-check-row {
+    display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+    font-size: 12.6px; color: var(--text-secondary); margin-bottom: 12px;
+  }
+  .kcm-check-row label { display: inline-flex; gap: 7px; align-items: center; cursor: pointer; }
+  .kcm-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 9px; border-radius: 999px; font-size: 11.6px; font-weight: 700;
+    border: 1px solid var(--border); background: var(--bg-input);
+  }
+  .kcm-pill.ok { color: #34d399; border-color: rgba(52,211,153,0.5); }
+  .kcm-pill.bad { color: #f87171; border-color: rgba(248,113,113,0.5); }
 </style>
 <link id="dynamicFaviconLink" rel="icon" type="image/png" href="/icons/emerald-shield.png">
 </head>
@@ -988,7 +1040,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.5.2<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
+        <span class="brand-badge">Windows Native GUI v4.6.0<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -1025,6 +1077,26 @@
     </button>
   </div>
 </header>
+
+<!-- v4.6.0: баннер новой версии (показывается, только если обновление действительно есть) -->
+<div id="updateBanner" class="update-banner" style="display:none;">
+  <div class="ub-icon">🚀</div>
+  <div class="ub-body">
+    <div class="ub-title">Вышла новая версия KerioCertManager <span id="ubVersion">—</span>
+      <span class="ub-cur">(у вас <span id="ubCurrent">—</span>)</span></div>
+    <ul class="ub-notes" id="ubNotes"></ul>
+  </div>
+  <div class="ub-actions">
+    <button type="button" class="btn btn-primary btn-sm" id="ubInstallBtn" title="Скачать, проверить SHA-256, заменить программу и перезапустить её">
+      ⬇ Обновить сейчас
+    </button>
+    <a class="btn btn-outline btn-sm" id="ubPageLink" target="_blank" rel="noopener">📄 Что нового</a>
+    <button type="button" class="btn btn-outline btn-sm" id="ubSkipBtn" title="Больше не напоминать об этой версии">
+      Пропустить версию
+    </button>
+    <button type="button" class="btn btn-outline btn-sm" id="ubCloseBtn" title="Скрыть до следующего запуска">✕</button>
+  </div>
+</div>
 
 <!-- Navigation Tabs -->
 <nav class="nav-tabs">
@@ -1340,25 +1412,6 @@
           </button>
         </div>
 
-        <!-- Interactive DNS-01 Pending Wizard -->
-        <div class="card" id="dns01WizardCard" style="display:none;border-color:var(--kerio-orange);">
-          <div class="card-header">
-            <div>
-              <div class="card-title" style="color:var(--kerio-orange);">📝 Подтверждение домена через DNS TXT-запись (DNS-01)</div>
-              <div class="card-subtitle">Добавьте эти TXT-записи в панели управления вашим доменом, проверьте их обновление и нажмите �am Files\Kerio\MailServer\sslcert">
-              <button type="button" class="btn btn-outline btn-sm" onclick="browseWindowsFolder('inlineKerioPathInput', 'Папка sslcert в Kerio Connect')">Обзор...</button>
-            </div>
-          </div>
-
-          <div class="actions-row">
-            <button type="button" class="btn btn-outline btn-lg" id="preflightBtn">
-              🔍 Проверить DNS, IP и порт
-            </button>
-            <button type="button" class="btn btn-primary btn-lg" id="issueBtn">
-              🔐 Сгенерировать ключ и выпустить сертификат
-            </button>
-          </div>
-        </div>
       </div>
 
       <!-- RIGHT COLUMN: DIAGNOSTICS + ISSUED CERT + LOGS -->
@@ -1593,6 +1646,7 @@
         </div>
       </div>
     </div>
+
   </section>
 
   <!-- TAB 3: CERTIFICATE VAULT & AUTO-RENEWAL -->
@@ -2630,6 +2684,103 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
       <div id="dnsGeneratedCardsBox"></div>
     </div>
 
+
+    <!-- v4.6.0: Kerio Connect на Linux — управление по SSH -->
+    <div class="card" id="linuxKerioCard">
+      <div class="card-header">
+        <div>
+          <div class="card-title">🐧 Kerio Connect на Linux — управление по SSH</div>
+          <div class="card-subtitle">
+            Если почтовый сервер стоит на Linux (Ubuntu / Debian / CentOS / Rocky / ALT), подключайтесь к нему по SSH
+            прямо из программы: она сама найдёт каталоги Kerio, положит антиспам-базу или сертификат и перезапустит
+            службу <code>kerio-connect</code>. Пароль хранится только в памяти на время операции.
+          </div>
+        </div>
+      </div>
+
+      <div class="linux-grid">
+        <div class="field">
+          <label class="field-label" for="linuxHostInput">Сервер (IP или имя)</label>
+          <input type="text" id="linuxHostInput" placeholder="10.0.0.5 или mail.company.by" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field-label" for="linuxPortInput">Порт SSH</label>
+          <input type="number" id="linuxPortInput" value="22" min="1" max="65535">
+        </div>
+        <div class="field">
+          <label class="field-label" for="linuxUserInput">Пользователь</label>
+          <input type="text" id="linuxUserInput" value="root" placeholder="root" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field-label" for="linuxPassInput">Пароль SSH <span class="label-hint">не сохраняется</span></label>
+          <input type="password" id="linuxPassInput" placeholder="пароль пользователя" autocomplete="off">
+        </div>
+        <div class="field" style="grid-column:1 / -1;">
+          <label class="field-label" for="linuxKeyInput">…или путь к приватному SSH-ключу <span class="label-hint">OpenSSH / PEM</span></label>
+          <input type="text" id="linuxKeyInput" placeholder="C:\Users\admin\.ssh\id_ed25519  или  ~/.ssh/id_rsa" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field-label" for="linuxKerioDirInput">Каталог Kerio <span class="label-hint">пусто = автоопределение</span></label>
+          <input type="text" id="linuxKerioDirInput" placeholder="/opt/kerio/mailserver" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field-label" for="linuxServiceInput">Служба</label>
+          <input type="text" id="linuxServiceInput" placeholder="kerio-connect" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="kcm-check-row">
+        <label><input type="checkbox" id="linuxSudoCheck" checked> Использовать <code>sudo -n</code> (если вход не от root)</label>
+        <label><input type="checkbox" id="linuxRestartCheck" checked> Перезапускать <code>kerio-connect</code> после установки</label>
+      </div>
+
+      <div class="actions-row">
+        <button type="button" class="btn btn-outline" id="linuxProbeBtn">🔍 Проверить сервер</button>
+        <button type="button" class="btn btn-primary" id="linuxInstallDbBtn">🛡 Установить антиспам-базу</button>
+        <button type="button" class="btn btn-outline" id="linuxCertInstallBtn">🔐 Установить сертификат</button>
+        <button type="button" class="btn btn-outline" id="linuxRestartBtn">🔄 Перезапустить Kerio</button>
+        <button type="button" class="btn btn-outline" id="linuxScriptBtn">📥 Скачать shell-скрипт</button>
+      </div>
+
+      <div id="linuxResultBox" style="display:none;margin-top:14px;">
+        <div id="linuxPills" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;"></div>
+        <div class="kcm-log" id="linuxLog"></div>
+      </div>
+
+      <div class="hint-text" style="margin-top:12px;">
+        Подсказка: что именно выполняется на сервере и как исправить ошибки прав — в инструкции,
+        раздел <a href="#" onclick="openHelpSection('20-kerio-connect-на-linux');return false;">«Kerio Connect на Linux»</a>.
+        Если SSH из программы недоступен (закрытый контур, открыты только 80/443) — скачайте готовый
+        <strong>install-kcm-antispam.sh</strong> и выполните его на сервере от root.
+      </div>
+    </div>
+
+        <!-- v4.6.0: обновления программы -->
+        <div class="card" id="updateSettingsCard">
+          <div class="card-header">
+            <div>
+              <div class="card-title">🔄 Обновления программы</div>
+              <div class="card-subtitle">
+                Программа сама проверяет GitHub Releases (не чаще одного раза в 6 часов) и предлагает обновиться
+                в один клик: скачивание → проверка SHA-256 → атомарная замена файла → перезапуск.
+              </div>
+            </div>
+            <span class="kcm-pill" id="updateCurrentPill">v—</span>
+          </div>
+
+          <div class="kcm-check-row" style="margin-bottom:14px;">
+            <label><input type="checkbox" id="autoUpdateCheck" checked> Проверять обновления автоматически при запуске</label>
+          </div>
+
+          <div class="actions-row">
+            <button type="button" class="btn btn-outline" id="checkUpdateNowBtn">🔍 Проверить сейчас</button>
+            <button type="button" class="btn btn-outline" id="resetSkippedBtn">↩ Сбросить пропущенные версии</button>
+            <button type="button" class="btn btn-outline" id="cleanupUpdateBtn" title="Удалить *.exe.old и папку update-tmp">🧹 Почистить временные файлы</button>
+          </div>
+
+          <div id="updateStatusBox" class="kcm-log" style="margin-top:12px;display:none;"></div>
+          <div id="updateNotesBox" style="display:none;margin-top:10px;"></div>
+        </div>
   </section>
 
   <!-- TAB 9: BUILT-IN INSTRUCTION (полный ФАК, вкомпилированный в .exe) -->
@@ -2682,7 +2833,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:1380px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.5.2</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.6.0</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -2758,7 +2909,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 <script>
   // Версия интерфейса. Должна совпадать с appVersion в version.go
   // (проверяется тестом TestVersionConsistency).
-  const APP_VERSION = '4.5.2';
+  const APP_VERSION = '4.6.0';
   let systemState = null;
   let currentCert = null;
   let allCerts = [];
@@ -4529,6 +4680,21 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
     if (detectedWanIp && !document.getElementById('dnsGenServerIp').value.trim()) {
       document.getElementById('dnsGenServerIp').value = detectedWanIp;
     }
+    // v4.6.0: Kerio Connect на Linux (пароль SSH не сохраняется никогда).
+    const setIfEmpty = (id, val) => {
+      const el = document.getElementById(id);
+      if (el && val && !el.value.trim()) el.value = val;
+    };
+    setIfEmpty('linuxHostInput', s.linuxHost);
+    setIfEmpty('linuxUserInput', s.linuxUser);
+    setIfEmpty('linuxKeyInput', s.linuxKeyPath);
+    setIfEmpty('linuxKerioDirInput', s.linuxKerioDir);
+    setIfEmpty('linuxServiceInput', s.linuxService);
+    if (s.linuxPort > 0 && document.getElementById('linuxPortInput')) {
+      document.getElementById('linuxPortInput').value = String(s.linuxPort);
+    }
+    const sudoCb = document.getElementById('linuxSudoCheck');
+    if (sudoCb && typeof s.linuxSudo === 'boolean') sudoCb.checked = s.linuxSudo;
   }
 
   let __saveSettingsTimer = null;
@@ -4550,7 +4716,14 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
             kerioApiUser: document.getElementById('kerioApiUser').value.trim(),
             auditDomain: document.getElementById('auditDomainInput').value.trim(),
             auditMailHost: document.getElementById('auditMailHostInput').value.trim(),
-            auditTargetIp: document.getElementById('auditTargetIpInput').value.trim()
+            auditTargetIp: document.getElementById('auditTargetIpInput').value.trim(),
+            linuxHost: document.getElementById('linuxHostInput') ? document.getElementById('linuxHostInput').value.trim() : '',
+            linuxPort: parseInt((document.getElementById('linuxPortInput') || {}).value || '22', 10) || 22,
+            linuxUser: document.getElementById('linuxUserInput') ? document.getElementById('linuxUserInput').value.trim() : '',
+            linuxKeyPath: document.getElementById('linuxKeyInput') ? document.getElementById('linuxKeyInput').value.trim() : '',
+            linuxKerioDir: document.getElementById('linuxKerioDirInput') ? document.getElementById('linuxKerioDirInput').value.trim() : '',
+            linuxService: document.getElementById('linuxServiceInput') ? document.getElementById('linuxServiceInput').value.trim() : '',
+            linuxSudo: document.getElementById('linuxSudoCheck') ? document.getElementById('linuxSudoCheck').checked : true
           })
         });
       } catch (_) {}
@@ -4558,7 +4731,9 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   }
 
   ['domainInput', 'ipInput', 'emailInput', 'kerioPathInput', 'kerioApiHost', 'kerioApiPort', 'kerioApiUser',
-   'auditDomainInput', 'auditMailHostInput', 'auditTargetIpInput'].forEach(id => {
+   'auditDomainInput', 'auditMailHostInput', 'auditTargetIpInput',
+   'linuxHostInput', 'linuxPortInput', 'linuxUserInput', 'linuxKeyInput', 'linuxKerioDirInput',
+   'linuxServiceInput', 'linuxSudoCheck'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', saveCurrentUiSettingsQuiet);
   });
@@ -6052,6 +6227,382 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
     clearTimeout(faqSearchTimer);
     faqSearchTimer = setTimeout(faqApplyFilter, 130);
   });
+
+
+  // ==========================================================================
+  // v4.6.0: автообновление программы
+  // ==========================================================================
+  const KCM_UPDATE = { info: null, notes: [] };
+
+  function kcmV(v) { return !v ? '—' : (v[0] === 'v' ? v : 'v' + v); }
+
+  function renderUpdateBanner(payload) {
+    const banner = document.getElementById('updateBanner');
+    if (!banner) return;
+    const info = (payload && payload.info) || null;
+    const hidden = !info || !info.available || info.skipped;
+    if (hidden) { banner.style.display = 'none'; return; }
+    KCM_UPDATE.info = info;
+    KCM_UPDATE.notes = (payload && payload.notes) || [];
+    document.getElementById('ubVersion').textContent = kcmV(info.latest);
+    document.getElementById('ubCurrent').textContent = kcmV(info.current);
+    const ul = document.getElementById('ubNotes');
+    ul.innerHTML = KCM_UPDATE.notes.map(n => '<li>' + escapeHtml(n) + '</li>').join('');
+    ul.style.display = KCM_UPDATE.notes.length ? '' : 'none';
+    const link = document.getElementById('ubPageLink');
+    if (info.pageUrl) { link.href = info.pageUrl; link.style.display = ''; }
+    else { link.style.display = 'none'; }
+    const btn = document.getElementById('ubInstallBtn');
+    if (!info.exeUrl) {
+      btn.disabled = true;
+      btn.textContent = '⬇ В релизе нет файла .exe';
+    } else {
+      btn.disabled = false;
+      btn.innerHTML = '⬇ Обновить сейчас';
+    }
+    banner.style.display = 'flex';
+  }
+
+  function updateStatusLine(text, cls) {
+    const box = document.getElementById('updateStatusBox');
+    if (!box) return false;
+    box.style.display = 'block';
+    box.innerHTML += '<div class="' + (cls || 'muted') + '">' + escapeHtml(text) + '</div>';
+    box.scrollTop = box.scrollHeight;
+    return true;
+  }
+
+  function renderUpdateNotes(notes) {
+    const box = document.getElementById('updateNotesBox');
+    if (!box) return;
+    if (!notes || !notes.length) { box.style.display = 'none'; return; }
+    box.style.display = 'block';
+    box.innerHTML = '<div style="font-weight:700;margin-bottom:6px;">Что нового:</div><ul class="ub-notes" style="max-height:none;">' +
+      notes.map(n => '<li>' + escapeHtml(n) + '</li>').join('') + '</ul>';
+  }
+
+  async function runUpdateCheck(force) {
+    if (force) {
+      const box = document.getElementById('updateStatusBox');
+      if (box) { box.style.display = 'block'; box.innerHTML = ''; }
+      updateStatusLine('Проверяю GitHub Releases…', 'muted');
+    }
+    try {
+      const r = await fetch('/api/update/check' + (force ? '?force=1' : ''));
+      const d = await r.json();
+      renderUpdateBanner(d);
+      if (force) {
+        const info = d.info || {};
+        if (d.error) {
+          updateStatusLine('Проверка не удалась: ' + d.error, 'err');
+        } else if (info.available) {
+          updateStatusLine('Доступна версия ' + kcmV(info.latest) + ' (у вас ' + kcmV(info.current) + ').', 'ok');
+          if (info.skipped) updateStatusLine('Вы пропустили эту версию — нажмите «Сбросить пропущенные версии», чтобы включить напоминание.', 'warn');
+          if (info.setupUrl) {
+            const box = document.getElementById('updateStatusBox');
+            if (box) {
+              box.insertAdjacentHTML('beforeend',
+                '<div class="muted">Нужен установщик с ярлыками и деинсталлятором? <a href="' +
+                escapeHtml(info.setupUrl) + '" target="_blank" rel="noopener">Скачать Setup ' +
+                escapeHtml(kcmV(info.latest)) + '</a> (обновление «поверх» сохранит сертификаты).</div>');
+            }
+          }
+          renderUpdateNotes(d.notes);
+        } else {
+          updateStatusLine('Обновлений нет: ' + kcmV(info.current || '') + ' — последняя версия.', 'ok');
+          renderUpdateNotes([]);
+        }
+      }
+      return d;
+    } catch (e) {
+      if (force) updateStatusLine('Ошибка: ' + e.message, 'err');
+      return null;
+    }
+  }
+
+  async function installUpdateNow() {
+    const info = KCM_UPDATE.info;
+    if (!info || !info.exeUrl) { showToast('Нет ссылки на файл обновления', true); return; }
+    if (!confirm('Обновить KerioCertManager до ' + kcmV(info.latest) + '?\n\n' +
+      'Программа скачает новый файл, проверит SHA-256 и перезапустится. Сертификаты и настройки не пострадают.')) return;
+    const btn = document.getElementById('ubInstallBtn');
+    const old = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Обновляюсь…';
+    try {
+      const r = await fetch('/api/update/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(info)
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'не удалось обновить программу');
+      showToast('Обновление установлено — программа перезапускается…');
+      document.getElementById('ubNotes').innerHTML = '<li style="color:#34d399;">Готово. Окно перезапустится автоматически через несколько секунд.</li>';
+      setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 6000);
+    } catch (e) {
+      btn.disabled = false;
+      btn.innerHTML = old;
+      showToast(e.message, true);
+      updateStatusLine('Ошибка обновления: ' + e.message, 'err');
+    }
+  }
+
+  async function skipUpdateVersion() {
+    const info = KCM_UPDATE.info;
+    if (!info || !info.latest) return;
+    try {
+      await fetch('/api/update/skip', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: info.latest })
+      });
+      document.getElementById('updateBanner').style.display = 'none';
+      showToast('Версия ' + kcmV(info.latest) + ' пропущена');
+    } catch (e) { showToast(e.message, true); }
+  }
+
+  async function loadUpdateSettings() {
+    try {
+      const r = await fetch('/api/update/settings');
+      const d = await r.json();
+      const cb = document.getElementById('autoUpdateCheck');
+      if (cb) cb.checked = !!d.autoCheck;
+      const pill = document.getElementById('updateCurrentPill');
+      if (pill) pill.textContent = kcmV(d.current);
+    } catch (e) { /* не критично */ }
+  }
+
+  // ==========================================================================
+  // v4.6.0: Kerio Connect на Linux (SSH)
+  // ==========================================================================
+  function linuxTargetPayload(extra) {
+    const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    return Object.assign({
+      host: val('linuxHostInput'),
+      port: parseInt(val('linuxPortInput') || '22', 10) || 22,
+      user: val('linuxUserInput') || 'root',
+      password: document.getElementById('linuxPassInput') ? document.getElementById('linuxPassInput').value : '',
+      keyPath: val('linuxKeyInput'),
+      kerioDir: val('linuxKerioDirInput'),
+      service: val('linuxServiceInput'),
+      sudo: document.getElementById('linuxSudoCheck') ? document.getElementById('linuxSudoCheck').checked : true,
+      restart: document.getElementById('linuxRestartCheck') ? document.getElementById('linuxRestartCheck').checked : true
+    }, extra || {});
+  }
+
+  function linuxLogAppend(text, cls) {
+    const box = document.getElementById('linuxLog');
+    if (!box) return;
+    box.innerHTML += '<div class="' + (cls || '') + '">' + escapeHtml(text) + '</div>';
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function linuxLogReset() {
+    const box = document.getElementById('linuxLog');
+    const wrap = document.getElementById('linuxResultBox');
+    const pills = document.getElementById('linuxPills');
+    if (box) box.innerHTML = '';
+    if (pills) pills.innerHTML = '';
+    if (wrap) wrap.style.display = 'block';
+  }
+
+  function linuxPill(text, ok) {
+    const pills = document.getElementById('linuxPills');
+    if (!pills) return;
+    const sp = document.createElement('span');
+    sp.className = 'kcm-pill ' + (ok ? 'ok' : 'bad');
+    sp.textContent = text;
+    pills.appendChild(sp);
+  }
+
+  function linuxRequireHost() {
+    const host = document.getElementById('linuxHostInput').value.trim();
+    if (!host) { showToast('Укажите адрес Linux-сервера с Kerio Connect', true); return false; }
+    return true;
+  }
+
+  function linuxRenderProbe(d) {
+    linuxLogReset();
+    if (!d.connected) {
+      linuxPill('нет связи', false);
+      linuxLogAppend(d.error || 'Не удалось подключиться по SSH', 'err');
+      linuxLogAppend('Проверьте: адрес сервера, порт 22 (или свой), логин и пароль/ключ, а также что SSH-сервер разрешает вход этому пользователю.', 'muted');
+      return;
+    }
+    linuxPill('SSH ОК', true);
+    linuxPill(d.kerioDir ? 'Kerio найден' : 'Kerio не найден', !!d.kerioDir);
+    if (d.serviceName) linuxPill(d.serviceName + ': ' + (d.serviceActive || '—'), d.serviceActive === 'active');
+    if (d.installedCf) linuxPill('база установлена', true); else linuxPill('базы нет', false);
+    (d.steps || []).forEach(line => linuxLogAppend(line, line.indexOf('⚠') === 0 ? 'warn' : 'muted'));
+    if (d.error) linuxLogAppend(d.error, 'err');
+    if (d.hostFingerprint) linuxLogAppend('Отпечаток ключа сервера: ' + d.hostFingerprint, 'muted');
+    if (d.kerioDir && !document.getElementById('linuxKerioDirInput').value.trim()) {
+      document.getElementById('linuxKerioDirInput').value = d.kerioDir;
+    }
+    if (d.serviceName && !document.getElementById('linuxServiceInput').value.trim()) {
+      document.getElementById('linuxServiceInput').value = d.serviceName;
+    }
+  }
+
+  async function linuxProbe() {
+    if (!linuxRequireHost()) return;
+    const btn = document.getElementById('linuxProbeBtn');
+    const old = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Проверяю…';
+    linuxLogReset();
+    linuxLogAppend('Подключение к ' + document.getElementById('linuxHostInput').value.trim() + '…', 'muted');
+    try {
+      const r = await fetch('/api/linux/probe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(linuxTargetPayload())
+      });
+      const d = await r.json();
+      if (d.error && !d.connected) throw new Error(d.error);
+      linuxRenderProbe(d);
+      if (d.ok) showToast('Сервер ' + (d.host || '') + ': Kerio Connect найден');
+    } catch (e) {
+      linuxLogAppend(e.message, 'err');
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false; btn.innerHTML = old;
+    }
+  }
+
+  async function linuxInstallDb() {
+    if (!linuxRequireHost()) return;
+    const btn = document.getElementById('linuxInstallDbBtn');
+    const old = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Устанавливаю базу…';
+    linuxLogReset();
+    linuxLogAppend('Подготовка файла правил…', 'muted');
+    try {
+      const r = await fetch('/api/linux/antispam-install', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(linuxTargetPayload())
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      linuxPill(d.ok ? 'база установлена' : 'ошибка', !!d.ok);
+      if (d.restarted) linuxPill('Kerio перезапущен', true);
+      (d.steps || []).forEach(l => linuxLogAppend(l, /^❌/.test(l) ? 'err' : 'ok'));
+      (d.warnings || []).forEach(l => linuxLogAppend(l, 'warn'));
+      if (d.remotePath) {
+        linuxLogAppend('Файл на сервере: ' + d.remotePath, 'muted');
+        if (d.size) linuxLogAppend('Размер: ' + d.size + ' байт, SHA-256: ' + (d.sha256 || ''), 'muted');
+      }
+      showToast(d.ok ? 'Антиспам-база загружена на ' + document.getElementById('linuxHostInput').value.trim() : 'Установка не завершена', !d.ok);
+    } catch (e) {
+      linuxLogAppend(e.message, 'err');
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false; btn.innerHTML = old;
+    }
+  }
+
+  async function linuxInstallCert() {
+    if (!linuxRequireHost()) return;
+    const sel = document.getElementById('kerioCertSelect');
+    const certId = sel ? sel.value : '';
+    if (!certId) { showToast('Сначала выпустите сертификат (вкладка «Выпуск») — затем выберите его здесь', true); return; }
+    const btn = document.getElementById('linuxCertInstallBtn');
+    const old = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Устанавливаю…';
+    linuxLogReset();
+    try {
+      const outDir = document.getElementById('outputDirInput');
+      const r = await fetch('/api/linux/cert-install', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(linuxTargetPayload({ certId: certId, certDir: outDir ? outDir.value.trim() : '' }))
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      linuxPill(d.ok ? 'сертификат установлен' : 'ошибка', !!d.ok);
+      (d.steps || []).forEach(l => linuxLogAppend(l, /ошибка/i.test(l) ? 'err' : 'ok'));
+      (d.warnings || []).forEach(l => linuxLogAppend(l, 'warn'));
+      if (d.sslDir) linuxLogAppend('Каталог sslcert на сервере: ' + d.sslDir, 'muted');
+      showToast(d.ok ? 'Сертификат установлен на Linux-сервер' : 'Сертификат не установлен', !d.ok);
+    } catch (e) {
+      linuxLogAppend(e.message, 'err');
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false; btn.innerHTML = old;
+    }
+  }
+
+  async function linuxRestartService() {
+    if (!linuxRequireHost()) return;
+    if (!confirm('Перезапустить Kerio Connect на сервере?\n\nПочтовые клиенты на несколько секунд потеряют соединение — это нормально.')) return;
+    const btn = document.getElementById('linuxRestartBtn');
+    const old = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Перезапускаю…';
+    linuxLogReset();
+    try {
+      const r = await fetch('/api/linux/restart', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(linuxTargetPayload())
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'не удалось перезапустить службу');
+      linuxPill('служба ' + (d.service || 'kerio-connect') + ' перезапущена', true);
+      if (d.output) linuxLogAppend(d.output, 'muted');
+      showToast('Служба перезапущена');
+    } catch (e) {
+      linuxLogAppend(e.message, 'err');
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false; btn.innerHTML = old;
+    }
+  }
+
+  function linuxDownloadScript() {
+    window.location = '/api/linux/script';
+    showToast('Скрипт install-kcm-antispam.sh скачан — выполните его на сервере: sudo sh install-kcm-antispam.sh');
+  }
+
+  function initV46Ui() {
+    const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+    on('ubInstallBtn', 'click', installUpdateNow);
+    on('ubSkipBtn', 'click', skipUpdateVersion);
+    on('ubCloseBtn', 'click', () => { const b = document.getElementById('updateBanner'); if (b) b.style.display = 'none'; });
+    on('checkUpdateNowBtn', 'click', () => runUpdateCheck(true));
+    on('autoUpdateCheck', 'change', async (e) => {
+      try {
+        await fetch('/api/update/settings', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ autoCheck: e.target.checked })
+        });
+        showToast(e.target.checked ? 'Автопроверка обновлений включена' : 'Автопроверка обновлений выключена');
+      } catch (_) {}
+    });
+    on('resetSkippedBtn', 'click', async () => {
+      try {
+        await fetch('/api/update/skip', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ version: '' })
+        });
+        showToast('Пропуски сброшены');
+        runUpdateCheck(true);
+      } catch (_) {}
+    });
+    on('cleanupUpdateBtn', 'click', async () => {
+      try {
+        await fetch('/api/update/cleanup', { method: 'POST' });
+        updateStatusLine('Временные файлы обновления удалены.', 'ok');
+        showToast('Готово');
+      } catch (e) { showToast(e.message, true); }
+    });
+    on('linuxProbeBtn', 'click', linuxProbe);
+    on('linuxInstallDbBtn', 'click', linuxInstallDb);
+    on('linuxCertInstallBtn', 'click', linuxInstallCert);
+    on('linuxRestartBtn', 'click', linuxRestartService);
+    on('linuxScriptBtn', 'click', linuxDownloadScript);
+
+    loadUpdateSettings();
+    // Первая проверка при запуске: сервер отвечает мгновенно, если не прошло 6 часов.
+    setTimeout(() => runUpdateCheck(false), 1500);
+  }
+
+  initV46Ui();
 
   initApp();
 </script>

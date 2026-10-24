@@ -579,3 +579,15 @@ func RunDesktopWindow(appURL string) (usedNativeWindow bool) {
 	_ = fallback.Start()
 	return false
 }
+
+// startDetached запускает новую копию программы после обновления.
+// Процесс не привязан к текущему: родитель сразу завершается.
+func startDetached(exe string, args []string) error {
+	cmd := exec.Command(exe, args...)
+	cmd.Dir = filepath.Dir(exe)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: false}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
+}
