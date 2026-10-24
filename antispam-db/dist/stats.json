@@ -1,0 +1,14 @@
+{
+  "sources": [],
+  "startedAt": "2026-10-24T08:11:45+00:00",
+  "durationMs": 1,
+  "counts": {
+    "domains": 0,
+    "emails": 0,
+    "urls": 0,
+    "ips": 0,
+    "subjects": 39,
+    "phrases": 23,
+    "allowlist": 58
+  }
+}

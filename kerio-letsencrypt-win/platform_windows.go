@@ -202,6 +202,38 @@ func PlatformQueryAutoRenewTask() bool {
 	return err == nil
 }
 
+func PlatformInstallAntiSpamTask(intervalHours int) (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	taskCmd := fmt.Sprintf(`"%s" --antispam-update`, exe)
+	args := []string{"/Create", "/F", "/RU", "SYSTEM", "/RL", "HIGHEST", "/TN", antiSpamTaskName, "/TR", taskCmd}
+	if intervalHours > 0 && intervalHours < 24 {
+		args = append(args, "/SC", "HOURLY", "/MO", fmt.Sprintf("%d", intervalHours))
+	} else {
+		args = append(args, "/SC", "DAILY", "/ST", "04:10")
+	}
+	out, err := runHiddenCmd("schtasks.exe", args...)
+	if err != nil {
+		return "", fmt.Errorf("не удалось создать задачу автообновления базы (запустите программу от имени Администратора): %s", strings.TrimSpace(string(out)))
+	}
+	return fmt.Sprintf("Задача автообновления антиспам-базы «%s» зарегистрирована в Планировщике заданий Windows!", antiSpamTaskName), nil
+}
+
+func PlatformRemoveAntiSpamTask() (string, error) {
+	out, err := runHiddenCmd("schtasks.exe", "/Delete", "/F", "/TN", antiSpamTaskName)
+	if err != nil {
+		return "", fmt.Errorf("задача автообновления не найдена или требуются права Администратора: %s", strings.TrimSpace(string(out)))
+	}
+	return fmt.Sprintf("Задача автообновления «%s» удалена из Планировщика Windows.", antiSpamTaskName), nil
+}
+
+func PlatformQueryAntiSpamTask() bool {
+	_, err := runHiddenCmd("schtasks.exe", "/Query", "/TN", antiSpamTaskName)
+	return err == nil
+}
+
 func PlatformOpenTempFirewallPort(port int) func() {
 	ruleName := fmt.Sprintf("KerioCertManager_ACME_TCP_%d", port)
 	_, _ = runHiddenCmd("netsh", "advfirewall", "firewall", "delete", "rule", "name="+ruleName)
@@ -281,7 +313,7 @@ func RunDesktopWindow(appURL string) (usedNativeWindow bool) {
 		AutoFocus: true,
 		DataPath:  dataDir,
 		WindowOptions: webview2.WindowOptions{
-			Title:  "Kerio SSL, Mail Audit, Delist & Sanctions Suite (v4.3) — Zakharevich Igor",
+			Title:  "Kerio SSL, Mail Audit, Delist, Sanctions & AntiSpam DB Suite (v4.4) — Zakharevich Igor",
 			Width:  1380,
 			Height: 940,
 			IconId: initIcon,

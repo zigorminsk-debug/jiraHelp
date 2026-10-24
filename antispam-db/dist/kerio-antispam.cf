@@ -1,0 +1,30 @@
+# ============================================================================
+# KCM AntiSpam DB for Kerio Connect
+# Версия базы: 2026.10.24-0811
+# Сгенерировано: 2026-10-24 08:11:45 UTC
+# Установлено программой KerioCertManager (Zakharevich Igor, ziv@csl.by)
+# Удалить базу: удалите этот файл из MailServer/plugins/spamassassin/rules/
+# ============================================================================
+
+# --- Домены отправителей из базы спама/фишинга (score 3.2) ---
+
+# --- Шаблоны мошеннических тем писем (score 1.8) ---
+header   KCM_SCAM_SUBJECT_001   Subject =~ /(account will be suspended|bitcoin giveaway|claim your prize|crypto giveaway|double your bitcoin|earn money fast|final notice|inheritance|investment opportunity|invoice overdue|lottery winner|payment failed|suspicious sign-in|unclaimed funds|unusual activity|verify your account|work from home|you have won|your password expires|аккаунт заблокирован|ваш аккаунт будет заблокирован|ваш приз|ваша карта заблокирована|возврат средств|выиграли)/i
+describe KCM_SCAM_SUBJECT_001   Типовая тема спам/фишинг-письма (KCM)
+score    KCM_SCAM_SUBJECT_001   1.8
+header   KCM_SCAM_SUBJECT_002   Subject =~ /(выигрыш|деньги в долг|задолженность|истёк срок действия карты|компенсация|кредит одобрен|наследство|неоплаченный счёт|одобрен кредит|подтвердите аккаунт|подтвердите данные карты|поздравляем победителя|получите приз|срочно требуется)/i
+describe KCM_SCAM_SUBJECT_002   Типовая тема спам/фишинг-письма (KCM)
+score    KCM_SCAM_SUBJECT_002   1.8
+
+# --- Фразы в теле письма (score 1.5) ---
+body     KCM_SCAM_PHRASE_001   /(cliquez ici|cvv код|mailbox quota exceeded|update your payment information|verify your identity by clicking|your mailbox is almost full|безопасный счёт|в течение 24 часов|ваш аккаунт будет удалён|ваши данные карты|во избежание блокировки|выплата компенсации|для получения выигрыша|для получения приза|код подтверждения никому не сообщайте|наследство в размере|оплата налога за выигрыш|оплатите комиссию|перевод на безопасный счёт|перейдите по ссылке ниже и укажите|подтвердите личность|реквизиты для перевода|служба безопасности банка)/i
+describe KCM_SCAM_PHRASE_001   Фраза мошеннического письма (KCM)
+score    KCM_SCAM_PHRASE_001   1.5
+
+# --- Белый список: снижаем ложные срабатывания (score -6.0) ---
+header   KCM_ALLOW_FROM_001   From =~ /@(?:1c\.ru|amazon\.com|amazonaws\.com|amazonses\.com|apple\.com|atlassian\.net|azure\.com|bank\.by|belarusbank\.by|beltelecom\.by|bitrix24\.ru|bk\.ru|cloudflare\.com|dropbox\.com|drweb\.com|facebook\.com|github\.com|gitlab\.com|gmail\.com|google\.com|googleapis\.com|gstatic\.com|icloud\.com|inbox\.ru|instagram\.com|jetbrains\.com|kaspersky\.com|list\.ru|live\.com|mail\.ru|mailchimp\.com|mailgun\.org|mandrillapp\.com|microsoft\.com|microsoftonline\.com|mozilla\.org|office\.com|office365\.com|ok\.ru|onliner\.by|outlook\.com|paypal\.com|prior\.by|sendgrid\.net|slack\.com|t\.me|telegram\.org|tut\.by|vk\.com|whatsapp\.com|windows\.com|windowsupdate\.com|ya\.ru|yandex\.by|yandex\.net|yandex\.ru|youtube\.com|zoom\.us)(?:[>\s,]|$)/i
+describe KCM_ALLOW_FROM_001   Доверенный отправитель (белый список KCM)
+score    KCM_ALLOW_FROM_001   -6.0
+
+# Статистика базы:
+#   домены=0 emails=0 urls=0 ips=0 subjects=39 phrases=23 allow=58

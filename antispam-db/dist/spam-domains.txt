@@ -1,0 +1,3 @@
+# KCM AntiSpam DB — spam-domains.txt
+# generated: 2026-10-24T08:11:45+00:00
+# entries: 0

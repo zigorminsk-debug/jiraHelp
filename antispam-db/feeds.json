@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "feeds": [
+    {
+      "name": "urlhaus",
+      "url": "https://urlhaus.abuse.ch/downloads/text_online/",
+      "type": "urls",
+      "enabled": true,
+      "limit": 8000,
+      "credit": "abuse.ch URLhaus (CC0)"
+    },
+    {
+      "name": "openphish",
+      "url": "https://openphish.com/feed.txt",
+      "type": "urls",
+      "enabled": true,
+      "limit": 4000,
+      "credit": "OpenPhish public feed"
+    },
+    {
+      "name": "phishing-army",
+      "url": "https://phishing.army/download/phishing_army_blocklist_extended.txt",
+      "type": "plain-domains",
+      "enabled": true,
+      "limit": 12000,
+      "credit": "Phishing Army (CC BY-NC 4.0)"
+    },
+    {
+      "name": "hagezi-tif",
+      "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/tif.txt",
+      "type": "plain-domains",
+      "enabled": true,
+      "limit": 12000,
+      "credit": "HaGeZi Threat Intelligence Feed"
+    },
+    {
+      "name": "spamhaus-drop",
+      "url": "https://www.spamhaus.org/drop/drop.txt",
+      "type": "ips",
+      "enabled": true,
+      "limit": 4000,
+      "credit": "Spamhaus DROP List"
+    },
+    {
+      "name": "stevenblack-unified",
+      "url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+      "type": "hosts",
+      "enabled": false,
+      "limit": 8000,
+      "credit": "StevenBlack/hosts (MIT)"
+    }
+  ]
+}

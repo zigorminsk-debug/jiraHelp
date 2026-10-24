@@ -69,6 +69,16 @@ func PlatformOpenTempFirewallPort(_ int) func() {
 	return func() {}
 }
 
+func PlatformInstallAntiSpamTask(_ int) (string, error) {
+	return "", fmt.Errorf("автообновление антиспам-базы через Планировщик доступно только в Windows")
+}
+
+func PlatformRemoveAntiSpamTask() (string, error) {
+	return "", fmt.Errorf("автообновление антиспам-базы через Планировщик доступно только в Windows")
+}
+
+func PlatformQueryAntiSpamTask() bool { return false }
+
 func CloseDesktopWindow() {}
 
 func PlatformApplyWindowIcon(_ int) {}

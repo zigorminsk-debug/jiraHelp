@@ -1008,6 +1008,184 @@ func buildRouter() http.Handler {
 		}
 	})
 
+	// ======================================================================
+	// v4.4: Автообновляемая антиспам-база KCM (GitHub → Kerio Connect)
+	// ======================================================================
+	mux.HandleFunc("/api/antispam/status", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, GetAntiSpamStatus(DefaultCertsRoot()))
+	})
+
+	mux.HandleFunc("/api/antispam/check", func(w http.ResponseWriter, r *http.Request) {
+		certsDir := DefaultCertsRoot()
+		remote, err := fetchAntiSpamManifest()
+		if err != nil {
+			writeErr(w, 502, err)
+			return
+		}
+		st := LoadAntiSpamState(certsDir)
+		st.LastCheckAt = time.Now().Format("2006-01-02 15:04:05")
+		st.LastRemoteVersion = remote.Manifest.Version
+		st.LastError = ""
+		_ = SaveAntiSpamState(certsDir, st)
+		status := GetAntiSpamStatus(certsDir)
+		available := status.Version == "" || compareAntiSpamVersions(remote.Manifest.Version, status.Version) > 0
+		logHub.Emit("info", fmt.Sprintf("Антиспам-база: на GitHub версия %s (источник: %s).", remote.Manifest.Version, remote.Source))
+		writeJSON(w, 200, map[string]any{
+			"ok":               true,
+			"manifest":         remote.Manifest,
+			"source":           remote.Source,
+			"installedVersion": status.Version,
+			"updateAvailable":  available,
+			"checkedAt":        st.LastCheckAt,
+			"releaseUrl":       status.ReleaseURL,
+		})
+	})
+
+	mux.HandleFunc("/api/antispam/preview", func(w http.ResponseWriter, r *http.Request) {
+		preview, err := PreviewAntiSpamInstall(DefaultCertsRoot())
+		if err != nil {
+			writeErr(w, 502, err)
+			return
+		}
+		writeJSON(w, 200, preview)
+	})
+
+	mux.HandleFunc("/api/antispam/install", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			KerioDir string `json:"kerioDir"`
+			RulesDir string `json:"rulesDir"`
+			Version  string `json:"version"`
+			Restart  *bool  `json:"restart"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		opts := AntiSpamInstallOptions{KerioDir: body.KerioDir, RulesDir: body.RulesDir, Version: body.Version, Restart: true}
+		if body.Restart != nil {
+			opts.Restart = *body.Restart
+		}
+		res, err := InstallAntiSpamDB(DefaultCertsRoot(), opts)
+		if err != nil {
+			logHub.Emit("error", "Антиспам-база не установлена: "+err.Error())
+			writeErr(w, 400, err)
+			return
+		}
+		logHub.Emit("success", fmt.Sprintf("Антиспам-база KCM %s установлена (%d правил).", res.Version, res.TotalRules))
+		writeJSON(w, 200, res)
+	})
+
+	mux.HandleFunc("/api/antispam/import", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Path    string `json:"path"`
+			Restart *bool  `json:"restart"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		restart := true
+		if body.Restart != nil {
+			restart = *body.Restart
+		}
+		res, err := ImportAntiSpamRuleFile(DefaultCertsRoot(), body.Path, restart)
+		if err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		logHub.Emit("success", "Антиспам-база KCM импортирована из локального файла.")
+		writeJSON(w, 200, res)
+	})
+
+	mux.HandleFunc("/api/antispam/rollback", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Restart *bool `json:"restart"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		restart := true
+		if body.Restart != nil {
+			restart = *body.Restart
+		}
+		res, err := RollbackAntiSpamDB(DefaultCertsRoot(), restart)
+		if err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		logHub.Emit("info", "Антиспам-база откатана к версии "+res.Version+".")
+		writeJSON(w, 200, res)
+	})
+
+	mux.HandleFunc("/api/antispam/remove", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Restart *bool `json:"restart"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		restart := true
+		if body.Restart != nil {
+			restart = *body.Restart
+		}
+		res, err := RemoveAntiSpamDB(DefaultCertsRoot(), restart)
+		if err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		logHub.Emit("info", "Антиспам-база KCM удалена из Kerio Connect.")
+		writeJSON(w, 200, res)
+	})
+
+	mux.HandleFunc("/api/antispam/auto", func(w http.ResponseWriter, r *http.Request) {
+		var body AntiSpamAutoOptions
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		certsDir := DefaultCertsRoot()
+		switch body.Action {
+		case "enable":
+			msg, err := PlatformInstallAntiSpamTask(body.IntervalHours)
+			if err != nil {
+				writeErr(w, 400, err)
+				return
+			}
+			st := LoadAntiSpamState(certsDir)
+			st.AutoUpdate = true
+			if body.IntervalHours > 0 {
+				st.IntervalHours = body.IntervalHours
+			}
+			_ = SaveAntiSpamState(certsDir, st)
+			logHub.Emit("success", msg)
+			writeJSON(w, 200, map[string]any{"ok": true, "message": msg, "autoUpdate": true,
+				"intervalHours": st.IntervalHours, "scheduled": PlatformQueryAntiSpamTask()})
+		case "disable":
+			msg, err := PlatformRemoveAntiSpamTask()
+			if err != nil {
+				msg = "Автообновление отключено (задача в Планировщике не найдена)."
+			}
+			st := LoadAntiSpamState(certsDir)
+			st.AutoUpdate = false
+			_ = SaveAntiSpamState(certsDir, st)
+			logHub.Emit("info", msg)
+			writeJSON(w, 200, map[string]any{"ok": true, "message": msg, "autoUpdate": false,
+				"scheduled": PlatformQueryAntiSpamTask()})
+		case "run-now":
+			if err := RunScheduledAntiSpamUpdate(certsDir, true, logHub.Emit); err != nil {
+				writeErr(w, 400, err)
+				return
+			}
+			writeJSON(w, 200, map[string]any{"ok": true, "message": "Проверка и обновление антиспам-базы выполнены.",
+				"status": GetAntiSpamStatus(certsDir)})
+		default:
+			writeErr(w, 400, fmt.Errorf("неизвестное действие автообновления базы: %s", body.Action))
+		}
+	})
+
+	mux.HandleFunc("/api/antispam/test-email", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Raw string `json:"raw"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		res, err := TestEmailAgainstAntiSpamDB(DefaultCertsRoot(), body.Raw)
+		if err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		writeJSON(w, 200, res)
+	})
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/ping" {
 			touchActivity()
@@ -1039,7 +1217,22 @@ func main() {
 	listenAddr := flag.String("listen", "", "Адрес и порт для веб-интерфейса (по умолчанию 127.0.0.1:0 для Desktop GUI)")
 	serverOnly := flag.Bool("server-only", false, "Не открывать окно браузера автоматически")
 	certsDirFlag := flag.String("certs-dir", "", "Папка хранения сертификатов")
+	antiSpamFlag := flag.Bool("antispam-update", false, "Тихое обновление антиспам-базы KCM с GitHub (для Планировщика Windows)")
 	flag.Parse()
+
+	if *antiSpamFlag {
+		certsDir := *certsDirFlag
+		if strings.TrimSpace(certsDir) == "" {
+			certsDir = DefaultCertsRoot()
+		}
+		err := RunScheduledAntiSpamUpdate(certsDir, false, func(level, msg string) {
+			fmt.Printf("[%s] %s\n", strings.ToUpper(level), msg)
+		})
+		if err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *renewFlag {
 		err := RunScheduledRenewals(*certsDirFlag, func(level, msg string) {

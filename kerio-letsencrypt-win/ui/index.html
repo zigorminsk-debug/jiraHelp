@@ -671,7 +671,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.3 • SSL • Аудит Почты • Delist • Проверка Санкций</span>
+        <span class="brand-badge">Windows Native GUI v4.4 • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -729,6 +729,9 @@
   <button type="button" class="nav-tab" data-tab="vault">
     📂 Выпущенные сертификаты и Автопродление
     <span class="tab-count" id="certCountBadge">0</span>
+  </button>
+  <button type="button" class="nav-tab" data-tab="antispam">
+    🛡️ Антиспам-база KCM (GitHub)
   </button>
   <button type="button" class="nav-tab" data-tab="tools">
     🧰 Инструменты админа (Заголовки / DNS)
@@ -1871,6 +1874,159 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   </section>
 
   <!-- TAB 6: PRO ADMIN TOOLS (EMAIL HEADER ANALYZER + TURNKEY DNS ZONE BUILDER) -->
+  <!-- ==================================================================
+       v4.4: АВТООБНОВЛЯЕМАЯ АНТИСПАМ-БАЗА KCM С GITHUB
+       ================================================================== -->
+  <section id="tab-antispam" class="tab-page">
+
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:12px;">
+        <div>
+          <div class="card-title">🛡️ Антиспам-база KCM с автообновлением с GitHub</div>
+          <div class="card-subtitle">
+            База собирается автоматически каждый день из открытых фидов (URLhaus, OpenPhish, Phishing Army, HaGeZi, Spamhaus DROP)
+            и курируемых списков мошеннических писем. Программа скачивает её с GitHub, проверяет <strong>SHA-256</strong>,
+            показывает предпросмотр и устанавливает в <strong>Kerio Connect</strong> как правила SpamAssassin
+            (<code>plugins\spamassassin\rules\kerio-antispam.cf</code>) — без сторонних программ и без передачи внутренних данных.
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="antiSpamOpenRulesFolder()">📂 Открыть папку правил Kerio</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="antiSpamOpenRepo()">🌐 Страница базы на GitHub</button>
+        </div>
+      </div>
+
+      <div id="antiSpamStatusBox">
+        <div class="hint-text">⏳ Чтение статуса базы…</div>
+      </div>
+
+      <div class="actions-row" style="justify-content:flex-start;flex-wrap:wrap;gap:8px;margin-top:14px;">
+        <button type="button" class="btn btn-outline" id="antiSpamCheckBtn" onclick="antiSpamCheck()">🔎 Проверить обновления на GitHub</button>
+        <button type="button" class="btn btn-blue" id="antiSpamPreviewBtn" onclick="antiSpamPreview()">👁 Предпросмотр установки (dry-run)</button>
+        <button type="button" class="btn btn-primary" id="antiSpamInstallBtn" onclick="antiSpamInstall()">⬇️ Установить / Обновить базу в Kerio</button>
+        <button type="button" class="btn btn-outline" id="antiSpamRollbackBtn" onclick="antiSpamRollback()">⏪ Откатить</button>
+        <button type="button" class="btn btn-danger" id="antiSpamRemoveBtn" onclick="antiSpamRemove()">🗑 Удалить базу</button>
+      </div>
+
+      <div class="check-box" style="margin-top:12px;">
+        <input type="checkbox" id="antiSpamRestartChk" checked>
+        <div>
+          <div class="check-box-title">Перезапускать службу Kerio MailServer после установки</div>
+          <div class="check-box-sub">
+            Обязательно для применения новых правил SpamAssassin. Без прав Администратора перезапуск не удастся —
+            программа подскажет, что сделать вручную (или включите/выключите SURBL в Контент-фильтре и нажмите «Применить»).
+          </div>
+        </div>
+      </div>
+
+      <div class="field-row" style="margin-top:14px;">
+        <div class="field">
+          <label class="field-label" for="antiSpamKerioDir">Папка установки Kerio Connect</label>
+          <input type="text" id="antiSpamKerioDir" placeholder="C:\Program Files\Kerio\MailServer">
+        </div>
+        <div class="field">
+          <label class="field-label" for="antiSpamRulesDir">Папка правил SpamAssassin</label>
+          <input type="text" id="antiSpamRulesDir" placeholder="...\plugins\spamassassin\rules">
+        </div>
+      </div>
+      <div class="actions-row" style="justify-content:flex-start;gap:8px;">
+        <button type="button" class="btn btn-outline btn-sm" onclick="antiSpamAutoDetect()">🪄 Определить автоматически</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="browseWindowsFolder('antiSpamKerioDir', 'Укажите папку установки Kerio Connect (например, C:\\Program Files\\Kerio\\MailServer)')">📁 Выбрать папку Kerio…</button>
+        <span class="hint-text" id="antiSpamDirHint"></span>
+      </div>
+
+      <div id="antiSpamActionResult" style="margin-top:14px;"></div>
+    </div>
+
+    <div class="card" id="antiSpamPreviewCard" style="display:none;">
+      <div class="card-header" style="flex-wrap:wrap;gap:10px;">
+        <div>
+          <div class="card-title">👁 Предпросмотр (dry-run): что именно будет установлено</div>
+          <div class="card-subtitle">Файл скачан с GitHub и проверен по SHA-256, но в Kerio <strong>ещё ничего не записано</strong>. Проверьте изменения и подтвердите установку.</div>
+        </div>
+        <button type="button" class="btn btn-primary" onclick="antiSpamInstall()">⬇️ Подтвердить установку</button>
+      </div>
+      <div id="antiSpamPreviewBox"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:10px;">
+        <div>
+          <div class="card-title">⏱ Автообновление базы (Планировщик Windows)</div>
+          <div class="card-subtitle">
+            Программа создаст задание <code>KerioCertManager_AntiSpamDB</code>, которое раз в N часов проверяет GitHub
+            и обновляет базу в Kerio без вашего участия. Нужны права Администратора.
+          </div>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="antiSpamInterval">Расписание проверки</label>
+          <select id="antiSpamInterval">
+            <option value="6">каждые 6 часов</option>
+            <option value="12" selected>каждые 12 часов</option>
+            <option value="24">раз в сутки (04:10)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">Текущее состояние</label>
+          <div id="antiSpamAutoState" class="hint-text">—</div>
+        </div>
+      </div>
+      <div class="actions-row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="btn btn-kerio" onclick="antiSpamAutoToggle(true)">✅ Включить автообновление</button>
+        <button type="button" class="btn btn-outline" onclick="antiSpamAutoToggle(false)">⏸ Выключить</button>
+        <button type="button" class="btn btn-blue" onclick="antiSpamRunNow()">🚀 Проверить и обновить сейчас</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:10px;">
+        <div>
+          <div class="card-title">🧪 Проверка письма по базе (dry-run, без отправки)</div>
+          <div class="card-subtitle">
+            Вставьте исходник письма (<code>From</code>, <code>Subject</code>, тело, при желании — заголовки <code>Received</code>)
+            и программа покажет, какие правила базы сработают и сколько очков SpamAssassin начислит Kerio Connect.
+            Письмо никуда не отправляется и не сохраняется.
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="antiSpamLoadSampleEmail()">📋 Вставить пример</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('antiSpamEmailRaw').value='';document.getElementById('antiSpamEmailResult').style.display='none';">Очистить</button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="antiSpamEmailRaw">Исходник письма</label>
+        <textarea id="antiSpamEmailRaw" rows="8" placeholder="From: &quot;Служба безопасности&quot; &lt;security@example-bank-verify.com&gt;&#10;Subject: Ваш аккаунт будет заблокирован&#10;Received: from unknown (unknown [203.0.113.45]) by mail.company.by ...&#10;&#10;Уважаемый клиент! Ваши данные карты будут удалены. Перейдите по ссылке https://example-bank-verify.com/login" style="width:100%;font-family:Consolas,monospace;font-size:12px;line-height:1.45;background:#0b1220;color:#e2e8f0;border:1px solid var(--border);border-radius:8px;padding:12px;"></textarea>
+      </div>
+      <div class="actions-row" style="justify-content:flex-end;">
+        <button type="button" class="btn btn-primary" onclick="antiSpamTestEmail()">🔬 Проверить письмо по антиспам-базе</button>
+      </div>
+      <div id="antiSpamEmailResult" style="display:none;margin-top:14px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">📖 Что именно делает база и как её обслуживать</div>
+          <div class="card-subtitle">Полная прозрачность: что установлено, куда и как это отключить.</div>
+        </div>
+      </div>
+      <div class="steps-list" style="line-height:1.85;font-size:13.5px;">
+        <div>1. <strong>Куда ставится:</strong> один файл <code>kerio-antispam.cf</code> в папку <code>&lt;Kerio&gt;\plugins\spamassassin\rules\</code>. Никаких изменений в <code>mailserver.cfg</code> и в базе пользователей.</div>
+        <div>2. <strong>Что внутри:</strong> домены отправителей (+3.2), адреса отправителей (+4.5), мотивы в теме (+1.8), фразы мошеннических писем (+1.5), домены фишинговых ссылок (+2.5), IP/CIDR источников в заголовках Received (+3.0) и белый список доверенных отправителей (−6.0).</div>
+        <div>3. <strong>Почему не ломает обычную почту:</strong> очки складываются с собственными правилами Kerio (SPF/DKIM/DMARC, DNSBL, байесовский фильтр), а белый список снижает риск ложных срабатываний для банков, госсервисов и крупных провайдеров.</div>
+        <div>4. <strong>Обновление:</strong> кнопка «Обновить базу в Kerio» или задание Планировщика. Перед записью — резервная копия в <code>&lt;certs&gt;\antispam\backup</code>, после записи — проверка SHA-256. Откат — одной кнопкой.</div>
+        <div>5. <strong>Удаление:</strong> «Удалить базу» убирает .cf из Kerio (копия остаётся в резервных). Через 10 минут после перезапуска службы правила перестают действовать.</div>
+        <div>6. <strong>Ручная установка без программы:</strong> скачайте <code>kerio-antispam.cf</code> со <a href="https://github.com/zigorminsk-debug/jiraHelp/releases/tag/antispam-db-latest" target="_blank" rel="noopener">страницы релиза</a>, положите в папку правил и перезапустите службу <code>KerioMailServer</code>.</div>
+        <div>7. <strong>Источники и лицензии:</strong> URLhaus (abuse.ch, CC0), OpenPhish public feed, Phishing Army (CC BY-NC 4.0), HaGeZi DNS blocklists, Spamhaus DROP. Курируемые списки и код сборщика — в репозитории <code>antispam-db/</code>.</div>
+      </div>
+      <div class="alert alert-info" style="margin-top:12px;">
+        База не заменяет антивирус и не блокирует легитимные рассылки по политическим или коммерческим признакам — только технические индикаторы спама, фишинга и вредоносных ссылок.
+      </div>
+    </div>
+  </section>
+
   <section id="tab-tools" class="tab-page">
 
     <!-- TOOL 1: RFC-822 EMAIL HEADER & HOP LATENCY ANALYZER -->
@@ -1987,7 +2143,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:1380px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist &amp; Sanctions Suite v4.3</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.4</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -2102,6 +2258,9 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
     document.querySelectorAll('.tab-page').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tabName));
     if (tabName === 'vault' || tabName === 'kerio') {
       loadCertificates();
+    }
+    if (tabName === 'antispam') {
+      loadAntiSpamStatus();
     }
   }
   document.querySelectorAll('.nav-tab').forEach(btn => {
@@ -4435,6 +4594,447 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
         ${renderSolutionBlockHtml(f.solution, 'sanctions_sol_' + idx, sr.targetMailHost || sr.targetDomain)}
       </div>
     `).join('');
+  }
+
+  // ========================================================================
+  // v4.4 — АВТООБНОВЛЯЕМАЯ АНТИСПАМ-БАЗА KCM (GitHub → Kerio Connect)
+  // ========================================================================
+  let lastAntiSpamStatus = {};
+
+  function antiSpamBusy(busy, text) {
+    ['antiSpamCheckBtn', 'antiSpamPreviewBtn', 'antiSpamInstallBtn', 'antiSpamRollbackBtn', 'antiSpamRemoveBtn']
+      .forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !!busy;
+      });
+    if (busy) {
+      const box = document.getElementById('antiSpamActionResult');
+      if (box) box.innerHTML = '<div class="alert alert-info"><span class="spinner"></span> ' + escapeHtml(text || 'Работаю…') + '</div>';
+    }
+  }
+
+  function antiSpamMeta(k, v) {
+    return '<div class="meta-item"><div class="meta-k">' + escapeHtml(k) + '</div><div class="meta-v">' + v + '</div></div>';
+  }
+
+  async function loadAntiSpamStatus() {
+    const box = document.getElementById('antiSpamStatusBox');
+    if (!box) return;
+    try {
+      const r = await fetch('/api/antispam/status');
+      const st = await r.json();
+      if (!r.ok) throw new Error(st.error || ('HTTP ' + r.status));
+      lastAntiSpamStatus = st;
+      renderAntiSpamStatus(st);
+    } catch (e) {
+      box.innerHTML = '<div class="alert alert-err">Не удалось прочитать статус базы: ' + escapeHtml(e.message) + '</div>';
+    }
+  }
+
+  function renderAntiSpamStatus(st) {
+    const box = document.getElementById('antiSpamStatusBox');
+    if (!box) return;
+    const installed = !!st.installed;
+    const groups = (st.groups || []).filter(g => g.count > 0);
+
+    let head = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:stretch;">';
+    head += antiSpamMeta('Версия базы в Kerio',
+      installed ? '<b style="color:#34d399">' + escapeHtml(st.version || '—') + '</b>' : '<span style="color:#f59e0b">не установлена</span>');
+    head += antiSpamMeta('Правил в базе', '<b>' + (st.totalRules || 0) + '</b>');
+    head += antiSpamMeta('Размер файла правил', installed ? (Math.round((st.size || 0) / 102.4) / 10 + ' КБ') : '—');
+    head += antiSpamMeta('Служба Kerio', escapeHtml(st.serviceStatus || '—'));
+    head += antiSpamMeta('Последняя проверка GitHub',
+      escapeHtml(st.lastCheckAt || '—') + (st.lastRemoteVersion ? ' · GitHub: <b>' + escapeHtml(st.lastRemoteVersion) + '</b>' : ''));
+    head += '</div>';
+
+    let body = '';
+    if (installed && groups.length) {
+      body += '<table class="data-table" style="margin-top:14px;"><thead><tr><th>Группа правил</th><th>Правил</th><th>Очки SpamAssassin</th></tr></thead><tbody>';
+      groups.forEach(g => {
+        body += '<tr><td>' + escapeHtml(g.label) + '</td><td><b>' + g.count + '</b></td><td>' + escapeHtml(g.score) + '</td></tr>';
+      });
+      body += '</tbody></table>';
+    } else if (!installed) {
+      body += '<div class="alert alert-warn" style="margin-top:14px;">База ещё не установлена в Kerio Connect. Нажмите «Проверить обновления на GitHub», затем «Предпросмотр установки» и «Установить базу».</div>';
+    }
+
+    body += '<div class="meta-k" style="margin-top:14px;">Пути</div>';
+    body += '<div class="hint-text" style="line-height:1.7;">';
+    body += 'Kerio: <code>' + escapeHtml(st.kerioDir || 'не найден') + '</code>' + (st.kerioDirSource ? ' <span style="opacity:.7">(' + escapeHtml(st.kerioDirSource) + ')</span>' : '') + '<br>';
+    body += 'Правила: <code>' + escapeHtml(st.rulesDir || 'не найден') + '</code><br>';
+    body += 'База: <code>' + escapeHtml(st.rulePath || '—') + '</code><br>';
+    body += 'Локальные списки для проверки писем: <code>' + escapeHtml(st.listsDir || '—') + '</code> ' +
+      (st.listsAvailable ? '<span style="color:#34d399">✓ доступны</span>' : '<span style="color:#f59e0b">(появятся после установки)</span>') + '<br>';
+    body += 'Резервных копий: <b>' + (st.backups || 0) + '</b>' + (st.lastBackup ? ', последняя: <code>' + escapeHtml(st.lastBackup) + '</code>' : '');
+    body += '</div>';
+
+    if (st.lastError) {
+      body += '<div class="alert alert-err" style="margin-top:12px;"><b>Последняя ошибка:</b><br>' + escapeHtml(st.lastError) + '</div>';
+    }
+    if (st.lastCheckAt) {
+      body += '<div class="hint-text" style="margin-top:10px;">Последняя проверка: <b>' + escapeHtml(st.lastCheckAt) + '</b>' +
+        (st.lastRemoteVersion ? ' · на GitHub <b>' + escapeHtml(st.lastRemoteVersion) + '</b>' : '') + '</div>';
+    }
+
+    if (Array.isArray(st.history) && st.history.length) {
+      body += '<div class="meta-k" style="margin-top:14px;">История операций</div>';
+      body += '<div class="hint-text" style="line-height:1.7;font-family:Consolas,monospace;font-size:12px;">';
+      st.history.slice(-6).reverse().forEach(h => {
+        body += '• ' + escapeHtml(h.when) + ' — <b>' + escapeHtml(h.action) + '</b> ' + escapeHtml(h.version || '') +
+          (h.note ? ' <span style="opacity:.75">(' + escapeHtml(h.note) + ')</span>' : '') + '<br>';
+      });
+      body += '</div>';
+    }
+
+    box.innerHTML = head + body;
+
+    const kerioInput = document.getElementById('antiSpamKerioDir');
+    const rulesInput = document.getElementById('antiSpamRulesDir');
+    if (kerioInput && !kerioInput.value && st.kerioDir) kerioInput.value = st.kerioDir;
+    if (rulesInput && !rulesInput.value && st.rulesDir) rulesInput.value = st.rulesDir;
+    if (document.getElementById('antiSpamInterval') && st.intervalHours) {
+      document.getElementById('antiSpamInterval').value = String(st.intervalHours);
+    }
+    const autoState = document.getElementById('antiSpamAutoState');
+    if (autoState) {
+      autoState.innerHTML = st.autoUpdate
+        ? '<span style="color:#34d399">✅ включено</span> · задание в Планировщике: ' + (st.taskScheduled ? '<b>зарегистрировано</b>' : '<span style="color:#f59e0b">не найдено</span>')
+        : '<span style="color:#f59e0b">⏸ выключено</span>' + (st.taskScheduled ? ' · задание в Планировщике осталось' : '');
+    }
+    const hint = document.getElementById('antiSpamDirHint');
+    if (hint) {
+      hint.textContent = st.kerioCandidates && st.kerioCandidates.length
+        ? 'Найдено установок Kerio: ' + st.kerioCandidates.length + ' — при необходимости выберите/впишите путь вручную.'
+        : 'Kerio Connect не найден автоматически — укажите папку установки вручную.';
+    }
+  }
+
+  function antiSpamCollectDirs() {
+    return {
+      kerioDir: (document.getElementById('antiSpamKerioDir') || {}).value || '',
+      rulesDir: (document.getElementById('antiSpamRulesDir') || {}).value || '',
+      restart: !!(document.getElementById('antiSpamRestartChk') || {}).checked,
+    };
+  }
+
+  async function antiSpamCheck() {
+    antiSpamBusy(true, 'Проверяю базу на GitHub…');
+    try {
+      const r = await fetch('/api/antispam/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      const box = document.getElementById('antiSpamActionResult');
+      const m = d.manifest || {};
+      let html = '<div class="alert ' + (d.updateAvailable ? 'alert-warn' : 'alert-ok') + '">';
+      html += d.updateAvailable
+        ? '🔔 <b>Доступно обновление:</b> установлено <b>' + escapeHtml(d.installedVersion || 'нет базы') + '</b>, на GitHub <b>' + escapeHtml(m.version) + '</b>.'
+        : '✅ Установлена актуальная версия базы: <b>' + escapeHtml(m.version) + '</b>.';
+      html += '<div class="hint-text" style="margin-top:6px;">Источник: ' + escapeHtml(d.source || '') + ' · проверено: ' + escapeHtml(d.checkedAt || '') +
+        ' · сгенерирована: ' + escapeHtml(m.generatedAt || '') + '</div></div>';
+      const c = m.counts || {};
+      html += '<div class="hint-text" style="margin-top:8px;">В базе: домены <b>' + (c.domains || 0) + '</b>, адреса <b>' + (c.emails || 0) +
+        '</b>, темы <b>' + (c.subjects || 0) + '</b>, фразы <b>' + (c.phrases || 0) + '</b>, ссылки <b>' + (c.urls || 0) +
+        '</b>, IP <b>' + (c.ips || 0) + '</b>.</div>';
+      if (d.updateAvailable) {
+        html += '<div class="actions-row" style="justify-content:flex-start;margin-top:10px;"><button type="button" class="btn btn-blue" onclick="antiSpamPreview()">👁 Проверить, что изменится</button></div>';
+      }
+      box.innerHTML = html;
+      showToast(d.updateAvailable ? 'На GitHub есть новая версия антиспам-базы' : 'Антиспам-база актуальна');
+      loadAntiSpamStatus();
+    } catch (e) {
+      document.getElementById('antiSpamActionResult').innerHTML = '<div class="alert alert-err">' + escapeHtml(e.message) + '</div>';
+      showToast(e.message, true);
+    } finally {
+      antiSpamBusy(false);
+    }
+  }
+
+  async function antiSpamPreview() {
+    antiSpamBusy(true, 'Скачиваю базу с GitHub и сравниваю с установленной…');
+    try {
+      const r = await fetch('/api/antispam/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      document.getElementById('antiSpamActionResult').innerHTML = '';
+      const card = document.getElementById('antiSpamPreviewCard');
+      const box = document.getElementById('antiSpamPreviewBox');
+      const m = d.manifest || {};
+      const diff = d.diff || {};
+      let html = '<div style="display:flex;gap:14px;flex-wrap:wrap;">';
+      html += antiSpamMeta('Версия на GitHub', '<b>' + escapeHtml(m.version) + '</b>');
+      html += antiSpamMeta('Установлено сейчас', '<b>' + escapeHtml(diff.oldVersion || 'нет базы') + '</b>');
+      html += antiSpamMeta('Размер файла', (Math.round((d.ruleSize || 0) / 102.4) / 10) + ' КБ');
+      html += antiSpamMeta('Проверка SHA-256', '<span style="color:#34d399">✓ пройдена</span>');
+      html += '</div>';
+
+      html += '<div class="alert alert-info" style="margin-top:12px;">' + escapeHtml(diff.summary || '') + '</div>';
+
+      const groups = d.groups || [];
+      html += '<table class="data-table" style="margin-top:12px;"><thead><tr><th>Группа</th><th>Будет в базе</th><th>Сейчас</th><th>Очки</th></tr></thead><tbody>';
+      groups.forEach(g => {
+        const old = (diff.oldCounts || {})[g.key] || 0;
+        const delta = g.count - old;
+        const deltaHtml = delta === 0 ? '<span style="opacity:.6">—</span>' : (delta > 0 ? '<span style="color:#34d399">+' + delta + '</span>' : '<span style="color:#f87171">' + delta + '</span>');
+        html += '<tr><td>' + escapeHtml(g.label) + '</td><td><b>' + g.count + '</b></td><td>' + old + ' (' + deltaHtml + ')</td><td>' + escapeHtml(g.score) + '</td></tr>';
+      });
+      html += '</tbody></table>';
+
+      if (Array.isArray(diff.sampleNew) && diff.sampleNew.length) {
+        html += '<div class="meta-k" style="margin-top:12px;">Примеры новых правил</div>';
+        html += '<div class="hint-text" style="font-family:Consolas,monospace;font-size:12px;line-height:1.6;">' +
+          diff.sampleNew.map(n => '• ' + escapeHtml(n)).join('<br>') + '</div>';
+      }
+
+      html += '<div class="meta-k" style="margin-top:12px;">Куда будет установлено</div>';
+      html += '<div class="hint-text" style="line-height:1.7;">';
+      html += 'Файл: <code>' + escapeHtml(d.rulePath || 'не определён') + '</code><br>';
+      html += 'Резервная копия: ' + (d.backupWillBeCreated ? 'будет создана' : 'не требуется') + '<br>';
+      html += 'Перезапуск Kerio MailServer: ' + (d.restartNeeded ? '<b style="color:#f59e0b">нужен</b>' : 'не нужен') + (d.upToDate ? ' <span style="opacity:.7">(версия совпадает — можно переустановить принудительно)</span>' : '');
+      html += '</div>';
+
+      if (Array.isArray(d.notes) && d.notes.length) {
+        html += '<div class="alert alert-warn" style="margin-top:12px;">' + d.notes.map(n => '• ' + escapeHtml(n)).join('<br>') + '</div>';
+      }
+      html += '<div class="actions-row" style="justify-content:flex-start;margin-top:12px;">';
+      html += '<button type="button" class="btn btn-primary" onclick="antiSpamInstall()">⬇️ Установить версию ' + escapeHtml(m.version) + '</button>';
+      html += '<button type="button" class="btn btn-outline" onclick="document.getElementById(\'antiSpamPreviewCard\').style.display=\'none\'">Отмена</button>';
+      html += '</div>';
+
+      box.innerHTML = html;
+      card.style.display = 'block';
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      document.getElementById('antiSpamActionResult').innerHTML = '<div class="alert alert-err">' + escapeHtml(e.message) + '</div>';
+      showToast(e.message, true);
+    } finally {
+      antiSpamBusy(false);
+    }
+  }
+
+  function antiSpamRenderInstallResult(d, title) {
+    const box = document.getElementById('antiSpamActionResult');
+    const ok = d.ok !== false;
+    let html = '<div class="alert ' + (ok ? 'alert-ok' : 'alert-err') + '"><b>' + escapeHtml(title || 'Готово') + '</b>';
+    if (d.version) html += '<div style="margin-top:6px;">Версия базы: <b>' + escapeHtml(d.version) + '</b>' +
+      (d.totalRules ? ' · правил: <b>' + d.totalRules + '</b>' : '') +
+      (d.source ? ' · источник: ' + escapeHtml(d.source) : '') + '</div>';
+    html += '</div>';
+    if (Array.isArray(d.steps) && d.steps.length) {
+      html += '<div class="steps-list" style="margin-top:10px;line-height:1.75;font-size:13px;">' +
+        d.steps.map(s => '<div>✔ ' + escapeHtml(s) + '</div>').join('') + '</div>';
+    }
+    if (d.restarted) html += '<div class="alert alert-ok" style="margin-top:10px;">🔄 Служба Kerio MailServer перезапущена — правила активны.</div>';
+    if (d.restartError) html += '<div class="alert alert-warn" style="margin-top:10px;"><b>Перезапуск не выполнен:</b> ' + escapeHtml(d.restartError) + '</div>';
+    if (Array.isArray(d.warnings) && d.warnings.length) {
+      html += '<div class="alert alert-warn" style="margin-top:10px;">' + d.warnings.map(w => '⚠ ' + escapeHtml(w)).join('<br>') + '</div>';
+    }
+    if (d.backupPath) html += '<div class="hint-text" style="margin-top:8px;">Резервная копия: <code>' + escapeHtml(d.backupPath) + '</code></div>';
+    box.innerHTML = html;
+  }
+
+  async function antiSpamInstall() {
+    const dirs = antiSpamCollectDirs();
+    if (!confirm('Установить антиспам-базу с GitHub в Kerio Connect?' + (dirs.restart ? '\n\nСлужба Kerio MailServer будет перезапущена — почта на несколько секунд станет недоступна.' : ''))) return;
+    antiSpamBusy(true, 'Скачиваю базу, проверяю SHA-256, устанавливаю в Kerio…');
+    try {
+      const r = await fetch('/api/antispam/install', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dirs)
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      antiSpamRenderInstallResult(d, 'Антиспам-база установлена в Kerio Connect');
+      document.getElementById('antiSpamPreviewCard').style.display = 'none';
+      showToast('Антиспам-база обновлена до ' + (d.version || ''));
+      loadAntiSpamStatus();
+    } catch (e) {
+      document.getElementById('antiSpamActionResult').innerHTML = '<div class="alert alert-err"><b>База не установлена:</b><br>' + escapeHtml(e.message) + '</div>';
+      showToast(e.message, true);
+    } finally {
+      antiSpamBusy(false);
+    }
+  }
+
+  async function antiSpamRollback() {
+    if (!confirm('Откатить антиспам-базу к предыдущей версии из резервной копии?')) return;
+    antiSpamBusy(true, 'Восстанавливаю резервную копию…');
+    try {
+      const r = await fetch('/api/antispam/rollback', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ restart: !!(document.getElementById('antiSpamRestartChk') || {}).checked })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      antiSpamRenderInstallResult(d, 'Выполнен откат антиспам-базы');
+      showToast('Откат выполнен');
+      loadAntiSpamStatus();
+    } catch (e) {
+      document.getElementById('antiSpamActionResult').innerHTML = '<div class="alert alert-err">' + escapeHtml(e.message) + '</div>';
+      showToast(e.message, true);
+    } finally {
+      antiSpamBusy(false);
+    }
+  }
+
+  async function antiSpamRemove() {
+    if (!confirm('Удалить антиспам-базу из Kerio Connect?\n\nФайл kerio-antispam.cf будет убран из папки правил, копия останется в резервных.')) return;
+    antiSpamBusy(true, 'Удаляю базу из Kerio…');
+    try {
+      const r = await fetch('/api/antispam/remove', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ restart: !!(document.getElementById('antiSpamRestartChk') || {}).checked })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      document.getElementById('antiSpamActionResult').innerHTML =
+        '<div class="alert alert-ok"><b>База удалена из Kerio Connect.</b></div>' +
+        '<div class="steps-list" style="margin-top:10px;line-height:1.7;">' + (d.steps || []).map(s => '<div>✔ ' + escapeHtml(s) + '</div>').join('') + '</div>' +
+        (Array.isArray(d.warnings) && d.warnings.length ? '<div class="alert alert-warn" style="margin-top:10px;">' + d.warnings.map(w => '⚠ ' + escapeHtml(w)).join('<br>') + '</div>' : '');
+      showToast('Антиспам-база удалена');
+      loadAntiSpamStatus();
+    } catch (e) {
+      document.getElementById('antiSpamActionResult').innerHTML = '<div class="alert alert-err">' + escapeHtml(e.message) + '</div>';
+      showToast(e.message, true);
+    } finally {
+      antiSpamBusy(false);
+    }
+  }
+
+  async function antiSpamAutoToggle(enable) {
+    const interval = parseInt((document.getElementById('antiSpamInterval') || {}).value || '12', 10);
+    try {
+      const r = await fetch('/api/antispam/auto', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: enable ? 'enable' : 'disable', intervalHours: interval })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      showToast(d.message || 'Готово');
+      loadAntiSpamStatus();
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  }
+
+  async function antiSpamRunNow() {
+    antiSpamBusy(true, 'Проверяю GitHub и обновляю базу в Kerio…');
+    try {
+      const r = await fetch('/api/antispam/auto', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'run-now' })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      const st = d.status || {};
+      document.getElementById('antiSpamActionResult').innerHTML =
+        '<div class="alert alert-ok"><b>Проверка выполнена.</b><div style="margin-top:6px;">Установленная версия: <b>' +
+        escapeHtml(st.version || 'нет базы') + '</b>' + (st.lastRemoteVersion ? ' · на GitHub: <b>' + escapeHtml(st.lastRemoteVersion) + '</b>' : '') + '</div></div>';
+      showToast('Проверка и обновление выполнены');
+      loadAntiSpamStatus();
+    } catch (e) {
+      document.getElementById('antiSpamActionResult').innerHTML = '<div class="alert alert-err">' + escapeHtml(e.message) + '</div>';
+      showToast(e.message, true);
+    } finally {
+      antiSpamBusy(false);
+    }
+  }
+
+  async function antiSpamAutoDetect() {
+    try {
+      const r = await fetch('/api/antispam/status');
+      const st = await r.json();
+      lastAntiSpamStatus = st;
+      const kerioInput = document.getElementById('antiSpamKerioDir');
+      const rulesInput = document.getElementById('antiSpamRulesDir');
+      if (st.kerioDir) kerioInput.value = st.kerioDir;
+      if (st.rulesDir) rulesInput.value = st.rulesDir;
+      if (!st.kerioDir) {
+        showToast('Kerio Connect не найден автоматически — укажите папку установки вручную', true);
+      } else {
+        showToast('Найдено: ' + st.kerioDir);
+      }
+      renderAntiSpamStatus(st);
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  }
+
+  async function antiSpamOpenRulesFolder() {
+    const st = lastAntiSpamStatus || {};
+    const path = st.rulesDir || st.kerioDir;
+    if (!path) {
+      showToast('Папка Kerio ещё не определена — сначала укажите её вручную или нажмите «Определить автоматически»', true);
+      return;
+    }
+    const r = await fetch('/api/windows/open-folder', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: path })
+    });
+    const d = await r.json();
+    if (d.error) showToast(d.error, true);
+  }
+
+  function antiSpamOpenRepo() {
+    const st = lastAntiSpamStatus || {};
+    window.open(st.releaseUrl || 'https://github.com/zigorminsk-debug/jiraHelp/releases', '_blank');
+  }
+
+  function antiSpamLoadSampleEmail() {
+    document.getElementById('antiSpamEmailRaw').value = [
+      'From: "Служба безопасности банка" <security@example-bank-verify.com>',
+      'To: client@company.by',
+      'Subject: Ваш аккаунт будет заблокирован — подтвердите данные карты',
+      'Received: from unknown (unknown [203.0.113.45]) by mail.company.by with SMTP; Mon, 1 Jan 2026 10:00:00 +0300',
+      'Content-Type: text/plain; charset=UTF-8',
+      '',
+      'Уважаемый клиент!',
+      'Служба безопасности банка зафиксировала подозрительную операцию.',
+      'Ваши данные карты будут удалены. Для получения приза и во избежание блокировки',
+      'перейдите по ссылке ниже и укажите CVV код:',
+      'https://example-bank-verify.com/login',
+      '',
+      'Оплатите комиссию в течение 24 часов.'
+    ].join('\n');
+  }
+
+  async function antiSpamTestEmail() {
+    const raw = (document.getElementById('antiSpamEmailRaw') || {}).value || '';
+    if (!raw.trim()) {
+      showToast('Вставьте исходник письма', true);
+      return;
+    }
+    try {
+      const r = await fetch('/api/antispam/test-email', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw: raw })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      const level = d.level || 'clean';
+      const cls = level === 'spam' ? 'alert-err' : (level === 'likely' ? 'alert-warn' : 'alert-ok');
+      let html = '<div class="alert ' + cls + '"><b>' + escapeHtml(d.verdict || '') + '</b>';
+      html += '<div class="hint-text" style="margin-top:6px;">От: <code>' + escapeHtml(d.from || '—') + '</code>' +
+        (d.fromDomain ? ' · домен: <code>' + escapeHtml(d.fromDomain) + '</code>' : '') +
+        ' · сработало правил: <b>' + (d.rulesHit || 0) + '</b></div></div>';
+      if (Array.isArray(d.matches) && d.matches.length) {
+        html += '<table class="data-table" style="margin-top:12px;"><thead><tr><th>Группа</th><th>Совпадение</th><th>Очки</th></tr></thead><tbody>';
+        d.matches.forEach(m => {
+          html += '<tr><td>' + escapeHtml(m.group) + '<div class="hint-text" style="font-family:Consolas,monospace;font-size:11px;">' +
+            escapeHtml(m.rule) + '</div></td><td><code>' + escapeHtml(m.value) + '</code></td><td><b>' +
+            (m.weight > 0 ? '+' : '') + m.weight + '</b></td></tr>';
+        });
+        html += '<tr><td colspan="2" style="text-align:right;"><b>Итого</b></td><td><b>' + (d.score || 0).toFixed(1) + '</b></td></tr>';
+        html += '</tbody></table>';
+      }
+      if (Array.isArray(d.notes) && d.notes.length) {
+        html += '<div class="hint-text" style="margin-top:10px;line-height:1.7;">' + d.notes.map(n => '• ' + escapeHtml(n)).join('<br>') + '</div>';
+      }
+      const box = document.getElementById('antiSpamEmailResult');
+      box.innerHTML = html;
+      box.style.display = 'block';
+    } catch (e) {
+      const box = document.getElementById('antiSpamEmailResult');
+      box.innerHTML = '<div class="alert alert-err">' + escapeHtml(e.message) + '</div>';
+      box.style.display = 'block';
+    }
   }
 
   initApp();
