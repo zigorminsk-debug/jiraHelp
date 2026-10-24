@@ -501,6 +501,61 @@ func buildRouter() http.Handler {
 		})
 	})
 
+	mux.HandleFunc("/api/kerio/diagnose", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, 405, fmt.Errorf("method not allowed"))
+			return
+		}
+		var body struct {
+			Host        string `json:"host"`
+			Port        int    `json:"port"`
+			User        string `json:"user"`
+			Password    string `json:"password"`
+			Domain      string `json:"domain"`
+			ProbeUpload bool   `json:"probeUpload"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		res := DiagnoseKerioConnection(body.Host, body.Port, body.User, body.Password, body.Domain, body.ProbeUpload)
+		if res.OK {
+			logHub.Emit("success", res.Verdict)
+		} else {
+			logHub.Emit("warning", res.Verdict)
+		}
+		for _, st := range res.Steps {
+			if st.Status == "fail" {
+				logHub.Emit("error", st.Title+": "+st.Detail)
+			}
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "diagnostics": res})
+	})
+
+	mux.HandleFunc("/api/kerio/discover", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, 405, fmt.Errorf("method not allowed"))
+			return
+		}
+		var body struct {
+			Host   string `json:"host"`
+			Domain string `json:"domain"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		probes := DiscoverKerioCandidates(body.Host, body.Domain)
+		reachable := 0
+		for _, p := range probes {
+			if p.TCP {
+				reachable++
+			}
+		}
+		logHub.Emit("info", fmt.Sprintf("Поиск Kerio в сети: проверено %d адресов, порт 4040 открыт на %d.", len(probes), reachable))
+		writeJSON(w, 200, map[string]any{"ok": true, "candidates": probes})
+	})
+
 	mux.HandleFunc("/api/sanctions-check", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeErr(w, 405, fmt.Errorf("method not allowed"))

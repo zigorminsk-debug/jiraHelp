@@ -1,0 +1,73 @@
+name: Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - arena/f70f3591-jirahelp
+    paths:
+      - 'kerio-letsencrypt-win/**'
+      - '.github/workflows/build-windows.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+
+      - name: go vet (informational)
+        working-directory: kerio-letsencrypt-win
+        run: go vet ./... || true
+
+      - name: Unit tests
+        working-directory: kerio-letsencrypt-win
+        run: go test ./... -count=1
+
+      - name: Build Windows x64 GUI executable
+        working-directory: kerio-letsencrypt-win
+        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -mod=vendor -trimpath -ldflags "-s -w -H windowsgui" -o ../KerioCertManager.exe .
+
+      - name: Package ZIP
+        run: |
+          set -e
+          rm -rf dist
+          mkdir -p "dist/Значки на выбор"
+          cp KerioCertManager.exe dist/
+          cp kerio-letsencrypt-win/README.md "dist/README-Инструкция.md"
+          cp kerio-letsencrypt-win/ui/icons/emerald-shield.ico "dist/Значки на выбор/1-Emerald-Shield-SSL.ico"
+          cp kerio-letsencrypt-win/ui/icons/emerald-shield.png "dist/Значки на выбор/1-Emerald-Shield-SSL.png"
+          cp kerio-letsencrypt-win/ui/icons/kerio-amber.ico "dist/Значки на выбор/2-Kerio-Amber-Key.ico"
+          cp kerio-letsencrypt-win/ui/icons/kerio-amber.png "dist/Значки на выбор/2-Kerio-Amber-Key.png"
+          cp kerio-letsencrypt-win/ui/icons/sapphire-globe.ico "dist/Значки на выбор/3-Sapphire-Globe-TLS.ico"
+          cp kerio-letsencrypt-win/ui/icons/sapphire-globe.png "dist/Значки на выбор/3-Sapphire-Globe-TLS.png"
+          cp kerio-letsencrypt-win/ui/icons/titanium-pro.ico "dist/Значки на выбор/4-Dark-Titanium-Pro.ico"
+          cp kerio-letsencrypt-win/ui/icons/titanium-pro.png "dist/Значки на выбор/4-Dark-Titanium-Pro.png"
+          cd dist
+          zip -r ../KerioCertManager-Windows-x64.zip . > /dev/null
+          cd ..
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: KerioCertManager-build
+          path: |
+            KerioCertManager.exe
+            KerioCertManager-Windows-x64.zip
+          retention-days: 14
+
+      - name: Publish rolling release (best effort)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view kerio-latest > /dev/null 2>&1 || gh release create kerio-latest --title "KerioCertManager latest build" --notes "Automated build of the current branch" || true
+          gh release upload kerio-latest KerioCertManager.exe KerioCertManager-Windows-x64.zip --clobber || true

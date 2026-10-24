@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -234,175 +233,27 @@ func RecordAuditAndComputeDelta(baseDir string, rep *MailAuditReport) AuditDelta
 // 3. LIVE KERIO CONNECT (:4040) ACTIVE SSL CERTIFICATE INSPECTOR
 // ============================================================================
 
-type KerioRemoteCertInfo struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	HostNames  []string `json:"hostNames"`
-	IssuerName string   `json:"issuerName"`
-	ValidFrom  string   `json:"validFrom"`
-	ValidTo    string   `json:"validTo"`
-	Active     bool     `json:"active"`
-	Type       string   `json:"type"`
-}
-
+// InspectKerioServerCertificates подключается к Kerio Connect Admin API и
+// возвращает список сертификатов сервера (используется кнопкой проверки связи).
 func InspectKerioServerCertificates(host string, port int, user, pass string) ([]KerioRemoteCertInfo, error) {
-	if strings.TrimSpace(host) == "" {
-		host = "127.0.0.1"
-	}
-	if port <= 0 {
-		port = 4040
-	}
-	baseURL := fmt.Sprintf("https://%s/admin/api/jsonrpc/", net.JoinHostPort(strings.TrimSpace(host), fmt.Sprintf("%d", port)))
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-
-	var token string
-	var sessionCookie *http.Cookie
-	nextID := 1
-
-	callRPC := func(method string, params any) (json.RawMessage, error) {
-		payload := map[string]any{
-			"jsonrpc": "2.0",
-			"id":      nextID,
-			"method":  method,
-			"params":  params,
-		}
-		if token != "" {
-			payload["token"] = token
-		}
-		nextID++
-		b, _ := json.Marshal(payload)
-		req, err := http.NewRequest(http.MethodPost, baseURL, strings.NewReader(string(b)))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if token != "" {
-			req.Header.Set("X-Token", token)
-		}
-		if sessionCookie != nil {
-			req.AddCookie(sessionCookie)
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("не удалось подключиться к Kerio Admin API (%s:%d): %w", host, port, err)
-		}
-		defer resp.Body.Close()
-		for _, ck := range resp.Cookies() {
-			if strings.Contains(strings.ToUpper(ck.Name), "SESSION") {
-				sessionCookie = ck
-			}
-		}
-		var out struct {
-			Result json.RawMessage `json:"result"`
-			Error  *struct {
-				Code    int    `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-			return nil, fmt.Errorf("некорректный ответ API Kerio: %w", err)
-		}
-		if out.Error != nil {
-			return nil, fmt.Errorf("%s (код %d)", out.Error.Message, out.Error.Code)
-		}
-		return out.Result, nil
-	}
-
-	loginRaw, err := callRPC("Session.login", map[string]any{
-		"userName": user,
-		"password": pass,
-		"application": map[string]any{
-			"name":    "KerioCertManager",
-			"vendor":  "KerioSSLTool",
-			"version": "4.0",
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("ошибка входа в Kerio Connect (:4040): %w", err)
-	}
-	var loginRes struct {
-		Token string `json:"token"`
-	}
-	_ = json.Unmarshal(loginRaw, &loginRes)
-	token = loginRes.Token
-	defer func() { _, _ = callRPC("Session.logout", map[string]any{}) }()
-
-	certPrefix := "ConnectCertificate"
-	rawList, err := callRPC("ConnectCertificate.get", map[string]any{})
-	if err != nil && (strings.Contains(err.Error(), "Method not found") || strings.Contains(err.Error(), "-32601")) {
-		certPrefix = "Certificates"
-		rawList, err = callRPC("Certificates.get", map[string]any{})
-	}
-	_ = certPrefix
-	if err != nil {
-		return nil, fmt.Errorf("не удалось получить список сертификатов Kerio: %w", err)
-	}
-
-	var parsed struct {
-		Certificates []struct {
-			Id               string   `json:"id"`
-			Name             string   `json:"name"`
-			SubjectHostNames []string `json:"subjectHostNames"`
-			Issuer           []struct {
-				Name  string `json:"name"`
-				Value string `json:"value"`
-			} `json:"issuer"`
-			Subject []struct {
-				Name  string `json:"name"`
-				Value string `json:"value"`
-			} `json:"subject"`
-			ValidPeriod struct {
-				ValidFromDate string `json:"validFromDate"`
-				ValidToDate   string `json:"validToDate"`
-			} `json:"validPeriod"`
-			Active bool   `json:"active"`
-			Type   string `json:"type"`
-		} `json:"certificates"`
-	}
-	if err := json.Unmarshal(rawList, &parsed); err != nil {
+	h, p := NormalizeKerioHost(host, port)
+	cli := NewKerioClient(KerioEndpoint{Host: h, Port: p})
+	if err := cli.Login(user, pass, ""); err != nil {
 		return nil, err
 	}
-
-	var result []KerioRemoteCertInfo
-	for _, c := range parsed.Certificates {
-		var issuerCN, subjCN string
-		for _, kv := range c.Issuer {
-			if kv.Name == "CN" || kv.Name == "O" {
-				if issuerCN == "" {
-					issuerCN = kv.Value
-				}
-			}
+	defer cli.Logout()
+	if who, err := cli.WhoAmI(); err == nil && !who.IsAdmin {
+		return nil, &KerioAPIError{
+			Kind: "rights", Method: "Session.whoAmI",
+			Message: fmt.Sprintf("учётка %s не является администратором Kerio Connect (роль: %s)", who.LoginName, who.Role),
+			Fix:     "Добавьте учётку в Configuration → Administration → Administrators или используйте мастер-администратора admin.",
 		}
-		for _, kv := range c.Subject {
-			if kv.Name == "CN" {
-				subjCN = kv.Value
-			}
-		}
-		hosts := c.SubjectHostNames
-		if len(hosts) == 0 && subjCN != "" {
-			hosts = []string{subjCN}
-		}
-		name := c.Name
-		if name == "" {
-			name = subjCN
-		}
-		result = append(result, KerioRemoteCertInfo{
-			ID:         c.Id,
-			Name:       name,
-			HostNames:  hosts,
-			IssuerName: issuerCN,
-			ValidFrom:  c.ValidPeriod.ValidFromDate,
-			ValidTo:    c.ValidPeriod.ValidToDate,
-			Active:     c.Active,
-			Type:       c.Type,
-		})
 	}
-	return result, nil
+	certs, _, err := cli.ListCertificates()
+	if err != nil {
+		return nil, err
+	}
+	return certs, nil
 }
 
 // ============================================================================

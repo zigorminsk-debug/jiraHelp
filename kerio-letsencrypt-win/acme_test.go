@@ -435,10 +435,22 @@ func TestEndToEndACMEv2HTTP01AndTLSALPN01AndDNS01(t *testing.T) {
 	var activatedID string
 	uploadSeq := 0
 	importedDone := false
+	correctUploadPart := 0
 	kerioMock := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json-rpc; charset=utf-8")
+		if r.Method == http.MethodGet {
+			w.Header().Set("Server", "Kerio Connect 10.0.5")
+			_, _ = w.Write([]byte(`<html><head><title>Kerio Connect Administration</title></head><body>login</body></html>`))
+			return
+		}
 		if r.URL.Path == "/admin/api/jsonrpc/upload/" {
 			uploadSeq++
+			// Kerio принимает multipart-часть name="unknown"; filename="newFile.bin"
+			if err := r.ParseMultipartForm(8 << 20); err == nil && r.MultipartForm != nil {
+				if fhs := r.MultipartForm.File["unknown"]; len(fhs) > 0 && fhs[0].Filename == "newFile.bin" {
+					correctUploadPart++
+				}
+			}
 			_, _ = w.Write([]byte(fmt.Sprintf(`{"jsonrpc":"2.0","result":{"fileUpload":{"id":"upload-%d"}}}`, uploadSeq)))
 			return
 		}
@@ -450,7 +462,22 @@ func TestEndToEndACMEv2HTTP01AndTLSALPN01AndDNS01(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&rpcReq)
 		switch rpcReq.Method {
 		case "Session.login":
+			var lp struct {
+				Password string `json:"password"`
+			}
+			_ = json.Unmarshal(rpcReq.Params, &lp)
+			if lp.Password != "secret" {
+				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":1001,"message":"Invalid user name or password."}}`))
+				return
+			}
+			http.SetCookie(w, &http.Cookie{Name: "SESSION_CONNECT_WEBADMIN", Value: "sess-kerio"})
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"token":"tok-kerio-4040"}}`))
+		case "Session.whoAmI":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"userDetails":{"loginName":"Admin","effectiveRole":{"userRole":"BuiltInAdmin"}}}}`))
+		case "Version.getProductVersion":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":3,"result":{"productVersion":{"productName":"Kerio Connect","major":10,"minor":0,"revision":5,"displayNumber":"10.0.5"}}}`))
+		case "Version.getApiVersion":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":4,"result":{"apiVersion":8}}`))
 		case "ConnectCertificate.get":
 			if !importedDone {
 				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"certificates":[{"id":"cert_old","name":"Default"}]}}`))
@@ -494,7 +521,27 @@ func TestEndToEndACMEv2HTTP01AndTLSALPN01AndDNS01(t *testing.T) {
 	if activatedID != "cert_new_leend" {
 		t.Fatalf("expected setActive on cert_new_leend, got %q", activatedID)
 	}
+	if correctUploadPart != 2 {
+		t.Fatalf("Kerio requires multipart part name=\"unknown\" filename=\"newFile.bin\" for both files, got %d correct uploads", correctUploadPart)
+	}
 	t.Logf("Kerio Admin API success: %s", apiNote)
+
+	// v4.3: Пошаговая диагностика подключения к Kerio Admin API
+	diag := DiagnoseKerioConnection(mockHost, mockPort, "admin", "secret", "leend.by", true)
+	if !diag.OK {
+		t.Fatalf("expected successful Kerio diagnostics, got verdict=%q steps=%+v", diag.Verdict, diag.Steps)
+	}
+	if len(diag.Steps) < 8 || diag.LoginUser != "admin" || diag.Role != "BuiltInAdmin" {
+		t.Fatalf("unexpected diagnostics payload: %+v", diag)
+	}
+	if !strings.Contains(diag.Product, "Kerio Connect") || diag.Version != "10.0.5" {
+		t.Fatalf("expected Kerio Connect 10.0.5 detection, got %q %q", diag.Product, diag.Version)
+	}
+	// Неверный пароль должен давать понятную причину, а не «некорректный ответ»
+	bad := DiagnoseKerioConnection(mockHost, mockPort, "admin", "wrong", "", false)
+	if bad.OK || len(bad.Fixes) == 0 {
+		t.Fatalf("expected failed diagnostics with fixes for wrong credentials, got %+v", bad)
+	}
 }
 
 func TestMailDeliverabilityAuditHelpersAndReport(t *testing.T) {

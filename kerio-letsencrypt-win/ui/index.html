@@ -671,7 +671,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.2 • SSL • Аудит Почты • Delist • Проверка Санкций</span>
+        <span class="brand-badge">Windows Native GUI v4.3 • SSL • Аудит Почты • Delist • Проверка Санкций</span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -1178,7 +1178,10 @@
           <div class="field-row">
             <div class="field">
               <label class="field-label" for="kerioApiHost">Хост / IP админки Kerio</label>
-              <input type="text" id="kerioApiHost" value="127.0.0.1">
+              <input type="text" id="kerioApiHost" value="127.0.0.1" placeholder="127.0.0.1 или внутренний IP, например 10.146.100.14">
+              <div class="field-hint" style="font-size:11.5px;color:var(--text-secondary);margin-top:4px;line-height:1.45;">
+                💡 Порт <code>4040</code> по умолчанию доступен <strong>только из локальной сети или через VPN</strong> — внешний домен (например <code>mail.leend.by</code>) здесь обычно <strong>не работает</strong>. Укажите внутренний IP сервера Kerio или <code>127.0.0.1</code>, если программа запущена на самом сервере.
+              </div>
             </div>
             <div class="field">
               <label class="field-label" for="kerioApiPort">Порт Admin API</label>
@@ -1196,10 +1199,17 @@
             </div>
           </div>
           <div style="margin-top:8px;margin-bottom:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <button type="button" class="btn btn-primary btn-sm" id="diagnoseKerioBtn" onclick="runKerioDiagnostics()">
+              🩺 Диагностика подключения к Kerio (найти точную причину)
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" id="discoverKerioBtn" onclick="discoverKerioInNetwork()">
+              🌐 Найти Kerio в сети
+            </button>
             <button type="button" class="btn btn-outline btn-sm" id="inspectRemoteKerioCertsBtn" onclick="inspectRemoteKerioCertificates()">
-              🔍 Проверить связь с Kerio (:4040) и показать текущие сертификаты на сервере
+              📜 Только список сертификатов
             </button>
           </div>
+          <div id="kerioDiagBox" style="display:none;margin-top:10px;"></div>
           <div id="kerioRemoteCertsBox" style="display:none;margin-top:10px;"></div>
         </div>
 
@@ -1208,6 +1218,7 @@
             📬 Установить выбранный ключ и сертификат в Kerio Connect
           </button>
         </div>
+        <div id="kerioInstallErrorBox" style="display:none;margin-top:12px;"></div>
       </div>
 
       <div>
@@ -1976,7 +1987,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:1380px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist &amp; Sanctions Suite v4.2</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist &amp; Sanctions Suite v4.3</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -2409,8 +2420,10 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 
       if (d.pendingDns01 && d.session) {
         const apiHost = document.getElementById('kerioApiHost');
-        if (apiHost && (!apiHost.value.trim() || apiHost.value.trim() === '127.0.0.1') && req.domain) {
-          apiHost.value = req.domain.trim();
+        // v4.3: НЕ подставляем внешний домен — порт 4040 обычно закрыт из интернета.
+        // Подставляем только если поле полностью пустое.
+        if (apiHost && !apiHost.value.trim() && req.domain) {
+          apiHost.value = '127.0.0.1';
         }
         renderDns01Wizard(d.session);
         document.getElementById('dns01WizardCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2793,10 +2806,22 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'Ошибка установки в Kerio Connect');
+      const errBox = document.getElementById('kerioInstallErrorBox');
+      if (errBox) errBox.style.display = 'none';
       renderKerioStatus(d.kerio);
       showToast(d.message);
     } catch (e) {
-      showToast(e.message, true);
+      const errBox = document.getElementById('kerioInstallErrorBox');
+      if (errBox) {
+        errBox.style.display = 'block';
+        errBox.innerHTML = '<div style="padding:12px 14px;border-radius:10px;background:rgba(239,68,68,0.12);border:1.5px solid #ef4444;">' +
+          '<div style="font-weight:800;color:#fca5a5;font-size:13px;margin-bottom:6px;">❌ Установка в Kerio Connect не выполнена</div>' +
+          '<div style="font-size:12.5px;white-space:pre-wrap;line-height:1.55;color:#fecaca;">' + escapeHtml(e.message) + '</div>' +
+          '<button type="button" class="btn btn-outline btn-sm" style="margin-top:9px;" onclick="runKerioDiagnostics()">🩺 Запустить диагностику подключения</button>' +
+          '</div>';
+        errBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      showToast('Установка не выполнена — подробности под кнопкой', true);
     } finally {
       btn.disabled = false;
       btn.innerHTML = orig;
@@ -3867,6 +3892,155 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
     document.querySelectorAll('#vaultTableBody tr.vault-cert-row').forEach(row => {
       row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? '' : 'none';
     });
+  }
+
+  // ===== v4.3: Диагностика подключения к Kerio Admin API =====
+  function kerioApiFormValues() {
+    return {
+      host: (document.getElementById('kerioApiHost').value || '').trim() || '127.0.0.1',
+      port: parseInt(document.getElementById('kerioApiPort').value, 10) || 4040,
+      user: (document.getElementById('kerioApiUser').value || '').trim() || 'admin',
+      password: document.getElementById('kerioApiPass').value,
+      domain: (document.getElementById('domainInput').value || '').trim()
+    };
+  }
+
+  function kerioStatusIcon(st) {
+    if (st === 'ok') return '✅';
+    if (st === 'warn') return '⚠️';
+    if (st === 'fail') return '❌';
+    return '⏭️';
+  }
+
+  function kerioStatusColor(st) {
+    if (st === 'ok') return '#10b981';
+    if (st === 'warn') return '#f59e0b';
+    if (st === 'fail') return '#ef4444';
+    return 'var(--text-secondary)';
+  }
+
+  async function runKerioDiagnostics() {
+    const f = kerioApiFormValues();
+    const box = document.getElementById('kerioDiagBox');
+    const btn = document.getElementById('diagnoseKerioBtn');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Проверяем Kerio по шагам...';
+    box.style.display = 'block';
+    box.innerHTML = '<div style="font-size:12.5px;color:var(--text-secondary);">Проверяются: DNS → TCP :' + f.port + ' → TLS → веб-админка → вход администратора → права → версия → сертификаты → загрузка файлов…</div>';
+    try {
+      const r = await fetch('/api/kerio/diagnose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: f.host, port: f.port, user: f.user, password: f.password, domain: f.domain, probeUpload: true })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Не удалось выполнить диагностику');
+      saveCurrentUiSettingsQuiet();
+      renderKerioDiagnostics(d.diagnostics);
+    } catch (e) {
+      box.innerHTML = '<div style="padding:12px;border-radius:8px;background:rgba(239,68,68,0.12);border:1px solid #ef4444;color:#fca5a5;font-size:12.5px;white-space:pre-wrap;">❌ ' + escapeHtml(e.message) + '</div>';
+      showToast('Диагностика Kerio не выполнена', true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  }
+
+  function renderKerioDiagnostics(dg) {
+    const box = document.getElementById('kerioDiagBox');
+    if (!dg) return;
+    const okColor = dg.ok ? 'rgba(16,185,129,0.14)' : 'rgba(239,68,68,0.14)';
+    const okBorder = dg.ok ? '#10b981' : '#ef4444';
+    const okTextColor = dg.ok ? '#6ee7b7' : '#fca5a5';
+
+    let html = '<div style="padding:12px 14px;border-radius:10px;background:' + okColor + ';border:1.5px solid ' + okBorder + ';margin-bottom:10px;font-size:13px;color:' + okTextColor + ';white-space:pre-wrap;font-weight:700;">' + escapeHtml(dg.verdict || '') + '</div>';
+
+    if (dg.product || dg.version || dg.loginUser) {
+      const bits = [];
+      if (dg.product) bits.push('Продукт: <strong>' + escapeHtml(dg.product + ' ' + (dg.version || '')) + '</strong>');
+      if (dg.loginUser) bits.push('Вход: <strong>' + escapeHtml(dg.loginUser) + '</strong>');
+      if (dg.role) bits.push('Роль: <strong>' + escapeHtml(dg.role) + '</strong>');
+      if (dg.interface) bits.push('Интерфейс: <code>' + escapeHtml(dg.interface) + '</code>');
+      html += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">' + bits.join(' • ') + '</div>';
+    }
+
+    html += '<div style="display:flex;flex-direction:column;gap:6px;">';
+    (dg.steps || []).forEach(st => {
+      const color = kerioStatusColor(st.status);
+      html += '<div style="padding:9px 12px;border-radius:8px;background:var(--bg-elevated);border-left:3px solid ' + color + ';">' +
+        '<div style="font-size:12.5px;font-weight:700;color:' + color + ';">' + kerioStatusIcon(st.status) + ' ' + escapeHtml(st.title || '') + '</div>' +
+        '<div style="font-size:12px;color:var(--text-secondary);margin-top:3px;white-space:pre-wrap;">' + escapeHtml(st.detail || '') + '</div>' +
+        (st.fix ? '<div style="margin-top:6px;padding:8px 10px;border-radius:7px;background:rgba(59,130,246,0.10);border:1px dashed rgba(59,130,246,0.45);font-size:12px;white-space:pre-wrap;line-height:1.5;">🛠 <strong>Что сделать:</strong><br>' + escapeHtml(st.fix) + '</div>' : '') +
+        '</div>';
+    });
+    html += '</div>';
+
+    if ((dg.fixes || []).length) {
+      html += '<div style="margin-top:10px;padding:11px 13px;border-radius:9px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.5);">' +
+        '<div style="font-weight:800;font-size:12.5px;margin-bottom:6px;">📋 Пошаговый план исправления</div>' +
+        '<ol style="margin:0;padding-left:18px;font-size:12px;line-height:1.6;">' +
+        dg.fixes.map(x => '<li>' + escapeHtml(x) + '</li>').join('') + '</ol></div>';
+    }
+
+    if ((dg.certs || []).length) {
+      html += '<div style="margin-top:10px;font-size:12px;font-weight:700;">📜 Сертификаты на сервере Kerio: ' + dg.certs.length + '</div>';
+      html += dg.certs.map(c => '<div style="padding:8px 11px;border-radius:8px;background:var(--bg-elevated);border:1.5px solid ' + (c.active ? '#10b981' : 'var(--border)') + ';margin-top:5px;font-size:12px;">' +
+        '<strong>' + (c.active ? '🟢 [АКТИВЕН] ' : '⚪ ') + escapeHtml(c.name || c.id) + '</strong>' +
+        '<span style="color:var(--text-secondary);"> • до ' + escapeHtml(c.validTo || '—') + '</span>' +
+        '<div style="color:var(--text-secondary);margin-top:2px;">SAN: <code>' + escapeHtml((c.hostNames || []).join(', ') || '—') + '</code> • Издатель: ' + escapeHtml(c.issuerName || c.type || '—') + '</div>' +
+        '</div>').join('');
+    }
+
+    box.innerHTML = html;
+    showToast(dg.ok ? 'Подключение к Kerio работает' : 'Найдена причина сбоя подключения — см. инструкции', !dg.ok);
+  }
+
+  async function discoverKerioInNetwork() {
+    const f = kerioApiFormValues();
+    const box = document.getElementById('kerioDiagBox');
+    const btn = document.getElementById('discoverKerioBtn');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Сканируем адреса...';
+    box.style.display = 'block';
+    box.innerHTML = '<div style="font-size:12.5px;color:var(--text-secondary);">Проверяем 127.0.0.1, локальные IP этого компьютера, указанный хост, домен и MX на открытый порт 4040…</div>';
+    try {
+      const r = await fetch('/api/kerio/discover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: f.host, domain: f.domain })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Поиск не выполнен');
+      const list = d.candidates || [];
+      const alive = list.filter(c => c.tcp);
+      let html = '<div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">🌐 Найдено адресов с открытым портом 4040: ' + alive.length + ' из ' + list.length + '</div>';
+      if (!alive.length) {
+        html += '<div style="padding:10px;border-radius:8px;background:rgba(239,68,68,0.12);border:1px solid #ef4444;font-size:12.5px;white-space:pre-wrap;">❌ Ни на одном адресе порт 4040 не открыт. Это значит: либо Kerio Connect установлен на другом сервере, либо админка отключена, либо нужен VPN, либо порт изменён в Configuration → Services → Web Administration.</div>';
+      }
+      html += list.map(c => {
+        const ep = c.endpoint || {};
+        return '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 11px;border-radius:8px;background:var(--bg-elevated);border:1.5px solid ' + (c.tcp ? '#10b981' : 'var(--border)') + ';margin-top:5px;font-size:12px;">' +
+          '<div><strong>' + escapeHtml((ep.host || '') + ':' + (ep.port || 4040)) + '</strong>' +
+          '<div style="color:var(--text-secondary);">' + escapeHtml(c.note || '') + (c.product ? ' • ' + escapeHtml(c.product) : '') + '</div></div>' +
+          (c.tcp ? '<button type="button" class="btn btn-outline btn-sm" onclick="useKerioEndpoint(\'' + escapeHtml(ep.host || '') + '\',' + (ep.port || 4040) + ')">Использовать</button>' : '') +
+          '</div>';
+      }).join('');
+      box.innerHTML = html;
+    } catch (e) {
+      box.innerHTML = '<div style="padding:10px;border-radius:8px;background:rgba(239,68,68,0.12);border:1px solid #ef4444;color:#fca5a5;font-size:12.5px;">❌ ' + escapeHtml(e.message) + '</div>';
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  }
+
+  function useKerioEndpoint(host, port) {
+    document.getElementById('kerioApiHost').value = host;
+    document.getElementById('kerioApiPort').value = port;
+    saveCurrentUiSettingsQuiet();
+    showToast('Адрес Kerio установлен: ' + host + ':' + port + '. Нажмите «Диагностика подключения».');
   }
 
   async function inspectRemoteKerioCertificates() {
