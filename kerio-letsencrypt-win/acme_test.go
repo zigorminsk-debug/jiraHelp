@@ -1,0 +1,892 @@
+package main
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"debug/pe"
+	"encoding/asn1"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"io"
+	"math/big"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestPunycodeIDNBelarusAndRussianDomains(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want string
+	}{
+		{"mail.company.by", "mail.company.by"},
+		{"https://Mail.Company.BY/webmail", "mail.company.by"},
+		{"почта.компания.бел", "xn--80a1acny.xn--80aqeigdi5k.xn--90ais"},
+		{"почта.пример.рф", "xn--80a1acny.xn--e1afmkfd.xn--p1ai"},
+	}
+	for _, tc := range cases {
+		got, _, err := NormalizeDomain(tc.raw)
+		if err != nil {
+			t.Fatalf("NormalizeDomain(%q) unexpected error: %v", tc.raw, err)
+		}
+		if got != tc.want {
+			t.Fatalf("NormalizeDomain(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+}
+
+func TestOpenSSLCompatibilityOfGeneratedKerioBundle(t *testing.T) {
+	tmpDir := t.TempDir()
+	req := IssueRequest{
+		Domain:       "mail.company.by",
+		ExtraDomains: []string{"webmail.company.by", "autodiscover.company.by"},
+		IPAddress:    "93.125.10.25",
+		Mode:         "selfsigned",
+		KeyType:      "rsa2048",
+		PFXPassword:  "KerioSecret123",
+		ValidityDays: 365,
+		OutputDir:    tmpDir,
+	}
+
+	rec, _, err := ExecuteCertificateIssuance(req, func(level, msg string) {
+		t.Logf("[%s] %s", level, msg)
+	})
+	if err != nil {
+		t.Fatalf("ExecuteCertificateIssuance failed: %v", err)
+	}
+
+	// 1. Verify RSA PKCS#1 Private Key via real OpenSSL CLI
+	outKey, err := exec.Command("openssl", "rsa", "-in", rec.Files["serverKey"], "-check", "-noout").CombinedOutput()
+	if err != nil {
+		t.Fatalf("openssl rsa check failed: %v\n%s", err, string(outKey))
+	}
+
+	// 2. Verify CSR signature & SANs via real OpenSSL CLI
+	outCSR, err := exec.Command("openssl", "req", "-in", rec.Files["csr"], "-text", "-noout", "-verify").CombinedOutput()
+	if err != nil {
+		t.Fatalf("openssl req verify failed: %v\n%s", err, string(outCSR))
+	}
+	if !strings.Contains(string(outCSR), "DNS:mail.company.by") || !strings.Contains(string(outCSR), "IP Address:93.125.10.25") {
+		t.Fatalf("CSR missing expected DNS or IP SAN:\n%s", string(outCSR))
+	}
+
+	// 3. Verify X.509 Certificate via real OpenSSL CLI
+	outCert, err := exec.Command("openssl", "x509", "-in", rec.Files["serverCrt"], "-text", "-noout").CombinedOutput()
+	if err != nil {
+		t.Fatalf("openssl x509 check failed: %v\n%s", err, string(outCert))
+	}
+
+	// 4. Verify PKCS#12 (.pfx) archive via real OpenSSL 3.x CLI (both with password and empty password)
+	outPFX, err := exec.Command("openssl", "pkcs12", "-in", rec.Files["pfx"], "-passin", "pass:KerioSecret123", "-info", "-noout").CombinedOutput()
+	if err != nil {
+		t.Fatalf("openssl pkcs12 check failed: %v\n%s", err, string(outPFX))
+	}
+
+	// Also verify empty password PFX (common on Windows servers)
+	reqEmptyPwd := req
+	reqEmptyPwd.Domain = "empty-pass.company.by"
+	reqEmptyPwd.PFXPassword = ""
+	rec2, _, err := ExecuteCertificateIssuance(reqEmptyPwd, func(_, _ string) {})
+	if err != nil {
+		t.Fatalf("ExecuteCertificateIssuance empty pwd failed: %v", err)
+	}
+	outPFX2, err := exec.Command("openssl", "pkcs12", "-in", rec2.Files["pfx"], "-passin", "pass:", "-info", "-noout").CombinedOutput()
+	if err != nil {
+		t.Fatalf("openssl pkcs12 empty password check failed: %v\n%s", err, string(outPFX2))
+	}
+
+	// 5. Verify Kerio Connect installation including custom active cert profile in mailserver.cfg
+	mockKerioRoot := filepath.Join(tmpDir, "Kerio", "MailServer")
+	mockSSLDir := filepath.Join(mockKerioRoot, "sslcert")
+	_ = os.MkdirAll(mockSSLDir, 0755)
+	_ = os.WriteFile(filepath.Join(mockSSLDir, "server.crt"), []byte("OLD_CERT"), 0644)
+	_ = os.WriteFile(filepath.Join(mockKerioRoot, "mailserver.cfg"), []byte(`<config><table name="Ssl"><variable name="Certificate">cert_2</variable></table></config>`), 0644)
+
+	note, err := InstallCertificateToKerio(rec, KerioInstallConfig{
+		Enabled:        true,
+		Method:         "filesystem",
+		KerioPath:      mockSSLDir,
+		RestartService: true,
+	}, func(_, _ string) {})
+	if err != nil {
+		t.Fatalf("InstallCertificateToKerio failed: %v", err)
+	}
+	t.Logf("Kerio install note: %s", note)
+
+	for _, mustExist := range []string{"server.crt", "server.key", "cert_2.crt", "cert_2.key"} {
+		if _, err := os.Stat(filepath.Join(mockSSLDir, mustExist)); err != nil {
+			t.Fatalf("expected installed Kerio file %s missing: %v", mustExist, err)
+		}
+	}
+}
+
+func TestEndToEndACMEv2HTTP01AndTLSALPN01AndDNS01(t *testing.T) {
+	// Spin up an in-process RFC 8555 + RFC 8738 compliant ACME CA server that actually verifies live HTTP-01 and TLS-ALPN-01 challenges!
+	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	caTpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(100),
+		Subject:               pkix.Name{CommonName: "Fake Let's Encrypt R11 Intermediate CA"},
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+	}
+	caDER, _ := x509.CreateCertificate(rand.Reader, caTpl, caTpl, &caKey.PublicKey, caKey)
+	caCert, _ := x509.ParseCertificate(caDER)
+
+	// Pick free local ports for HTTP-01 and TLS-ALPN-01 tests
+	ln1, _ := net.Listen("tcp", "127.0.0.1:0")
+	httpChallPort := ln1.Addr().(*net.TCPAddr).Port
+	_ = ln1.Close()
+
+	ln2, _ := net.Listen("tcp", "127.0.0.1:0")
+	tlsChallPort := ln2.Addr().(*net.TCPAddr).Port
+	_ = ln2.Close()
+
+	var mu sync.Mutex
+	var accountThumbprint string
+	issuedCertPEM := ""
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", fmt.Sprintf("nonce-%d", time.Now().UnixNano()))
+		if r.URL.Path == "/directory" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"newNonce":   srv.URL + "/nonce",
+				"newAccount": srv.URL + "/account",
+				"newOrder":   srv.URL + "/new-order",
+				"meta": map[string]any{
+					"profiles": map[string]string{
+						"classic":    "90-day certs",
+						"shortlived": "160-hour IP+DNS certs",
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/nonce" {
+			w.WriteHeader(200)
+			return
+		}
+
+		raw, _ := io.ReadAll(r.Body)
+		var jws struct {
+			Protected string `json:"protected"`
+			Payload   string `json:"payload"`
+			Signature string `json:"signature"`
+		}
+		_ = json.Unmarshal(raw, &jws)
+		protBytes, _ := base64.RawURLEncoding.DecodeString(jws.Protected)
+		payBytes, _ := base64.RawURLEncoding.DecodeString(jws.Payload)
+
+		switch {
+		case r.URL.Path == "/account":
+			var prot struct {
+				JWK map[string]string `json:"jwk"`
+			}
+			_ = json.Unmarshal(protBytes, &prot)
+			canon := fmt.Sprintf(`{"crv":"%s","kty":"%s","x":"%s","y":"%s"}`, prot.JWK["crv"], prot.JWK["kty"], prot.JWK["x"], prot.JWK["y"])
+			sum := sha256.Sum256([]byte(canon))
+			mu.Lock()
+			accountThumbprint = base64.RawURLEncoding.EncodeToString(sum[:])
+			mu.Unlock()
+			w.Header().Set("Location", srv.URL+"/acct/1")
+			w.WriteHeader(201)
+			_, _ = w.Write([]byte(`{"status":"valid"}`))
+
+		case r.URL.Path == "/new-order":
+			var ordReq struct {
+				Profile     string           `json:"profile"`
+				Identifiers []acmeIdentifier `json:"identifiers"`
+			}
+			_ = json.Unmarshal(payBytes, &ordReq)
+			var authURLs []string
+			for _, id := range ordReq.Identifiers {
+				authURLs = append(authURLs, fmt.Sprintf("%s/authz/%s/%s", srv.URL, id.Type, id.Value))
+			}
+			w.Header().Set("Location", srv.URL+"/order/1")
+			w.WriteHeader(201)
+			_ = json.NewEncoder(w).Encode(acmeOrder{
+				Status:         "pending",
+				Profile:        ordReq.Profile,
+				Identifiers:    ordReq.Identifiers,
+				Authorizations: authURLs,
+				Finalize:       srv.URL + "/finalize",
+			})
+
+		case strings.HasPrefix(r.URL.Path, "/authz/"):
+			parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/authz/"), "/", 2)
+			idType, idVal := parts[0], parts[1]
+			tok := "tok1234567890abcdef"
+			status := r.URL.Query().Get("st")
+			if status == "" {
+				status = "pending"
+			}
+			_ = json.NewEncoder(w).Encode(acmeAuthorization{
+				Identifier: acmeIdentifier{Type: idType, Value: idVal},
+				Status:     status,
+				Challenges: []acmeChallenge{
+					{Type: "http-01", URL: srv.URL + "/chall/http/" + idVal, Status: "pending", Token: tok},
+					{Type: "tls-alpn-01", URL: srv.URL + "/chall/alpn/" + idVal, Status: "pending", Token: tok},
+					{Type: "dns-01", URL: srv.URL + "/chall/dns/" + idVal, Status: "pending", Token: tok},
+				},
+			})
+
+		case strings.HasPrefix(r.URL.Path, "/chall/http/"):
+			// Actually fetch HTTP-01 challenge from client's live TCP listener!
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/.well-known/acme-challenge/tok1234567890abcdef", httpChallPort))
+			if err != nil {
+				t.Errorf("CA failed HTTP-01 probe: %v", err)
+			} else {
+				b, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				mu.Lock()
+				want := "tok1234567890abcdef." + accountThumbprint
+				mu.Unlock()
+				if string(b) != want {
+					t.Errorf("HTTP-01 keyAuth mismatch: got %q, want %q", string(b), want)
+				}
+			}
+			// Mark auth valid on subsequent polls via simple redirect trick: rewrite auth handler check
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{"status":"valid"}`))
+
+		case strings.HasPrefix(r.URL.Path, "/chall/alpn/"):
+			idVal := strings.TrimPrefix(r.URL.Path, "/chall/alpn/")
+			conn, err := tls.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", tlsChallPort), &tls.Config{
+				ServerName:         idVal,
+				NextProtos:         []string{"acme-tls/1"},
+				InsecureSkipVerify: true,
+			})
+			if err != nil {
+				t.Errorf("CA failed TLS-ALPN-01 probe: %v", err)
+			} else {
+				peerCert := conn.ConnectionState().PeerCertificates[0]
+				_ = conn.Close()
+				foundOID := false
+				for _, ext := range peerCert.Extensions {
+					if ext.Id.Equal(asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 1, 31}) && ext.Critical {
+						foundOID = true
+					}
+				}
+				if !foundOID {
+					t.Errorf("TLS-ALPN-01 cert missing critical id-pe-acmeIdentifier extension")
+				}
+			}
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{"status":"valid"}`))
+
+		case strings.HasPrefix(r.URL.Path, "/chall/dns/"):
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{"status":"valid"}`))
+
+		case r.URL.Path == "/finalize":
+			var fin struct {
+				CSR string `json:"csr"`
+			}
+			_ = json.Unmarshal(payBytes, &fin)
+			csrDER, _ := base64.RawURLEncoding.DecodeString(fin.CSR)
+			csr, err := x509.ParseCertificateRequest(csrDER)
+			if err != nil || csr.CheckSignature() != nil {
+				t.Errorf("invalid CSR submitted to finalize: %v", err)
+			}
+			leafTpl := &x509.Certificate{
+				SerialNumber: big.NewInt(99999),
+				Subject:      csr.Subject,
+				NotBefore:    time.Now().Add(-5 * time.Minute),
+				NotAfter:     time.Now().Add(160 * time.Hour),
+				DNSNames:     csr.DNSNames,
+				IPAddresses:  csr.IPAddresses,
+				KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+				ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			}
+			leafDER, _ := x509.CreateCertificate(rand.Reader, leafTpl, caCert, csr.PublicKey, caKey)
+			mu.Lock()
+			issuedCertPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER})) +
+				string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}))
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(acmeOrder{
+				Status:      "valid",
+				Certificate: srv.URL + "/cert/1",
+			})
+
+		case r.URL.Path == "/order/1":
+			_ = json.NewEncoder(w).Encode(acmeOrder{
+				Status:      "valid",
+				Certificate: srv.URL + "/cert/1",
+			})
+
+		case r.URL.Path == "/cert/1":
+			mu.Lock()
+			pemOut := issuedCertPEM
+			mu.Unlock()
+			_, _ = w.Write([]byte(pemOut))
+		}
+	}))
+	defer srv.Close()
+
+	// Make auth polling see "valid" after challenge trigger
+	validatedIDs := map[string]bool{}
+	origHandler := srv.Config.Handler
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/chall/") {
+			parts := strings.Split(r.URL.Path, "/")
+			mu.Lock()
+			validatedIDs[parts[len(parts)-1]] = true
+			mu.Unlock()
+		}
+		if strings.HasPrefix(r.URL.Path, "/authz/") {
+			parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/authz/"), "/", 2)
+			mu.Lock()
+			isVal := validatedIDs[parts[1]]
+			mu.Unlock()
+			if isVal {
+				r.URL.RawQuery = "st=valid"
+			}
+		}
+		origHandler.ServeHTTP(w, r)
+	})
+
+	tmpOut := t.TempDir()
+
+	// Scenario 1: Classic 90-day Domain issuance over HTTP-01 with full intermediate chain verification
+	recHTTP, _, err := ExecuteCertificateIssuance(IssueRequest{
+		Domain:             "mail.company.by",
+		ExtraDomains:       []string{"autodiscover.company.by"},
+		IPAddress:          "93.125.10.25",
+		BindIP:             "127.0.0.1",
+		Email:              "postmaster@company.by",
+		Mode:               "staging",
+		CustomDirectoryURL: srv.URL + "/directory",
+		ChallengeType:      "http-01",
+		HTTPPort:           httpChallPort,
+		KeyType:            "rsa2048",
+		OutputDir:          tmpOut,
+	}, func(lvl, msg string) { t.Logf("[HTTP-01 %s] %s", lvl, msg) })
+	if err != nil {
+		t.Fatalf("ACME HTTP-01 issuance failed: %v", err)
+	}
+	if recHTTP.Files["chainCrt"] == "" {
+		t.Fatalf("expected intermediate chainCrt file to be generated")
+	}
+
+	// Scenario 2: RFC 8738 Public IP + Domain SAN ("shortlived" profile) over TLS-ALPN-01
+	mu.Lock()
+	validatedIDs = map[string]bool{}
+	mu.Unlock()
+	recALPN, _, err := ExecuteCertificateIssuance(IssueRequest{
+		Domain:             "ipmail.company.by",
+		IPAddress:          "93.125.10.25",
+		BindIP:             "127.0.0.1",
+		Mode:               "staging",
+		CustomDirectoryURL: srv.URL + "/directory",
+		IncludeIPSAN:       true,
+		ChallengeType:      "tls-alpn-01",
+		TLSPort:            tlsChallPort,
+		KeyType:            "rsa4096",
+		OutputDir:          tmpOut,
+	}, func(lvl, msg string) { t.Logf("[TLS-ALPN-01 %s] %s", lvl, msg) })
+	if err != nil {
+		t.Fatalf("ACME TLS-ALPN-01 IP+DNS issuance failed: %v", err)
+	}
+	if len(recALPN.IPAddresses) != 1 || recALPN.IPAddresses[0] != "93.125.10.25" {
+		t.Fatalf("expected IP SAN 93.125.10.25 in issued cert, got %v", recALPN.IPAddresses)
+	}
+
+	// Scenario 3: Interactive 2-step DNS-01 issuance
+	mu.Lock()
+	validatedIDs = map[string]bool{}
+	mu.Unlock()
+	_, dnsSess, err := ExecuteCertificateIssuance(IssueRequest{
+		Domain:             "dnsmail.company.by",
+		IPAddress:          "93.125.10.25",
+		Mode:               "staging",
+		CustomDirectoryURL: srv.URL + "/directory",
+		ChallengeType:      "dns-01",
+		KeyType:            "ecdsa256",
+		OutputDir:          tmpOut,
+	}, func(lvl, msg string) { t.Logf("[DNS-01 %s] %s", lvl, msg) })
+	if err != nil || dnsSess == nil || len(dnsSess.Records) != 1 {
+		t.Fatalf("expected pending DNS-01 session, got err=%v sess=%v", err, dnsSess)
+	}
+	recDNS, err := CompletePendingDNS01Session(dnsSess.SessionID, func(lvl, msg string) {
+		t.Logf("[DNS-01-COMPLETE %s] %s", lvl, msg)
+	})
+	if err != nil || recDNS == nil {
+		t.Fatalf("CompletePendingDNS01Session failed: %v", err)
+	}
+
+	// Verify Kerio Connect Admin JSON-RPC 2.0 (ConnectCertificate.*) upload & activation
+	var activatedID string
+	uploadSeq := 0
+	importedDone := false
+	correctUploadPart := 0
+	kerioMock := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json-rpc; charset=utf-8")
+		if r.Method == http.MethodGet {
+			w.Header().Set("Server", "Kerio Connect 10.0.5")
+			_, _ = w.Write([]byte(`<html><head><title>Kerio Connect Administration</title></head><body>login</body></html>`))
+			return
+		}
+		if r.URL.Path == "/admin/api/jsonrpc/upload/" {
+			uploadSeq++
+			// Kerio принимает multipart-часть name="unknown"; filename="newFile.bin"
+			if err := r.ParseMultipartForm(8 << 20); err == nil && r.MultipartForm != nil {
+				if fhs := r.MultipartForm.File["unknown"]; len(fhs) > 0 && fhs[0].Filename == "newFile.bin" {
+					correctUploadPart++
+				}
+			}
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"jsonrpc":"2.0","result":{"fileUpload":{"id":"upload-%d"}}}`, uploadSeq)))
+			return
+		}
+		var rpcReq struct {
+			ID     int             `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&rpcReq)
+		switch rpcReq.Method {
+		case "Session.login":
+			var lp struct {
+				Password string `json:"password"`
+			}
+			_ = json.Unmarshal(rpcReq.Params, &lp)
+			if lp.Password != "secret" {
+				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":1001,"message":"Invalid user name or password."}}`))
+				return
+			}
+			http.SetCookie(w, &http.Cookie{Name: "SESSION_CONNECT_WEBADMIN", Value: "sess-kerio"})
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"token":"tok-kerio-4040"}}`))
+		case "Session.whoAmI":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"userDetails":{"loginName":"Admin","effectiveRole":{"userRole":"BuiltInAdmin"}}}}`))
+		case "Version.getProductVersion":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":3,"result":{"productVersion":{"productName":"Kerio Connect","major":10,"minor":0,"revision":5,"displayNumber":"10.0.5"}}}`))
+		case "Version.getApiVersion":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":4,"result":{"apiVersion":8}}`))
+		case "ConnectCertificate.get":
+			if !importedDone {
+				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"certificates":[{"id":"cert_old","name":"Default"}]}}`))
+			} else {
+				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"certificates":[{"id":"cert_old","name":"Default"},{"id":"cert_new_leend","name":"mail.leend.by"}]}}`))
+			}
+		case "ConnectCertificate.importPrivateKey":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"needPassword":false,"id":"temp_key_1"}}`))
+		case "ConnectCertificate.importCertificate":
+			importedDone = true
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{}}`))
+		case "ConnectCertificate.setActive":
+			var p struct {
+				Id string `json:"id"`
+			}
+			_ = json.Unmarshal(rpcReq.Params, &p)
+			activatedID = p.Id
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{}}`))
+		case "Session.logout":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{}}`))
+		default:
+			t.Fatalf("unexpected RPC method: %s", rpcReq.Method)
+		}
+	}))
+	defer kerioMock.Close()
+
+	mockHost, mockPortStr, _ := net.SplitHostPort(strings.TrimPrefix(kerioMock.URL, "https://"))
+	var mockPort int
+	_, _ = fmt.Sscanf(mockPortStr, "%d", &mockPort)
+	apiNote, err := InstallCertificateToKerio(recDNS, KerioInstallConfig{
+		Enabled:     true,
+		Method:      "api",
+		APIHost:     mockHost,
+		APIPort:     mockPort,
+		APIUser:     "admin",
+		APIPassword: "secret",
+	}, func(lvl, msg string) { t.Logf("[KERIO-API %s] %s", lvl, msg) })
+	if err != nil {
+		t.Fatalf("InstallCertificateToKerio via ConnectCertificate.* failed: %v", err)
+	}
+	if activatedID != "cert_new_leend" {
+		t.Fatalf("expected setActive on cert_new_leend, got %q", activatedID)
+	}
+	if correctUploadPart != 2 {
+		t.Fatalf("Kerio requires multipart part name=\"unknown\" filename=\"newFile.bin\" for both files, got %d correct uploads", correctUploadPart)
+	}
+	t.Logf("Kerio Admin API success: %s", apiNote)
+
+	// v4.3: Пошаговая диагностика подключения к Kerio Admin API
+	diag := DiagnoseKerioConnection(mockHost, mockPort, "admin", "secret", "leend.by", true)
+	if !diag.OK {
+		t.Fatalf("expected successful Kerio diagnostics, got verdict=%q steps=%+v", diag.Verdict, diag.Steps)
+	}
+	if len(diag.Steps) < 8 || diag.LoginUser != "admin" || diag.Role != "BuiltInAdmin" {
+		t.Fatalf("unexpected diagnostics payload: %+v", diag)
+	}
+	if !strings.Contains(diag.Product, "Kerio Connect") || diag.Version != "10.0.5" {
+		t.Fatalf("expected Kerio Connect 10.0.5 detection, got %q %q", diag.Product, diag.Version)
+	}
+	// Неверный пароль должен давать понятную причину, а не «некорректный ответ»
+	bad := DiagnoseKerioConnection(mockHost, mockPort, "admin", "wrong", "", false)
+	if bad.OK || len(bad.Fixes) == 0 {
+		t.Fatalf("expected failed diagnostics with fixes for wrong credentials, got %+v", bad)
+	}
+}
+
+func TestMailDeliverabilityAuditHelpersAndReport(t *testing.T) {
+	// 1. Test DKIM 2048-bit RSA key extraction
+	priv, _, _, _, err := GeneratePrivateKey("rsa2048")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubDER, err := x509.MarshalPKIXPublicKey(priv.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dkimTxt := "v=DKIM1; k=rsa; p=" + base64.StdEncoding.EncodeToString(pubDER)
+	algo, bits := parseDKIMPublicKeyBits(dkimTxt)
+	if algo != "rsa" || bits != 2048 {
+		t.Fatalf("expected rsa 2048-bit DKIM key, got algo=%s bits=%d", algo, bits)
+	}
+
+	// 2. Test end-to-end RunMailDeliverabilityAudit report & remediation guide builder
+	rep, err := RunMailDeliverabilityAudit(MailAuditRequest{
+		Domain:   "user@nonexistent-test-domain-kerio.invalid",
+		ServerIP: "127.0.0.1",
+	}, func(lvl, msg string) {
+		t.Logf("[AUDIT %s] %s", lvl, msg)
+	})
+	if err != nil {
+		t.Fatalf("RunMailDeliverabilityAudit failed: %v", err)
+	}
+	if rep.MailDomain != "nonexistent-test-domain-kerio.invalid" {
+		t.Fatalf("unexpected mailDomain: %s", rep.MailDomain)
+	}
+	if len(rep.Checks) < 8 {
+		t.Fatalf("expected at least 8 diagnostic checks, got %d", len(rep.Checks))
+	}
+	if len(rep.Remediations) < 4 {
+		t.Fatalf("expected step-by-step remediation guides to be generated, got %d", len(rep.Remediations))
+	}
+	for _, ch := range rep.Checks {
+		if ch.Status == "error" || ch.Status == "warning" {
+			if ch.Solution == nil || len(ch.Solution.Steps) == 0 {
+				t.Fatalf("check %q (%s) has status=%s but missing inline Solution steps!", ch.ID, ch.Title, ch.Status)
+			}
+		}
+	}
+	if len(rep.DelistCenter.MajorProviders) < 8 {
+		t.Fatalf("expected 8 major provider delist kits, got %d", len(rep.DelistCenter.MajorProviders))
+	}
+
+	// 4. Test SPF lookup limit counter (>10 lookups + deprecated ptr detection)
+	cnt, hasPTR, _ := countSPFDNSLookups("example.by", "v=spf1 a mx ptr a:s1.example.by a:s2.example.by a:s3.example.by a:s4.example.by a:s5.example.by a:s6.example.by a:s7.example.by a:s8.example.by ~all", 0, map[string]bool{})
+	if cnt != 11 || !hasPTR {
+		t.Fatalf("expected 11 SPF lookups and hasPTR=true, got cnt=%d hasPTR=%v", cnt, hasPTR)
+	}
+
+	// 5. Test SMTP Bounce Decoder (Microsoft S3150 & Mail.ru)
+	msDec := DecodeSMTPBounceAndBuildLetter(BounceDecodeRequest{
+		BounceText: "550 5.7.1 Unfortunately, messages from [178.124.204.98] weren't sent. (S3150)",
+		MailDomain: "leend.by",
+		ServerIP:   "178.124.204.98",
+	})
+	if msDec.DetectedProviderID != "microsoft" || !strings.Contains(msDec.RecommendedAction.LetterBody, "178.124.204.98") {
+		t.Fatalf("unexpected Microsoft bounce decode result: %+v", msDec)
+	}
+
+	t.Logf("Generated %d checks, %d remediation guides, and %d delist kits (score=%d, grade=%s)",
+		len(rep.Checks), len(rep.Remediations), len(rep.DelistCenter.MajorProviders), rep.Score, rep.Grade)
+}
+
+func TestV4ProSuiteToolsCachePersistenceAndRemoteKerioInspector(t *testing.T) {
+	// 1. Test RAM DNS & WAN Cache + Explicit Flush
+	ClearNetworkDiagnosticCache()
+	setCachedWANIP("178.124.204.98")
+	if got := getCachedWANIP(); got != "178.124.204.98" {
+		t.Fatalf("expected cached WAN IP 178.124.204.98, got %q", got)
+	}
+	setCachedDoH("leend.by|A", []dohAnswer{{Name: "leend.by", Type: 1, Data: "178.124.204.98"}}, 0, 30*time.Second)
+	if ans, status, ok := getCachedDoH("leend.by|A"); !ok || status != 0 || len(ans) != 1 {
+		t.Fatalf("expected cached DoH answer hit, got ok=%v len=%d", ok, len(ans))
+	}
+	ClearNetworkDiagnosticCache()
+	if got := getCachedWANIP(); got != "" {
+		t.Fatalf("expected empty WAN IP after ClearNetworkDiagnosticCache(), got %q", got)
+	}
+
+	// 2. Test Persistent UI Settings & Audit Score Delta ("Было -> Стало")
+	tmpDir := t.TempDir()
+	wantSettings := SavedUISettings{
+		LastDomain:   "mail.leend.by",
+		LastServerIP: "178.124.204.98",
+		LastEmail:    "admin@leend.by",
+		KerioAPIHost: "10.146.100.14",
+		KerioAPIPort: 4040,
+		KerioAPIUser: "admin",
+		AuditDomain:  "leend.by",
+	}
+	if err := SaveUISettings(tmpDir, wantSettings); err != nil {
+		t.Fatalf("SaveUISettings failed: %v", err)
+	}
+	gotSettings := LoadSavedUISettings(tmpDir)
+	if gotSettings.LastDomain != "mail.leend.by" || gotSettings.KerioAPIHost != "10.146.100.14" {
+		t.Fatalf("unexpected loaded settings: %+v", gotSettings)
+	}
+
+	firstDelta := RecordAuditAndComputeDelta(tmpDir, &MailAuditReport{
+		CheckedAt:  "23.10.2026 12:00:00",
+		MailDomain: "leend.by",
+		MailHost:   "mail.leend.by",
+		ServerIP:   "178.124.204.98",
+		Score:      38,
+		Grade:      "F",
+	})
+	if firstDelta.HasPrevious {
+		t.Fatalf("first audit should have HasPrevious=false")
+	}
+	secondDelta := RecordAuditAndComputeDelta(tmpDir, &MailAuditReport{
+		CheckedAt:  "23.10.2026 12:30:00",
+		MailDomain: "leend.by",
+		MailHost:   "mail.leend.by",
+		ServerIP:   "178.124.204.98",
+		Score:      96,
+		Grade:      "A+",
+	})
+	if !secondDelta.HasPrevious || secondDelta.ScoreDiff != 58 {
+		t.Fatalf("expected ScoreDiff=+58, got %+v", secondDelta)
+	}
+	if hist := LoadAuditHistory(tmpDir); len(hist) != 2 {
+		t.Fatalf("expected 2 saved audit history entries, got %d", len(hist))
+	}
+
+	// 3. Test RFC-822 Raw Email Header Analyzer (Timezone-aware hop delay + Auth extraction)
+	sampleHeaders := `Delivered-To: partner@gmail.com
+Authentication-Results: mx.google.com;
+       dkim=fail header.i=@leend.by;
+       spf=softfail smtp.mailfrom=info@leend.by;
+       dmarc=fail (p=NONE) header.from=leend.by
+Return-Path: <info@leend.by>
+Received: from mail.leend.by (unknown [178.124.204.98])
+        by mx.google.com with ESMTPS
+        for <partner@gmail.com>;
+        Fri, 23 Oct 2026 10:14:52 +0000 (UTC)
+Received: from [10.146.100.25] (office-pc.local [10.146.100.25])
+        by mail.leend.by (Kerio Connect) with ESMTPSA
+        for <partner@gmail.com>;
+        Fri, 23 Oct 2026 13:13:04 +0300
+From: info@leend.by
+To: partner@gmail.com
+Subject: Invoice #418
+X-Spam-Status: Yes, score=6.8 required=5.0`
+
+	hRes, err := AnalyzeRawEmailHeaders(sampleHeaders)
+	if err != nil {
+		t.Fatalf("AnalyzeRawEmailHeaders failed: %v", err)
+	}
+	if len(hRes.Hops) != 2 || hRes.TotalDelaySec != 108 || !hRes.Hops[1].SlowHop {
+		t.Fatalf("unexpected header hop latency calculation: %+v", hRes)
+	}
+	if !strings.Contains(strings.ToLower(hRes.SPFStatus), "softfail") || !strings.Contains(strings.ToLower(hRes.DKIMStatus), "fail") {
+		t.Fatalf("unexpected auth status parsing: SPF=%q DKIM=%q", hRes.SPFStatus, hRes.DKIMStatus)
+	}
+
+	// 4. Test Live Kerio Connect (:4040) Remote SSL Certificate Inspector via Mock TLS JSON-RPC Server
+	mockKerio := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var rpcReq struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&rpcReq)
+		switch rpcReq.Method {
+		case "Session.login":
+			http.SetCookie(w, &http.Cookie{Name: "SESSION_CONNECT_WEBADMIN", Value: "sess_v4"})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": rpcReq.ID,
+				"result": map[string]any{"token": "tok_v4"},
+			})
+		case "Session.whoAmI":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": rpcReq.ID,
+				"result": map[string]any{
+					"userDetails": map[string]any{
+						"loginName":     "Admin",
+						"effectiveRole": map[string]any{"userRole": "BuiltInAdmin"},
+					},
+				},
+			})
+		case "ConnectCertificate.get":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": rpcReq.ID,
+				"result": map[string]any{
+					"certificates": []map[string]any{
+						{
+							"id":               "cert_active_1",
+							"name":             "mail.leend.by (Let's Encrypt)",
+							"subjectHostNames": []string{"mail.leend.by", "leend.by"},
+							"issuer":           []map[string]string{{"name": "CN", "value": "R11"}},
+							"validPeriod":      map[string]string{"validFromDate": "2026-10-23", "validToDate": "2027-01-21"},
+							"active":           true,
+							"type":             "ActiveCertificate",
+						},
+					},
+				},
+			})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": rpcReq.ID, "result": map[string]any{}})
+		}
+	}))
+	defer mockKerio.Close()
+
+	kHost, kPortStr, _ := net.SplitHostPort(strings.TrimPrefix(mockKerio.URL, "https://"))
+	var kPort int
+	_, _ = fmt.Sscanf(kPortStr, "%d", &kPort)
+	remoteCerts, err := InspectKerioServerCertificates(kHost, kPort, "admin", "secret")
+	if err != nil {
+		t.Fatalf("InspectKerioServerCertificates failed: %v", err)
+	}
+	if len(remoteCerts) != 1 || !remoteCerts[0].Active || remoteCerts[0].IssuerName != "R11" {
+		t.Fatalf("unexpected remote Kerio certs: %+v", remoteCerts)
+	}
+}
+
+func TestSanctionsOFACAndGeoBlockAuditEngine(t *testing.T) {
+	// 1. Verify Punycode Cyrillic .бел / .рф TLD embargo detection
+	belNorm, _, err := NormalizeDomain("почта.компания.бел")
+	if err != nil || !isCommercialCAEmbargoedTLD(belNorm) || !strings.Contains(extractEffectiveTLD(belNorm), ".бел") {
+		t.Fatalf("expected .бел embargo detection, got norm=%q tld=%q", belNorm, extractEffectiveTLD(belNorm))
+	}
+	if isCommercialCAEmbargoedTLD("mail.example.com") {
+		t.Fatalf(".com should NOT be flagged as embargoed TLD")
+	}
+
+	// 2. Mock real RFC 8555 Let's Encrypt ACME server enforcing OFAC `Policy forbids issuing for name`
+	var srvURL string
+	mockACME := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "sanctions-nonce-123")
+		switch r.URL.Path {
+		case "/directory":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"newNonce":   srvURL + "/new-nonce",
+				"newAccount": srvURL + "/new-account",
+				"newOrder":   srvURL + "/new-order",
+			})
+		case "/new-nonce":
+			w.WriteHeader(http.StatusNoContent)
+		case "/new-account":
+			w.Header().Set("Location", srvURL+"/acct/1")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "valid"})
+		case "/new-order":
+			raw, _ := io.ReadAll(r.Body)
+			var jws struct {
+				Payload string `json:"payload"`
+			}
+			_ = json.Unmarshal(raw, &jws)
+			pBytes, _ := base64.RawURLEncoding.DecodeString(jws.Payload)
+			if strings.Contains(string(pBytes), "belarusbank.by") {
+				w.Header().Set("Content-Type", "application/problem+json")
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"type":   "urn:ietf:params:acme:error:rejectedIdentifier",
+					"detail": "Error creating new order :: Policy forbids issuing for name",
+					"status": 400,
+				})
+				return
+			}
+			w.Header().Set("Location", srvURL+"/order/ok")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "pending"})
+		}
+	}))
+	defer mockACME.Close()
+	srvURL = mockACME.URL
+
+	// Case A: Standard commercial .by domain (leend.by) -> Allowed by Let's Encrypt, Restricted on Sectigo/DigiCert
+	allowedProbe := probeLetsEncryptOFACPolicy(srvURL+"/directory", []string{"leend.by", "mail.leend.by"}, "178.124.204.98")
+	if !allowedProbe.CheckedLive || allowedProbe.DomainBlocked || allowedProbe.IPBlocked {
+		t.Fatalf("expected leend.by + 178.124.204.98 to PASS Let's Encrypt OFAC check, got: %+v", allowedProbe)
+	}
+
+	// Case B: Direct OFAC SDN sanctioned domain -> Rejected by Let's Encrypt with `Policy forbids issuing for name`
+	blockedRep, err := RunSanctionsAndGeoBlockAudit(SanctionsCheckRequest{
+		Domain:           "belarusbank.by",
+		IPAddress:        "178.124.204.98",
+		ACMEDirectoryURL: srvURL + "/directory",
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunSanctionsAndGeoBlockAudit failed: %v", err)
+	}
+	if !blockedRep.LEPolicyProbe.DomainBlocked || blockedRep.OverallStatus != "blocked" || len(blockedRep.Remediations) == 0 {
+		t.Fatalf("expected belarusbank.by to be flagged as OFAC blocked with remediation guide, got: %+v", blockedRep)
+	}
+}
+
+func TestStylizedAppIconsAndDeveloperAttribution(t *testing.T) {
+	// 1. Verify all 4 stylized PNG + ICO icons are cleanly embedded & valid
+	for _, slug := range []string{"emerald-shield", "kerio-amber", "sapphire-globe", "titanium-pro"} {
+		pngBytes, err := embeddedIconsFS.ReadFile("ui/icons/" + slug + ".png")
+		if err != nil || len(pngBytes) < 10000 {
+			t.Fatalf("missing or invalid embedded PNG icon %s: err=%v len=%d", slug, err, len(pngBytes))
+		}
+		icoBytes, err := embeddedIconsFS.ReadFile("ui/icons/" + slug + ".ico")
+		if err != nil || len(icoBytes) < 10000 {
+			t.Fatalf("missing or invalid embedded ICO icon %s: err=%v len=%d", slug, err, len(icoBytes))
+		}
+	}
+
+	// 2. Verify developer attribution in UI HTML
+	htmlStr := string(embeddedIndexHTML)
+	for _, mustHave := range []string{"Zakharevich Igor", "ziv@csl.by", "+375293371412"} {
+		if !strings.Contains(htmlStr, mustHave) {
+			t.Fatalf("embedded UI HTML missing required developer attribution %q", mustHave)
+		}
+	}
+
+	// 3. Verify compiled Windows COFF resource object (.syso) embeds all 4 icons + UTF-16LE developer info
+	sysoRaw, err := os.ReadFile("rsrc_windows_amd64.syso")
+	if err != nil {
+		t.Fatalf("rsrc_windows_amd64.syso missing: %v", err)
+	}
+	f, err := pe.NewFile(strings.NewReader(string(sysoRaw)))
+	if err != nil {
+		t.Fatalf("invalid COFF object rsrc_windows_amd64.syso: %v", err)
+	}
+	defer f.Close()
+	rsrcSec := f.Section(".rsrc")
+	if rsrcSec == nil {
+		t.Fatalf("missing .rsrc section in rsrc_windows_amd64.syso")
+	}
+	secData, err := rsrcSec.Data()
+	if err != nil || len(secData) < 100000 {
+		t.Fatalf("unexpected .rsrc section payload: err=%v len=%d", err, len(secData))
+	}
+	// Check UTF-16LE encoded developer strings inside VS_VERSION_INFO
+	utf16Check := func(s string) []byte {
+		var out []byte
+		for _, r := range s {
+			out = append(out, byte(r), byte(r>>8))
+		}
+		return out
+	}
+	for _, needle := range []string{"Zakharevich Igor", "ziv@csl.by", "+375293371412"} {
+		if !strings.Contains(string(secData), string(utf16Check(needle))) {
+			t.Fatalf("VS_VERSION_INFO in .rsrc missing UTF-16LE string %q", needle)
+		}
+	}
+}
+
+
+
+
