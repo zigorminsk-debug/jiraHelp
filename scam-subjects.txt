@@ -1,0 +1,42 @@
+# KCM AntiSpam DB — scam-subjects.txt
+# generated: 2026-10-24T08:51:43+00:00
+# entries: 39
+account will be suspended
+bitcoin giveaway
+claim your prize
+crypto giveaway
+double your bitcoin
+earn money fast
+final notice
+inheritance
+investment opportunity
+invoice overdue
+lottery winner
+payment failed
+suspicious sign-in
+unclaimed funds
+unusual activity
+verify your account
+work from home
+you have won
+your password expires
+аккаунт заблокирован
+ваш аккаунт будет заблокирован
+ваш приз
+ваша карта заблокирована
+возврат средств
+выиграли
+выигрыш
+деньги в долг
+задолженность
+истёк срок действия карты
+компенсация
+кредит одобрен
+наследство
+неоплаченный счёт
+одобрен кредит
+подтвердите аккаунт
+подтвердите данные карты
+поздравляем победителя
+получите приз
+срочно требуется
