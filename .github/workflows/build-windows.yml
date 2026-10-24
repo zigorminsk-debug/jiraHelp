@@ -115,9 +115,11 @@ jobs:
           cp kerio-letsencrypt-win/ui/icons/sapphire-globe.png "dist/Значки на выбор/3-Sapphire-Globe-TLS.png"
           cp kerio-letsencrypt-win/ui/icons/titanium-pro.ico "dist/Значки на выбор/4-Dark-Titanium-Pro.ico"
           cp kerio-letsencrypt-win/ui/icons/titanium-pro.png "dist/Значки на выбор/4-Dark-Titanium-Pro.png"
-          cd dist
-          zip -r ../KerioCertManager-Windows-x64.zip . > /dev/null
-          cd ..
+          # Фиксируем время файлов и порядок обхода: ZIP получается
+          # воспроизводимым (одинаковые байты при одинаковых исходниках).
+          find dist -exec touch -t 198001010000.00 {} +
+          rm -f KerioCertManager-Windows-x64.zip
+          ( cd dist && find . -type f | LC_ALL=C sort | zip -X -q -@ ../KerioCertManager-Windows-x64.zip )
 
       - name: Commit rebuilt binaries to the branch
         if: github.event_name == 'push' && github.ref_type == 'branch'
