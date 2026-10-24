@@ -494,8 +494,6 @@ func antiSpamManifestURLs() []string {
 		fmt.Sprintf("https://github.com/%s/releases/download/%s/manifest.json", antiSpamRepoSlug, antiSpamReleaseTag),
 		// 2) Зеркало: ветка antispam-db (если релизы/API недоступны)
 		fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/manifest.json", antiSpamRepoSlug, antiSpamBranch),
-		// 3) Зеркало: снимок базы в репозитории (работает сразу после сборки PR)
-		fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/antispam-db/dist/manifest.json", antiSpamRepoSlug, "arena/f70f3591-jirahelp"),
 	}
 }
 
