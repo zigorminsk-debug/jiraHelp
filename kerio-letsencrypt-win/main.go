@@ -542,6 +542,56 @@ func buildRouter() http.Handler {
 		writeJSON(w, 200, map[string]any{"ok": true, "diagnostics": res})
 	})
 
+	// Карточка «Вход под администратором Kerio Connect» (v4.7.0):
+	// быстрая проверка конкретно логина/пароля администратора с выдачей
+	// причин и плана устранения при неудаче.
+	mux.HandleFunc("/api/kerio/login-check", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, 405, fmt.Errorf("method not allowed"))
+			return
+		}
+		var body struct {
+			Host       string `json:"host"`
+			Port       int    `json:"port"`
+			User       string `json:"user"`
+			Password   string `json:"password"`
+			Domain     string `json:"domain"`
+			ProbeCerts *bool  `json:"probeCerts"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		probeCerts := true
+		if body.ProbeCerts != nil {
+			probeCerts = *body.ProbeCerts
+		}
+		res := CheckKerioAdminLogin(KerioLoginCheckRequest{
+			Host:       body.Host,
+			Port:       body.Port,
+			User:       body.User,
+			Password:   body.Password,
+			Domain:     body.Domain,
+			ProbeCerts: probeCerts,
+		})
+		if res.OK {
+			msg := res.Verdict
+			if res.Summary != "" {
+				msg += " (" + res.Summary + ")"
+			}
+			logHub.Emit("success", msg)
+		} else {
+			logHub.Emit("warning", res.Verdict)
+			for _, c := range res.Causes {
+				if c.Severity == "block" {
+					logHub.Emit("info", "Причина: "+c.Title+". Что сделать: "+strings.Join(c.Steps, " "))
+					break
+				}
+			}
+		}
+		writeJSON(w, 200, map[string]any{"ok": res.OK, "auth": res})
+	})
+
 	mux.HandleFunc("/api/kerio/discover", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeErr(w, 405, fmt.Errorf("method not allowed"))

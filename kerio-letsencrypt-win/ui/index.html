@@ -1040,7 +1040,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.6.0<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
+        <span class="brand-badge">Windows Native GUI v4.7.0<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -1535,6 +1535,61 @@
         📖 Подробно в инструкции — раздел 4. Установка в Kerio Connect
       </button>
     </div>
+    <!-- v4.7.0: вход под администратором Kerio Connect (проверка успеха + разбор причин) -->
+    <div class="card" id="kerioAuthCard">
+      <div class="card-header">
+        <div>
+          <div class="card-title">🔐 Вход под администратором Kerio Connect</div>
+          <div class="card-subtitle">
+            Проверяет <strong>только вход</strong> в Admin API (<code>:4040</code>) и сразу говорит, подошёл ли логин с паролем.
+            При успехе показывает, кто вошёл, его роль, версию Kerio и права на сертификаты. При неудаче — причину
+            и пошаговый план устранения. Пароль нигде не сохраняется.
+          </div>
+        </div>
+        <button type="button" class="btn btn-outline btn-sm" id="kerioAuthTakeFromInstallBtn"
+                title="Скопировать адрес, порт и логин из блока «Автоматическая установка в Kerio Connect»">
+          ↧ Взять из блока установки
+        </button>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="kerioAuthHost">Хост / IP админки Kerio</label>
+          <input type="text" id="kerioAuthHost" placeholder="127.0.0.1 или внутренний IP, например 10.146.100.14" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field-label" for="kerioAuthPort">Порт Admin API</label>
+          <input type="number" id="kerioAuthPort" value="4040" min="1" max="65535">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="kerioAuthUser">Логин администратора <span class="label-hint">обычно admin</span></label>
+          <input type="text" id="kerioAuthUser" value="admin" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field-label" for="kerioAuthPass">Пароль администратора <span class="label-hint">не сохраняется</span></label>
+          <div class="input-with-btn">
+            <input type="password" id="kerioAuthPass" placeholder="Пароль от веб-админки Kerio" autocomplete="off">
+            <button type="button" class="btn btn-outline btn-sm" id="kerioAuthShowPassBtn" title="Показать / скрыть пароль">👁</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="kcm-check-row" style="margin-bottom:12px;">
+        <label><input type="checkbox" id="kerioAuthProbeCerts" checked> Проверять права на SSL-сертификаты (чтение списка)</label>
+      </div>
+
+      <div class="actions-row">
+        <button type="button" class="btn btn-primary" id="kerioAuthCheckBtn">🔓 Проверить вход</button>
+        <button type="button" class="btn btn-outline" id="kerioAuthWebAdminBtn" title="Открыть веб-админку Kerio в браузере, чтобы проверить пароль вручную">🌐 Открыть WebAdmin</button>
+        <button type="button" class="btn btn-outline" id="kerioAuthReportBtn" title="Скопировать отчёт (без пароля) — удобно приложить к заявке">📋 Копировать отчёт</button>
+        <a class="btn btn-outline" href="#" onclick="openHelpSection('46-вход-под-администратором-kerio-connect--проверка-и-разбор-ошибок');return false;">📖 Как это работает</a>
+      </div>
+
+      <div id="kerioAuthResult" style="display:none;margin-top:14px;"></div>
+    </div>
+
     <div class="workspace-grid">
       <div class="card">
         <div class="card-header">
@@ -2833,7 +2888,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:1380px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.6.0</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.7.0</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -2909,7 +2964,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 <script>
   // Версия интерфейса. Должна совпадать с appVersion в version.go
   // (проверяется тестом TestVersionConsistency).
-  const APP_VERSION = '4.6.0';
+  const APP_VERSION = '4.7.0';
   let systemState = null;
   let currentCert = null;
   let allCerts = [];
@@ -4663,6 +4718,20 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
     }
     if (s.kerioApiUser) {
       document.getElementById('kerioApiUser').value = s.kerioApiUser;
+    }
+    // Карточка «Вход под администратором» (v4.7.0) — подставляем тот же адрес и
+    // логин, что и в блоке установки, но свои поля не сохраняем (пароль — тем более).
+    const authHost = document.getElementById('kerioAuthHost');
+    if (authHost && !authHost.value.trim()) {
+      authHost.value = (s.kerioApiHost || '').trim() || '127.0.0.1';
+    }
+    const authPort = document.getElementById('kerioAuthPort');
+    if (authPort && (!authPort.value || authPort.value === '4040')) {
+      authPort.value = String(s.kerioApiPort > 0 ? s.kerioApiPort : 4040);
+    }
+    const authUser = document.getElementById('kerioAuthUser');
+    if (authUser && !authUser.value.trim()) {
+      authUser.value = (s.kerioApiUser || '').trim() || 'admin';
     }
     if (s.auditDomain && !document.getElementById('auditDomainInput').value.trim()) {
       document.getElementById('auditDomainInput').value = s.auditDomain;
@@ -6603,6 +6672,295 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
   }
 
   initV46Ui();
+
+
+  // ==========================================================================
+  // v4.7.0: вход под администратором Kerio Connect
+  // Проверяем только вход в Admin API и при неудаче объясняем причину.
+  // ==========================================================================
+  let kerioAuthLastReport = null;
+
+  function kerioAuthValues() {
+    const hostEl = document.getElementById('kerioAuthHost');
+    const portEl = document.getElementById('kerioAuthPort');
+    const userEl = document.getElementById('kerioAuthUser');
+    const passEl = document.getElementById('kerioAuthPass');
+    return {
+      host: (hostEl && hostEl.value || '').trim() || '127.0.0.1',
+      port: parseInt(portEl && portEl.value || '4040', 10) || 4040,
+      user: (userEl && userEl.value || '').trim() || 'admin',
+      password: passEl ? passEl.value : '',
+      domain: (document.getElementById('domainInput') ? document.getElementById('domainInput').value || '' : '').trim(),
+      probeCerts: document.getElementById('kerioAuthProbeCerts') ? document.getElementById('kerioAuthProbeCerts').checked : true
+    };
+  }
+
+  function kerioAuthTakeFromInstall() {
+    const src = kerioApiFormValues();
+    document.getElementById('kerioAuthHost').value = src.host;
+    document.getElementById('kerioAuthPort').value = String(src.port);
+    document.getElementById('kerioAuthUser').value = src.user;
+    if (src.password) document.getElementById('kerioAuthPass').value = src.password;
+    showToast('Адрес, порт и логин скопированы из блока установки');
+  }
+
+  function kerioAuthWebAdmin() {
+    const v = kerioAuthValues();
+    const host = v.host || '127.0.0.1';
+    const url = 'https://' + host + ':' + v.port + '/admin/';
+    try {
+      window.open(url, '_blank', 'noopener');
+    } catch (_) {}
+    showToast('Открываю ' + url + (host === '127.0.0.1' ? ' — если программа не на сервере Kerio, замените адрес на внутренний IP' : ''));
+  }
+
+  function kerioAuthChip(icon, text, color) {
+    return '<span class="kcm-pill" style="' + (color ? 'color:' + color + ';border-color:' + color + ';' : '') + '">' +
+      escapeHtml(icon + ' ' + text) + '</span>';
+  }
+
+  function renderKerioAuthResult(res) {
+    const box = document.getElementById('kerioAuthResult');
+    if (!box) return;
+    kerioAuthLastReport = res;
+    box.style.display = 'block';
+
+    const okColor = res.ok ? 'rgba(16,185,129,0.14)' : 'rgba(239,68,68,0.14)';
+    const okBorder = res.ok ? '#10b981' : '#ef4444';
+    const okText = res.ok ? '#6ee7b7' : '#fca5a5';
+
+    let html = '<div style="padding:12px 14px;border-radius:10px;background:' + okColor + ';border:1.5px solid ' + okBorder +
+      ';color:' + okText + ';font-size:13px;font-weight:700;white-space:pre-wrap;">' + escapeHtml(res.verdict || '') + '</div>';
+
+    // Сводка «что за сервер и кто вошёл»
+    const chips = [];
+    if (res.product || res.version) chips.push(kerioAuthChip('🖥', (res.product || 'Kerio') + ' ' + (res.version || ''), '#60a5fa'));
+    if (res.loginUser) chips.push(kerioAuthChip('👤', res.loginUser, '#34d399'));
+    if (res.role) chips.push(kerioAuthChip('🛡', 'роль: ' + res.role, res.isAdmin ? '#34d399' : '#fbbf24'));
+    if (res.sessionOk) chips.push(kerioAuthChip('🔑', 'X-Token ' + (res.tokenMasked || '') + (res.cookieOk ? ' + cookie' : ''), res.cookieOk ? '#34d399' : '#fbbf24'));
+    if (res.certsChecked && res.canManageCerts) chips.push(kerioAuthChip('📜', 'сертификатов: ' + res.certsCount, '#34d399'));
+    if (typeof res.elapsedMs === 'number') chips.push(kerioAuthChip('⏱', (res.elapsedMs / 1000).toFixed(1) + ' с', 'var(--text-secondary)'));
+    if (chips.length) {
+      html += '<div style="display:flex;gap:7px;flex-wrap:wrap;margin:10px 0 12px;">' + chips.join('') + '</div>';
+    }
+
+    // Причины и план устранения — главное при неудаче
+    if ((res.causes || []).length) {
+      const blocking = res.causes.filter(c => c.severity === 'block');
+      const warns = res.causes.filter(c => c.severity !== 'block');
+      const block = (list, title, color, bg) => {
+        if (!list.length) return '';
+        let out = '<div style="margin-top:12px;">';
+        out += '<div style="font-weight:800;font-size:13px;margin-bottom:8px;color:' + color + ';">' + escapeHtml(title) + '</div>';
+        list.forEach((c, i) => {
+          const num = '<span class="kerio-step-num" style="background:' + bg + ';color:' + color + ';">' + (i + 1) + '</span>';
+          out += '<div class="kerio-step" style="border-color:' + color + '33;">' +
+            '<div style="display:flex;gap:9px;align-items:flex-start;">' + num +
+            '<div><div class="kerio-step-title" style="color:' + color + ';">' + escapeHtml(c.title || '') + '</div>' +
+            '<div class="kerio-step-body" style="margin-top:3px;">' + escapeHtml(c.explanation || '') + '</div></div></div>';
+          if ((c.steps || []).length) {
+            out += '<ol style="margin:9px 0 0;padding-left:20px;font-size:12.4px;line-height:1.65;">' +
+              c.steps.map(x => '<li>' + escapeHtml(x) + '</li>').join('') + '</ol>';
+          }
+          if (c.checkWhere) {
+            out += '<div style="margin-top:8px;padding:7px 10px;border-radius:7px;background:rgba(59,130,246,0.10);' +
+              'border:1px dashed rgba(59,130,246,0.45);font-size:12px;">🔎 <strong>Где проверить:</strong> ' +
+              escapeHtml(c.checkWhere) + '</div>';
+          }
+          out += '</div>';
+        });
+        out += '</div>';
+        return out;
+      };
+      html += block(blocking, '❌ Причина и как устранить', '#f87171', 'rgba(248,113,113,0.16)');
+      html += block(warns, '⚠️ На что обратить внимание', '#fbbf24', 'rgba(251,191,36,0.16)');
+    }
+
+    // Попытки входа (важно, когда Kerio принимает один вариант логина и не принимает другой)
+    if ((res.attempts || []).length) {
+      html += '<div style="margin-top:12px;font-size:12px;font-weight:800;margin-bottom:6px;">🔑 Попытки входа</div>';
+      html += '<div style="display:flex;flex-direction:column;gap:5px;">';
+      res.attempts.forEach(a => {
+        const color = a.ok ? '#10b981' : '#ef4444';
+        html += '<div style="padding:8px 11px;border-radius:8px;background:var(--bg-elevated);border-left:3px solid ' + color + ';font-size:12.2px;">' +
+          '<span style="font-weight:700;color:' + color + ';">' + (a.ok ? '✅' : '❌') + ' ' + escapeHtml(a.login || '') + '</span>' +
+          (a.note ? '<span style="color:var(--text-secondary);"> — ' + escapeHtml(a.note) + '</span>' : '') +
+          (!a.ok && a.error ? '<div style="color:var(--text-secondary);margin-top:2px;">' + escapeHtml(a.error) + '</div>' : '') +
+          '</div>';
+      });
+      html += '</div>';
+    }
+
+    // Шаги проверки
+    if ((res.checks || []).length) {
+      html += '<div style="margin-top:12px;font-size:12px;font-weight:800;margin-bottom:6px;">🧭 Что проверено</div>';
+      html += '<div style="display:flex;flex-direction:column;gap:5px;">';
+      res.checks.forEach(st => {
+        const color = kerioStatusColor(st.status);
+        html += '<div style="padding:8px 11px;border-radius:8px;background:var(--bg-elevated);border-left:3px solid ' + color + ';font-size:12.2px;">' +
+          '<div style="font-weight:700;color:' + color + ';">' + kerioStatusIcon(st.status) + ' ' + escapeHtml(st.title || '') + '</div>' +
+          '<div style="color:var(--text-secondary);margin-top:2px;white-space:pre-wrap;">' + escapeHtml(st.detail || '') + '</div>' +
+          '</div>';
+      });
+      html += '</div>';
+    }
+
+    if (res.ok) {
+      html += '<div style="margin-top:12px;padding:10px 12px;border-radius:9px;background:rgba(16,185,129,0.10);' +
+        'border:1px solid rgba(16,185,129,0.45);font-size:12.4px;line-height:1.6;">✅ <strong>Вход подтверждён.</strong> ' +
+        (res.canManageCerts
+          ? 'Этот же логин и пароль подойдут в блоке «Через Kerio Connect Admin API» — перенесите их туда одной кнопкой и нажмите «📬 Установить выбранный ключ и сертификат в Kerio Connect».'
+          : 'Учётка администратора рабочая, но прав на SSL-сертификаты нет: установить сертификат через API не получится — используйте файловый метод (раздел 4.1).') +
+        '<div style="margin-top:9px;"><button class="btn btn-secondary" id="kerioAuthApplyBtn" type="button" ' +
+        'style="font-size:12px;padding:7px 12px;">↧ Подставить в блок установки</button></div></div>';
+      setTimeout(() => {
+        const applyBtn = document.getElementById('kerioAuthApplyBtn');
+        if (applyBtn) applyBtn.addEventListener('click', kerioAuthApplyToInstall);
+      }, 0);
+    }
+
+    box.innerHTML = html;
+  }
+
+  async function checkKerioAdminLogin() {
+    const v = kerioAuthValues();
+    const box = document.getElementById('kerioAuthResult');
+    const btn = document.getElementById('kerioAuthCheckBtn');
+    const old = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Проверяю вход…';
+    box.style.display = 'block';
+    box.innerHTML = '<div style="font-size:12.5px;color:var(--text-secondary);">Проверяю: DNS → порт ' + v.port +
+      ' → TLS → веб-админка → вход администратора → права → версия Kerio' + (v.probeCerts ? ' → сертификаты' : '') + '…</div>';
+    try {
+      const r = await fetch('/api/kerio/login-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(v)
+      });
+      const d = await r.json();
+      if (!d.auth) throw new Error(d.error || 'Сервер не вернул результат проверки');
+      renderKerioAuthResult(d.auth);
+      if (d.auth.ok) {
+        showToast('Вход под администратором Kerio выполнен: ' + (d.auth.loginUser || v.user));
+        // Пустые поля блока установки заполняем сразу; уже заполненные не трогаем —
+        // для переноса есть кнопка «↧ Подставить в блок установки» в результате.
+        const apiHost = document.getElementById('kerioApiHost');
+        const apiPort = document.getElementById('kerioApiPort');
+        const apiUser = document.getElementById('kerioApiUser');
+        if (apiHost && !apiHost.value.trim()) apiHost.value = v.host;
+        if (apiPort && !apiPort.value.trim()) apiPort.value = String(v.port);
+        if (apiUser && d.auth.loginUser && (!apiUser.value.trim() || apiUser.value.trim() === 'admin')) apiUser.value = d.auth.loginUser;
+      } else {
+        showToast('Вход не выполнен — причина и шаги ниже', true);
+      }
+    } catch (e) {
+      box.innerHTML = '<div style="padding:12px;border-radius:8px;background:rgba(239,68,68,0.12);border:1px solid #ef4444;color:#fca5a5;font-size:12.5px;white-space:pre-wrap;">❌ ' + escapeHtml(e.message) + '</div>';
+      showToast('Проверка входа не выполнена', true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = old;
+    }
+  }
+
+  // kerioAuthApplyToInstall — переносит проверенные адрес, порт и логин в блок
+  // установки. Пароль НЕ переносим: его вводит человек, чтобы значение не
+  // оказалось в DOM/настройках дольше необходимого.
+  function kerioAuthApplyToInstall() {
+    const res = kerioAuthLastReport;
+    if (!res) return;
+    const v = kerioAuthValues();
+    const host = (res.host || v.host || '').trim();
+    const port = res.port || v.port || 4040;
+    const user = (res.loginUser || v.user || '').trim();
+    const apiHost = document.getElementById('kerioApiHost');
+    const apiPort = document.getElementById('kerioApiPort');
+    const apiUser = document.getElementById('kerioApiUser');
+    if (apiHost) apiHost.value = host;
+    if (apiPort) apiPort.value = String(port);
+    if (apiUser) apiUser.value = user;
+    showToast('Адрес, порт и логин перенесены в блок установки — пароль введите там вручную');
+  }
+
+  function kerioAuthReportText() {
+    const res = kerioAuthLastReport;
+    if (!res) return '';
+    const lines = [];
+    lines.push('KerioCertManager v' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '') + ' — отчёт о проверке входа в Kerio Connect');
+    lines.push('Дата: ' + new Date().toLocaleString());
+    const webAdmin = res.webAdmin || res.webAdminUrl || res.url || ('https://' + res.host + ':' + res.port + '/admin/');
+    lines.push('Сервер: ' + res.host + ':' + res.port + ' (' + webAdmin + ')');
+    const triedLogin = res.loginUser || res.user || ((res.attempts || [])[0] || {}).login || '';
+    lines.push('Логин: ' + (triedLogin || '—'));
+    if (res.product || res.version) lines.push('Продукт: ' + (res.product || '') + ' ' + (res.version || '') + ' (API v' + (res.apiVersion || 0) + ')');
+    if (res.role) lines.push('Роль: ' + res.role + (res.isAdmin ? ' (администратор)' : ''));
+    if (res.sessionOk) lines.push('Сессия: X-Token ' + (res.tokenMasked || '') + ', cookie: ' + (res.cookieOk ? 'да' : 'нет'));
+    if (res.certsChecked) lines.push('Сертификаты: ' + (res.canManageCerts ? 'доступ есть, найдено ' + res.certsCount : 'доступа нет: ' + (res.certsError || '')));
+    lines.push('');
+    lines.push('ИТОГ: ' + (res.verdict || ''));
+    if ((res.attempts || []).length) {
+      lines.push('');
+      lines.push('Попытки входа:');
+      res.attempts.forEach(a => lines.push('  ' + (a.ok ? 'OK  ' : 'FAIL') + ' ' + a.login + (a.error ? ' — ' + a.error : '')));
+    }
+    if ((res.causes || []).length) {
+      lines.push('');
+      lines.push('Причины и что сделать:');
+      res.causes.forEach((c, i) => {
+        lines.push('  ' + (i + 1) + ') ' + c.title + ' [' + (c.severity === 'block' ? 'блокирует' : 'внимание') + ']');
+        if (c.explanation) lines.push('     ' + c.explanation);
+        (c.steps || []).forEach((s, j) => lines.push('     ' + (j + 1) + '. ' + s));
+        if (c.checkWhere) lines.push('     Где проверить: ' + c.checkWhere);
+      });
+    }
+    if ((res.checks || []).length) {
+      lines.push('');
+      lines.push('Шаги проверки:');
+      res.checks.forEach(st => lines.push('  [' + (st.status || '') + '] ' + st.title + ': ' + (st.detail || '')));
+    }
+    return lines.join('\n');
+  }
+
+  async function copyKerioAuthReport() {
+    const text = kerioAuthReportText();
+    if (!text) { showToast('Сначала нажмите «🔓 Проверить вход»', true); return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('Отчёт скопирован в буфер обмена (пароль в него не попадает)');
+    } catch (e) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('Отчёт скопирован в буфер обмена');
+      } catch (e2) {
+        showToast('Не удалось скопировать отчёт: ' + e2.message, true);
+      }
+    }
+  }
+
+  function initKerioAuthCard() {
+    const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+    on('kerioAuthCheckBtn', 'click', checkKerioAdminLogin);
+    on('kerioAuthTakeFromInstallBtn', 'click', kerioAuthTakeFromInstall);
+    on('kerioAuthWebAdminBtn', 'click', kerioAuthWebAdmin);
+    on('kerioAuthReportBtn', 'click', copyKerioAuthReport);
+    on('kerioAuthShowPassBtn', 'click', () => {
+      const el = document.getElementById('kerioAuthPass');
+      if (!el) return;
+      el.type = el.type === 'password' ? 'text' : 'password';
+    });
+    // Enter в любом поле карточки запускает проверку — как в обычной форме входа.
+    ['kerioAuthHost', 'kerioAuthPort', 'kerioAuthUser', 'kerioAuthPass'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); checkKerioAdminLogin(); } });
+    });
+  }
+
+  initKerioAuthCard();
 
   initApp();
 </script>

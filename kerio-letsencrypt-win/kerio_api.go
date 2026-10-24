@@ -35,9 +35,9 @@ import (
 )
 
 const (
-	kerioAdminPort      = 4040
-	kerioAdminPath      = "/admin/api/jsonrpc/"
-	kerioUploadPath     = "/admin/api/jsonrpc/upload/"
+	kerioAdminPort       = 4040
+	kerioAdminPath       = "/admin/api/jsonrpc/"
+	kerioUploadPath      = "/admin/api/jsonrpc/upload/"
 	kerioClientUserAgent = "KerioCertManager/" + appVersion + " (Windows)"
 )
 
@@ -55,8 +55,8 @@ func (e KerioEndpoint) HostPort() string {
 	return net.JoinHostPort(e.Host, strconv.Itoa(port))
 }
 
-func (e KerioEndpoint) BaseURL() string  { return "https://" + e.HostPort() }
-func (e KerioEndpoint) RPCURL() string   { return e.BaseURL() + kerioAdminPath }
+func (e KerioEndpoint) BaseURL() string   { return "https://" + e.HostPort() }
+func (e KerioEndpoint) RPCURL() string    { return e.BaseURL() + kerioAdminPath }
 func (e KerioEndpoint) UploadURL() string { return e.BaseURL() + kerioUploadPath }
 
 // NormalizeKerioHost приводит пользовательский ввод к паре host/port.
@@ -489,19 +489,40 @@ func kerioLoginVariants(user, domainHint string) []string {
 	return res
 }
 
+// loginOnce — одна попытка Session.login под конкретным логином.
+// Вынесено отдельно, чтобы карточка «Вход под администратором» (kerio_auth.go)
+// показывала результат по каждому варианту логина, а не только последнюю ошибку.
+func (c *KerioClient) loginOnce(login, password string) (string, error) {
+	raw, err := c.rpc("Session.login", map[string]any{
+		"userName": login,
+		"password": password,
+		"application": map[string]any{
+			"name":    "KerioCertManager",
+			"vendor":  "CSL.BY",
+			"version": appVersion,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	var res struct {
+		Token string `json:"token"`
+	}
+	_ = json.Unmarshal(raw, &res)
+	if strings.TrimSpace(res.Token) == "" {
+		return "", &KerioAPIError{Kind: "protocol", Method: "Session.login",
+			Message: "Kerio принял login, но не вернул token (CSRF).",
+			Fix:     "Проверьте, что запросы идут на /admin/api/jsonrpc/ и cookie сессии не вырезается прокси.",
+			Raw:     truncateText(string(raw), 200)}
+	}
+	return res.Token, nil
+}
+
 // Login выполняет Session.login с перебором вариантов имени администратора.
 func (c *KerioClient) Login(user, password, domainHint string) error {
 	var lastErr error
 	for _, u := range kerioLoginVariants(user, domainHint) {
-		raw, err := c.rpc("Session.login", map[string]any{
-			"userName": u,
-			"password": password,
-			"application": map[string]any{
-				"name":    "KerioCertManager",
-				"vendor":  "CSL.BY",
-				"version": appVersion,
-			},
-		})
+		token, err := c.loginOnce(u, password)
 		if err != nil {
 			lastErr = err
 			kind := kerioErrKind(err)
@@ -510,17 +531,7 @@ func (c *KerioClient) Login(user, password, domainHint string) error {
 			}
 			return err
 		}
-		var res struct {
-			Token string `json:"token"`
-		}
-		_ = json.Unmarshal(raw, &res)
-		if strings.TrimSpace(res.Token) == "" {
-			return &KerioAPIError{Kind: "protocol", Method: "Session.login",
-				Message: "Kerio принял login, но не вернул token (CSRF).",
-				Fix:     "Проверьте, что запросы идут на /admin/api/jsonrpc/ и cookie сессии не вырезается прокси.",
-				Raw:     truncateText(string(raw), 200)}
-		}
-		c.Token = res.Token
+		c.Token = token
 		c.User = u
 		return nil
 	}
@@ -545,9 +556,9 @@ func (c *KerioClient) WhoAmI() (KerioWhoAmI, error) {
 	}
 	var parsed struct {
 		UserDetails struct {
-			LoginName string `json:"loginName"`
-			FullName  string `json:"fullName"`
-			IsAdmin   bool   `json:"isAdmin"`
+			LoginName     string `json:"loginName"`
+			FullName      string `json:"fullName"`
+			IsAdmin       bool   `json:"isAdmin"`
 			EffectiveRole struct {
 				UserRole string `json:"userRole"`
 			} `json:"effectiveRole"`
@@ -565,12 +576,12 @@ func (c *KerioClient) WhoAmI() (KerioWhoAmI, error) {
 }
 
 type KerioProductInfo struct {
-	Product     string `json:"product"`
-	Version     string `json:"version"`
-	Major       int    `json:"major"`
-	Minor       int    `json:"minor"`
-	Revision    int    `json:"revision"`
-	APIVersion  int    `json:"apiVersion"`
+	Product    string `json:"product"`
+	Version    string `json:"version"`
+	Major      int    `json:"major"`
+	Minor      int    `json:"minor"`
+	Revision   int    `json:"revision"`
+	APIVersion int    `json:"apiVersion"`
 }
 
 func (c *KerioClient) ProductVersion() (KerioProductInfo, error) {
@@ -611,17 +622,17 @@ func (c *KerioClient) ProductVersion() (KerioProductInfo, error) {
 
 // KerioRemoteCertInfo — сертификат на сервере Kerio.
 type KerioRemoteCertInfo struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	HostNames    []string `json:"hostNames"`
-	IssuerName   string   `json:"issuerName"`
-	ValidFrom    string   `json:"validFrom"`
-	ValidTo      string   `json:"validTo"`
-	Active       bool     `json:"active"`
-	Type         string   `json:"type"`
-	Fingerprint  string   `json:"fingerprint,omitempty"`
-	KeyID        string   `json:"keyId,omitempty"`
-	SourceIface  string   `json:"interface,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	HostNames   []string `json:"hostNames"`
+	IssuerName  string   `json:"issuerName"`
+	ValidFrom   string   `json:"validFrom"`
+	ValidTo     string   `json:"validTo"`
+	Active      bool     `json:"active"`
+	Type        string   `json:"type"`
+	Fingerprint string   `json:"fingerprint,omitempty"`
+	KeyID       string   `json:"keyId,omitempty"`
+	SourceIface string   `json:"interface,omitempty"`
 }
 
 type kerioCertListParsed struct {
@@ -843,20 +854,20 @@ type KerioEndpointProbe struct {
 }
 
 type KerioDiagResult struct {
-	OK         bool                 `json:"ok"`
-	Host       string               `json:"host"`
-	Port       int                  `json:"port"`
-	URL        string               `json:"url"`
-	Steps      []KerioDiagStep      `json:"steps"`
-	Verdict    string               `json:"verdict"`
-	Fixes      []string             `json:"fixes"`
-	Product    string               `json:"product,omitempty"`
-	Version    string               `json:"version,omitempty"`
-	LoginUser  string               `json:"loginUser,omitempty"`
-	Role       string               `json:"role,omitempty"`
-	Interface  string               `json:"interface,omitempty"`
+	OK         bool                  `json:"ok"`
+	Host       string                `json:"host"`
+	Port       int                   `json:"port"`
+	URL        string                `json:"url"`
+	Steps      []KerioDiagStep       `json:"steps"`
+	Verdict    string                `json:"verdict"`
+	Fixes      []string              `json:"fixes"`
+	Product    string                `json:"product,omitempty"`
+	Version    string                `json:"version,omitempty"`
+	LoginUser  string                `json:"loginUser,omitempty"`
+	Role       string                `json:"role,omitempty"`
+	Interface  string                `json:"interface,omitempty"`
 	Certs      []KerioRemoteCertInfo `json:"certs"`
-	Candidates []KerioEndpointProbe `json:"candidates,omitempty"`
+	Candidates []KerioEndpointProbe  `json:"candidates,omitempty"`
 }
 
 func (r *KerioDiagResult) step(key, title, status, detail, fix string) {
@@ -1136,10 +1147,10 @@ func DiagnoseKerioConnection(host string, port int, user, password, domainHint s
 
 func (r *KerioDiagResult) skipRest(afterKey string) {
 	titles := map[string]string{
-		"dns":   "TCP-порт / TLS / API",
-		"tcp":   "TLS / API",
-		"tls":   "API Kerio (JSON-RPC)",
-		"login": "Проверка прав и сертификатов",
+		"dns":    "TCP-порт / TLS / API",
+		"tcp":    "TLS / API",
+		"tls":    "API Kerio (JSON-RPC)",
+		"login":  "Проверка прав и сертификатов",
 		"rights": "Проверка сертификатов",
 	}
 	t := titles[afterKey]
@@ -1181,7 +1192,6 @@ func (r *KerioDiagResult) finalize() {
 		r.Fixes = append(r.Fixes, "Откройте https://"+net.JoinHostPort(r.Host, strconv.Itoa(r.Port))+"/admin/ в браузере на этом компьютере и проверьте, что админка Kerio открывается и вход работает.")
 	}
 }
-
 
 func detectKerioProduct(server string) string {
 	low := strings.ToLower(server)
