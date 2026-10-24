@@ -242,7 +242,7 @@ func InspectKerioServerCertificates(host string, port int, user, pass string) ([
 		return nil, err
 	}
 	defer cli.Logout()
-	if who, err := cli.WhoAmI(); err == nil && !who.IsAdmin {
+	if who, err := cli.WhoAmI(); err == nil && !who.IsAdmin && strings.TrimSpace(who.Role) != "" {
 		return nil, &KerioAPIError{
 			Kind: "rights", Method: "Session.whoAmI",
 			Message: fmt.Sprintf("учётка %s не является администратором Kerio Connect (роль: %s)", who.LoginName, who.Role),

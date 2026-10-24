@@ -1053,6 +1053,9 @@ func DiagnoseKerioConnection(host string, port int, user, password, domainHint s
 			res.step("rights", "Права администратора", "ok",
 				fmt.Sprintf("Роль: %s (пользователь %s). Полные права администратора подтверждены.", role, who.LoginName), "")
 			res.Role = role
+		} else if strings.TrimSpace(who.Role) == "" && strings.TrimSpace(who.LoginName) == "" {
+			res.step("rights", "Права администратора", "warn",
+				"Kerio не сообщил роль пользователя (Session.whoAmI недоступен в этой сборке). Проверка прав будет выполнена при импорте сертификата.", "")
 		} else {
 			res.step("rights", "Права администратора", "fail",
 				fmt.Sprintf("Учётка %s вошла, но роль \"%s\" не является административной.", who.LoginName, role),

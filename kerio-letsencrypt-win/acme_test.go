@@ -716,6 +716,16 @@ X-Spam-Status: Yes, score=6.8 required=5.0`
 				"jsonrpc": "2.0", "id": rpcReq.ID,
 				"result": map[string]any{"token": "tok_v4"},
 			})
+		case "Session.whoAmI":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": rpcReq.ID,
+				"result": map[string]any{
+					"userDetails": map[string]any{
+						"loginName":     "Admin",
+						"effectiveRole": map[string]any{"userRole": "BuiltInAdmin"},
+					},
+				},
+			})
 		case "ConnectCertificate.get":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"jsonrpc": "2.0", "id": rpcReq.ID,

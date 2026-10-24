@@ -241,7 +241,7 @@ func installViaKerioAdminAPI(rec *IssuedCertRecord, cfg KerioInstallConfig, log 
 	defer cli.Logout()
 	log("success", "Вход администратора Kerio выполнен: "+cli.User)
 
-	if who, werr := cli.WhoAmI(); werr == nil && !who.IsAdmin {
+	if who, werr := cli.WhoAmI(); werr == nil && !who.IsAdmin && strings.TrimSpace(who.Role) != "" {
 		return "", kerioInstallHint(&KerioAPIError{
 			Kind: "rights", Method: "Session.whoAmI",
 			Message: fmt.Sprintf("учётная запись %s вошла, но не является администратором Kerio Connect (роль: %s)", who.LoginName, who.Role),
