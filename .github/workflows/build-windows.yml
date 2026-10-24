@@ -5,6 +5,10 @@ on:
   push:
     branches:
       - arena/f70f3591-jirahelp
+    # Тег vX.Y.Z собирает релиз из этого тега и прикладывает к нему EXE и ZIP.
+    # Для тегов paths-фильтр GitHub не применяет.
+    tags:
+      - 'v*'
     paths:
       - 'kerio-letsencrypt-win/**'
       - 'FAQ.md'
@@ -64,6 +68,17 @@ jobs:
           fi
           exit $rc
 
+      - name: Verify tag matches appVersion
+        if: github.ref_type == 'tag'
+        run: |
+          set -e
+          VER=$(awk -F'"' '/^const appVersion = "/{print $2; exit}' kerio-letsencrypt-win/version.go)
+          if [ "v$VER" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Тег ${GITHUB_REF_NAME} не совпадает с appVersion $VER — выпуск остановлен"
+            exit 1
+          fi
+          echo "Тег ${GITHUB_REF_NAME} совпадает с appVersion $VER"
+
       - name: Verify built EXE version matches source
         run: |
           set -e
@@ -105,7 +120,7 @@ jobs:
           cd ..
 
       - name: Commit rebuilt binaries to the branch
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref_type == 'branch'
         run: |
           set -e
           git config user.name "kerio-ci"
@@ -134,6 +149,16 @@ jobs:
           echo "::error::Не удалось зафиксировать пересобранные бинарники после 5 попыток"
           exit 1
 
+      - name: Attach assets to the tagged release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1 ||             gh release create "${GITHUB_REF_NAME}" --title "KerioCertManager ${GITHUB_REF_NAME}"               --notes "Автоматическая сборка ${GITHUB_REF_NAME} из исходников этого тега."
+          gh release upload "${GITHUB_REF_NAME}" KerioCertManager.exe KerioCertManager-Windows-x64.zip --clobber
+          echo "Ассеты приложены к релизу ${GITHUB_REF_NAME}"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -144,6 +169,7 @@ jobs:
           retention-days: 14
 
       - name: Publish rolling release (best effort)
+        if: github.ref_type == 'branch'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
