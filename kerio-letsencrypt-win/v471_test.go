@@ -39,10 +39,13 @@ func TestV471CertsCauseIsActionable(t *testing.T) {
 	if len(c.Steps) < 5 {
 		t.Fatalf("certs: шагов %d, ожидалось не меньше 5 (полный разбор)", len(c.Steps))
 	}
+	// Объяснение должно прямо говорить: вход прошёл, проблема — в уровне прав.
+	for _, want := range []string{"Пароль верный", "ниже «весь сервер, чтение и запись»"} {
+		if !strings.Contains(c.Explanation, want) {
+			t.Errorf("certs: в объяснении нет %q — администратор не поймёт, что логин верный", want)
+		}
+	}
 	for _, want := range []string{
-		// Простое объяснение, почему отказ пришёл ПОСЛЕ успешного входа.
-		"Пароль верный",
-		"ниже «весь сервер, чтение и запись»",
 		// Способ 1 — встроенная учётка.
 		"Configuration → Administration Settings",
 		"Enable built-in administrator account",

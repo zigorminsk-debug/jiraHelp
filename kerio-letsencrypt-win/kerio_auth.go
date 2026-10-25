@@ -627,7 +627,7 @@ func kerioAuthCause(code string) KerioAuthCause {
 			Explanation: "JSON-RPC Admin API Kerio не умеет принимать одноразовый код, поэтому вход с 2FA из программы " +
 				"невозможен — даже с верным паролем. Нужна учётка без 2FA.",
 			Steps: []string{
-				"Создайте отдельную учётку для программы: в веб-админке https://<сервер>:4040/admin/ откройте " +
+				"Создайте отдельную учётку без 2FA для программы: в веб-админке https://<сервер>:4040/admin/ откройте " +
 					"Accounts → Users → Add, задайте имя (например kerioapi) и пароль.",
 				"В её свойствах откройте вкладку Rights и в разделе «Server administration» выберите " +
 					"Whole server read/write → OK. Без этого установка сертификатов через API не сработает.",
