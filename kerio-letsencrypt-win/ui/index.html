@@ -161,7 +161,11 @@
     background: currentColor;
   }
 
-  /* Navigation Tabs */
+  /* Navigation Tabs
+     v4.8.0: панель вкладок «прилипает» под шапкой, чтобы меню всегда было
+     под рукой при прокрутке длинных страниц. Высоту шапки измеряет
+     initStickyHeader() и кладёт в --kcm-topbar-h: шапка умеет переноситься
+     на две строки на узких окнах, поэтому фиксированное значение не годится. */
   .nav-tabs {
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border);
@@ -169,7 +173,30 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    position: sticky;
+    top: var(--kcm-topbar-h, 74px);
+    z-index: 45;
+    transition: box-shadow 0.18s ease;
   }
+  /* Тень появляется, когда панель действительно «оторвалась» от потока. */
+  .nav-tabs.is-stuck { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
+  /* Прокрутка к заголовкам не должна прятать их под прилипшей шапкой. */
+  html { scroll-padding-top: calc(var(--kcm-sticky-h, 116px) + 12px); }
+
+  /* v4.8.0: кнопка проверки обновлений в шапке + индикатор доступной версии. */
+  .kcm-update-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: #fbbf24;
+    display: inline-block; margin-left: 2px; flex: 0 0 8px;
+    animation: kcmUpdatePulse 2s ease-out infinite;
+  }
+  @keyframes kcmUpdatePulse {
+    0%   { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.55); }
+    70%  { box-shadow: 0 0 0 7px rgba(251, 191, 36, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+  }
+  .btn.has-update { border-color: rgba(251, 191, 36, 0.75); color: #fbbf24; }
+  .btn.has-update:hover { background: rgba(251, 191, 36, 0.10); }
+  #topCheckUpdateBtn.is-checking { opacity: 0.75; cursor: progress; }
   .nav-tab {
     background: transparent;
     border: none;
@@ -790,8 +817,8 @@
   }
   .faq-toc {
     position: sticky;
-    top: 74px;
-    max-height: calc(100vh - 150px);
+    top: calc(var(--kcm-sticky-h, 116px) + 10px);
+    max-height: calc(100vh - var(--kcm-sticky-h, 116px) - 34px);
     overflow: auto;
     background: var(--bg-surface);
     border: 1px solid var(--border);
@@ -828,7 +855,7 @@
     line-height: 1.65;
     color: var(--text-main);
   }
-  .faq-doc .md-h { scroll-margin-top: 84px; }
+  .faq-doc .md-h { scroll-margin-top: calc(var(--kcm-sticky-h, 116px) + 16px); }
   .faq-doc .md-h1 {
     font-size: 20px; margin: 0 0 10px; line-height: 1.3;
     padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft);
@@ -897,7 +924,7 @@
   .faq-doc a:hover { border-bottom-style: solid; }
   .faq-doc strong { color: var(--text-main); font-weight: 700; }
   mark.md-hit { background: #fbbf24; color: #111827; border-radius: 3px; padding: 0 2px; }
-  .faq-sec { scroll-margin-top: 84px; }
+  .faq-sec { scroll-margin-top: calc(var(--kcm-sticky-h, 116px) + 16px); }
   .faq-sec.faq-flash { animation: faqFlash 1.6s ease-out 1; }
   @keyframes faqFlash { from { background: var(--accent-soft); } to { background: transparent; } }
   .faq-empty { padding: 28px 8px; text-align: center; color: var(--text-secondary); font-size: 13.5px; }
@@ -1080,7 +1107,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.7.1<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
+        <span class="brand-badge">Windows Native GUI v4.8.0<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -1098,6 +1125,11 @@
     <a id="downloadWinZipBtn" href="/api/download-windows-zip" class="btn btn-outline btn-sm" style="display:none;" title="Скачать ZIP-архив с KerioCertManager.exe и всеми значками">
       📦 ZIP для Windows
     </a>
+
+    <button type="button" class="btn btn-outline btn-sm" id="topCheckUpdateBtn"
+            title="Проверить обновления KerioCertManager (GitHub Releases)">
+      🔄 <span class="btn-lbl">Проверить обновления</span><span class="kcm-update-dot" id="topUpdateDot" style="display:none;"></span>
+    </button>
 
     <button type="button" class="btn btn-outline btn-sm" onclick="openAboutAndIconsModal()" title="Выбрать стилизованный значок приложения и посмотреть контакты разработчика">
       🎨 <span class="btn-lbl">Значки / Автор</span>
@@ -2928,7 +2960,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:1380px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.7.1</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.8.0</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -3004,7 +3036,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 <script>
   // Версия интерфейса. Должна совпадать с appVersion в version.go
   // (проверяется тестом TestVersionConsistency).
-  const APP_VERSION = '4.7.1';
+  const APP_VERSION = '4.8.0';
   let systemState = null;
   let currentCert = null;
   let allCerts = [];
@@ -6345,10 +6377,27 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
 
   function kcmV(v) { return !v ? '—' : (v[0] === 'v' ? v : 'v' + v); }
 
+  // updateHeaderUpdateButton — держит кнопку в шапке в согласии с состоянием
+  // обновления: жёлтая точка и подсказка «нажмите, чтобы обновить», когда
+  // версия действительно доступна.
+  function updateHeaderUpdateButton(info) {
+    const btn = document.getElementById('topCheckUpdateBtn');
+    const dot = document.getElementById('topUpdateDot');
+    if (!btn) return;
+    const avail = !!(info && info.available && !info.skipped);
+    btn.classList.toggle('has-update', avail);
+    if (dot) dot.style.display = avail ? 'inline-block' : 'none';
+    btn.title = avail
+      ? 'Доступна версия ' + kcmV(info.latest) + ' (у вас ' + kcmV(info.current) +
+        ') — нажмите, чтобы проверить ещё раз и обновить'
+      : 'Проверить обновления KerioCertManager (GitHub Releases)';
+  }
+
   function renderUpdateBanner(payload) {
     const banner = document.getElementById('updateBanner');
     if (!banner) return;
     const info = (payload && payload.info) || null;
+    updateHeaderUpdateButton(info);
     const hidden = !info || !info.available || info.skipped;
     if (hidden) { banner.style.display = 'none'; return; }
     KCM_UPDATE.info = info;
@@ -6455,6 +6504,51 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
       showToast(e.message, true);
       updateStatusLine('Ошибка обновления: ' + e.message, 'err');
     }
+  }
+
+  // checkUpdatesFromHeader — «Проверить обновления» в шапке. Всегда делает
+  // свежий запрос к GitHub (force=1), показывает состояние на самой кнопке и
+  // коротким тостом сообщает итог, чтобы не открывать вкладку «Инструменты».
+  async function checkUpdatesFromHeader() {
+    const btn = document.getElementById('topCheckUpdateBtn');
+    if (!btn || btn.disabled) return;
+    const lbl = btn.querySelector('.btn-lbl');
+    const oldLabel = lbl ? lbl.textContent : '';
+    btn.disabled = true;
+    btn.classList.add('is-checking');
+    if (lbl) lbl.textContent = 'Проверяю…';
+    try {
+      const d = await runUpdateCheck(true);
+      if (!d) { showToast('Не удалось проверить обновления — нет связи с программой', true); return; }
+      const info = d.info || {};
+      if (d.error) {
+        showToast('Проверка не удалась: ' + d.error, true);
+        return;
+      }
+      if (info.available && !info.skipped) {
+        showToast('Доступна версия ' + kcmV(info.latest) + ' (у вас ' + kcmV(info.current) + ') — баннер с кнопкой «Обновить сейчас» вверху страницы');
+        try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, 0); }
+        pulseUpdateBanner();
+      } else if (info.available && info.skipped) {
+        showToast('Версия ' + kcmV(info.latest) + ' пропущена — включить напоминание можно в «Инструменты админа»');
+      } else {
+        showToast('Обновлений нет: у вас последняя версия ' + kcmV(info.current || APP_VERSION));
+      }
+      updateStatusLine((info.available ? 'Доступна версия ' + kcmV(info.latest) : 'Обновлений нет: ' + kcmV(info.current || '')) +
+        ' (проверено ' + new Date().toLocaleTimeString() + ')', info.available ? 'ok' : 'muted');
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove('is-checking');
+      if (lbl) lbl.textContent = oldLabel;
+    }
+  }
+
+  function pulseUpdateBanner() {
+    const banner = document.getElementById('updateBanner');
+    if (!banner || banner.style.display === 'none') return;
+    banner.style.transition = 'box-shadow 0.4s ease, transform 0.4s ease';
+    banner.style.boxShadow = '0 0 0 3px rgba(251,191,36,0.55)';
+    setTimeout(() => { banner.style.boxShadow = ''; }, 1600);
   }
 
   async function skipUpdateVersion() {
@@ -6705,6 +6799,7 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
     on('linuxCertInstallBtn', 'click', linuxInstallCert);
     on('linuxRestartBtn', 'click', linuxRestartService);
     on('linuxScriptBtn', 'click', linuxDownloadScript);
+    on('topCheckUpdateBtn', 'click', checkUpdatesFromHeader);
 
     loadUpdateSettings();
     // Первая проверка при запуске: сервер отвечает мгновенно, если не прошло 6 часов.
@@ -6712,6 +6807,55 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
   }
 
   initV46Ui();
+
+  // ==========================================================================
+  // v4.8.0: шапка и панель вкладок всегда остаются сверху при прокрутке.
+  // Высоту шапки измеряем, а не задаём числом: на узких окнах она
+  // переносится на две строки, а на широких — одна.
+  // ==========================================================================
+  function initStickyHeader() {
+    const topbar = document.querySelector('.topbar');
+    const tabs = document.querySelector('.nav-tabs');
+    const root = document.documentElement;
+    if (!topbar) return;
+
+    const sync = () => {
+      // Страховка: если вёрстка ещё не посчитана (или окно скрыто) и высота
+      // пришла нулевой, оставляем прежнее значение — иначе вкладки прилипнут
+      // к самой верхней кромке и накроют шапку.
+      const rawTop = Math.round(topbar.getBoundingClientRect().height);
+      const topH = rawTop > 0 ? rawTop : 74;
+      const rawTabs = tabs ? Math.round(tabs.getBoundingClientRect().height) : 0;
+      const tabsH = rawTabs > 0 ? rawTabs : 42;
+      root.style.setProperty('--kcm-topbar-h', topH + 'px');
+      root.style.setProperty('--kcm-sticky-h', (topH + tabsH) + 'px');
+    };
+
+    sync();
+    if (typeof ResizeObserver === 'function') {
+      const ro = new ResizeObserver(sync);
+      ro.observe(topbar);
+      if (tabs) ro.observe(tabs);
+    }
+    window.addEventListener('resize', sync);
+    window.addEventListener('orientationchange', sync);
+    // Шрифты/иконки могут догрузиться позже и изменить высоту на пару пикселей.
+    setTimeout(sync, 250);
+    setTimeout(sync, 1200);
+
+    // Тень у вкладок появляется только когда они реально прилипли.
+    if (tabs) {
+      const onScroll = () => {
+        const topH = topbar.getBoundingClientRect().height;
+        const stuck = tabs.getBoundingClientRect().top <= topH + 1 && window.scrollY > 4;
+        tabs.classList.toggle('is-stuck', stuck);
+      };
+      window.addEventListener('scroll', onScroll, { passive: true });
+      onScroll();
+    }
+  }
+
+  initStickyHeader();
 
 
   // ==========================================================================
