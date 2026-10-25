@@ -478,6 +478,10 @@ func TestEndToEndACMEv2HTTP01AndTLSALPN01AndDNS01(t *testing.T) {
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":3,"result":{"productVersion":{"productName":"Kerio Connect","major":10,"minor":0,"revision":5,"displayNumber":"10.0.5"}}}`))
 		case "Version.getApiVersion":
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":4,"result":{"apiVersion":8}}`))
+		case "Certificates.get":
+			// Старая сборка Kerio Connect (8.5–9.1): современный интерфейс
+			// Certificates ещё не существует — отвечаем как настоящий сервер.
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}`))
 		case "ConnectCertificate.get":
 			if !importedDone {
 				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"certificates":[{"id":"cert_old","name":"Default"}]}}`))

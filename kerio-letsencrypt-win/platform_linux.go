@@ -71,6 +71,16 @@ func platformLinuxServiceName() string {
 	return "kerio-connect"
 }
 
+// PlatformKerioServiceName — имя службы Kerio на Linux. Нужно обработчику
+// /api/kerio/service, чтобы журнал и ответ интерфейса называли реальную
+// службу (kerio-connect), а не пустое имя.
+func PlatformKerioServiceName() string {
+	if !platformLinuxKerioInstalled() {
+		return ""
+	}
+	return platformLinuxServiceName()
+}
+
 func PlatformKerioRegistryDirs() []string { return nil }
 
 func PlatformKerioSearchRoots() []string {

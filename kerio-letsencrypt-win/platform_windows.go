@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -298,41 +299,237 @@ func PlatformCandidateKerioDirs() []string {
 	return dirs
 }
 
+// kerioServiceNameCache — имя найденной службы кэшируем, чтобы не гонять
+// sc/reg при каждом обновлении карточки.
+var (
+	kerioServiceNameMu  sync.Mutex
+	kerioServiceNameVal string
+	kerioServiceNameAt  time.Time
+	kerioServiceNameTTL = 60 * time.Second
+)
+
+// PlatformKerioServiceName возвращает имя реально установленной службы Kerio.
+//
+// Раньше start/stop/restart жёстко использовали «KerioMailServer», поэтому на
+// серверах, где служба называется иначе (KerioConnect, «Kerio Connect»), любая
+// команда падала с «Служба не запущена» / «The service name is invalid».
+func PlatformKerioServiceName() string {
+	kerioServiceNameMu.Lock()
+	if time.Since(kerioServiceNameAt) < kerioServiceNameTTL && kerioServiceNameVal != "" {
+		name := kerioServiceNameVal
+		kerioServiceNameMu.Unlock()
+		return name
+	}
+	kerioServiceNameMu.Unlock()
+
+	name := detectKerioServiceName()
+
+	kerioServiceNameMu.Lock()
+	if name != "" {
+		kerioServiceNameVal = name
+		kerioServiceNameAt = time.Now()
+	}
+	kerioServiceNameMu.Unlock()
+	return name
+}
+
+// ResetKerioServiceNameCache сбрасывает кэш имени службы (после её установки
+// или удаления, чтобы карточка Kerio не показывала старое состояние).
+func ResetKerioServiceNameCache() {
+	kerioServiceNameMu.Lock()
+	kerioServiceNameVal = ""
+	kerioServiceNameAt = time.Time{}
+	kerioServiceNameMu.Unlock()
+}
+
+func detectKerioServiceName() string {
+	// 1. Служба, у которой в команде запуска есть путь к Kerio.
+	if name, cmd := PlatformKerioServiceImagePath(); name != "" && cmd != "" {
+		return name
+	}
+	// 2. Любая из известных служб, которая реально отвечает.
+	for _, name := range kerioServiceNames {
+		if _, ok := scQueryState(name); ok {
+			return name
+		}
+	}
+	// 3. Поиск службы по имени среди всех служб системы.
+	if out, err := runHiddenCmd("reg", "query", `HKLM\SYSTEM\CurrentControlSet\Services`, "/f", "Kerio", "/k"); err == nil {
+		for _, name := range parseKerioServiceNames(DecodeWindowsConsole(out)) {
+			if _, ok := scQueryState(name); ok {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
+// scQueryState запускает `sc query <name>` и возвращает числовой код состояния.
+// Используем именно код (1 STOPPED, 4 RUNNING), а не слова: `sc` печатает
+// STATE : 4 RUNNING без перевода, но полагаться на локализацию всё равно
+// не стоит — цифра одинакова на любой Windows.
+func scQueryState(name string) (int, bool) {
+	if strings.TrimSpace(name) == "" {
+		return 0, false
+	}
+	out, err := runHiddenCmd("sc", "query", name)
+	if err != nil {
+		return 0, false
+	}
+	code, ok := parseScStateCode(DecodeWindowsConsole(out))
+	return code, ok
+}
+
+// Числовые состояния службы Windows (sc.exe, поле STATE).
+const (
+	scStateStopped      = 1
+	scStateStartPending = 2
+	scStateStopPending  = 3
+	scStateRunning      = 4
+	scStateContinuePend = 5
+	scStatePausePending = 6
+	scStatePaused       = 7
+)
+
+// PlatformKerioServiceStatus — состояние службы Kerio на Windows.
 func PlatformKerioServiceStatus() string {
-	out, err := runHiddenCmd("sc", "query", "KerioMailServer")
-	s := string(out)
-	if err != nil || strings.Contains(s, "1060") {
+	name := PlatformKerioServiceName()
+	if name == "" {
 		return "NOT_INSTALLED"
 	}
-	if strings.Contains(s, "RUNNING") {
-		return "RUNNING"
+	code, ok := scQueryState(name)
+	if !ok {
+		return "UNKNOWN"
 	}
-	if strings.Contains(s, "STOPPED") {
+	switch code {
+	case scStateRunning, scStateContinuePend:
+		return "RUNNING"
+	case scStateStopped, scStateStopPending, scStateStartPending, scStatePaused, scStatePausePending:
 		return "STOPPED"
 	}
 	return "UNKNOWN"
 }
 
+// platformAdminHint — подсказка, если Windows отказала в доступе.
+func platformAdminHint() string {
+	if IsRunningAsAdmin() {
+		return "Запустите программу заново: возможно, служба защищена политикой или ещё не завершила предыдущую команду."
+	}
+	return "Нужны права администратора: закройте программу и запустите её через «Запуск от имени администратора»."
+}
+
+// serviceCmdDetail превращает вывод консольной команды в одну читаемую строку.
+// Никаких «exit status 2» в интерфейсе: пользователю нужен смысл, а не код.
+func serviceCmdDetail(out []byte, err error) string {
+	detail := CleanConsoleOutput(out)
+	if detail != "" {
+		return detail
+	}
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if strings.HasPrefix(msg, "exit status") {
+		if code, convErr := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(msg, "exit status"))); convErr == nil {
+			switch code {
+			case 2:
+				return "Windows не распознала службу (код 2)."
+			case 5:
+				return "Windows отказала в доступе (код 5)."
+			case 1060, 1062:
+				return "Служба не установлена (код " + strconv.Itoa(code) + ")."
+			default:
+				return "команда завершилась с кодом " + strconv.Itoa(code)
+			}
+		}
+	}
+	return msg
+}
+
+// waitServiceState ждёт нужного состояния службы (Кеrio стартует 10–30 секунд).
+func waitServiceState(name string, want int, timeout time.Duration) (int, bool) {
+	deadline := time.Now().Add(timeout)
+	last := 0
+	for {
+		if code, ok := scQueryState(name); ok {
+			last = code
+			if code == want {
+				return code, true
+			}
+		}
+		if time.Now().After(deadline) {
+			return last, false
+		}
+		time.Sleep(700 * time.Millisecond)
+	}
+}
+
+func kerioServiceStart(name string) error {
+	if code, ok := scQueryState(name); ok && code == scStateRunning {
+		return nil
+	}
+	out, err := runHiddenCmd("sc", "start", name)
+	if code, ok := waitServiceState(name, scStateRunning, 90*time.Second); ok && code == scStateRunning {
+		return nil
+	}
+	detail := serviceCmdDetail(out, err)
+	msg := "не удалось запустить службу «" + name + "»"
+	if detail != "" {
+		msg += ": " + detail
+	}
+	return fmt.Errorf("%s. %s", msg, platformAdminHint())
+}
+
+func kerioServiceStop(name string) error {
+	if code, ok := scQueryState(name); ok && code == scStateStopped {
+		return nil
+	}
+	out, err := runHiddenCmd("sc", "stop", name)
+	if code, ok := waitServiceState(name, scStateStopped, 60*time.Second); ok && code == scStateStopped {
+		return nil
+	}
+	detail := serviceCmdDetail(out, err)
+	msg := "не удалось остановить службу «" + name + "»"
+	if detail != "" {
+		msg += ": " + detail
+	}
+	return fmt.Errorf("%s. %s", msg, platformAdminHint())
+}
+
+// PlatformControlKerioService — stop/start/restart службы Kerio Connect.
+//
+// Важно: команда выполняется через `sc`, а готовность определяется по числовому
+// состоянию, а не по тексту сообщения. `net stop`/`net start` печатают
+// локализованные фразы, поэтому раньше на русской Windows любая попытка
+// заканчивалась «exit status 2» с нечитаемым текстом.
 func PlatformControlKerioService(action string) error {
 	switch action {
-	case "stop":
-		out, err := runHiddenCmd("net", "stop", "KerioMailServer")
-		if err != nil && !strings.Contains(string(out), "3521") && !strings.Contains(strings.ToLower(string(out)), "not started") {
-			return fmt.Errorf("%v (%s)", err, strings.TrimSpace(string(out)))
-		}
-		return nil
-	case "start":
-		out, err := runHiddenCmd("net", "start", "KerioMailServer")
-		if err != nil && !strings.Contains(strings.ToLower(string(out)), "already been started") {
-			return fmt.Errorf("%v (%s)", err, strings.TrimSpace(string(out)))
-		}
-		return nil
-	case "restart":
-		_ = PlatformControlKerioService("stop")
-		return PlatformControlKerioService("start")
+	case "start", "stop", "restart":
 	default:
 		return fmt.Errorf("неизвестное действие службы: %s", action)
 	}
+
+	name := PlatformKerioServiceName()
+	if name == "" {
+		return fmt.Errorf("служба Kerio Connect не найдена на этом компьютере. Проверьте, что Kerio Connect установлен " +
+			"(служба обычно называется KerioMailServer или KerioConnect) — или запустите программу на самом сервере Kerio. " +
+			"Если Kerio работает на Linux, используйте карточку «Kerio Connect на Linux».")
+	}
+
+	if action == "stop" {
+		return kerioServiceStop(name)
+	}
+	if action == "start" {
+		return kerioServiceStart(name)
+	}
+	// restart: если служба не запущена, останавливать нечего — просто стартуем.
+	if code, ok := scQueryState(name); !ok || code != scStateRunning {
+		return kerioServiceStart(name)
+	}
+	if err := kerioServiceStop(name); err != nil {
+		return err
+	}
+	return kerioServiceStart(name)
 }
 
 func PlatformOpenFolderInExplorer(path string) error {

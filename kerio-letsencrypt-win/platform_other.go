@@ -65,6 +65,12 @@ func PlatformKerioServiceStatus() string {
 	return "DEMO_LINUX_PREVIEW"
 }
 
+// PlatformKerioServiceName — на прочих платформах имя службы неизвестно:
+// обработчик /api/kerio/service вернёт пустую строку вместо ошибки сборки.
+func PlatformKerioServiceName() string {
+	return ""
+}
+
 func PlatformControlKerioService(_ string) error {
 	return nil
 }

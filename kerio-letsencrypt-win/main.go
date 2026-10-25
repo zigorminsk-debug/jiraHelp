@@ -592,6 +592,33 @@ func buildRouter() http.Handler {
 		writeJSON(w, 200, map[string]any{"ok": res.OK, "auth": res})
 	})
 
+	// «🧪 Проверить API сертификатов»: какие методы SSL реально есть на этом
+	// Kerio и что он отвечает на каждый вариант запроса. Ничего не меняет.
+	mux.HandleFunc("/api/kerio/cert-probe", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, 405, fmt.Errorf("method not allowed"))
+			return
+		}
+		var body struct {
+			Host     string `json:"host"`
+			Port     int    `json:"port"`
+			User     string `json:"user"`
+			Password string `json:"password"`
+			Domain   string `json:"domain"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		res := ProbeKerioCertificateAPI(body.Host, body.Port, body.User, body.Password, body.Domain)
+		if res.OK {
+			logHub.Emit("success", "API сертификатов Kerio: "+res.Summary)
+		} else {
+			logHub.Emit("warning", res.Summary)
+		}
+		writeJSON(w, 200, map[string]any{"ok": res.OK, "probe": res})
+	})
+
 	mux.HandleFunc("/api/kerio/discover", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeErr(w, 405, fmt.Errorf("method not allowed"))
@@ -983,12 +1010,25 @@ func buildRouter() http.Handler {
 			return
 		}
 		if err := PlatformControlKerioService(body.Action); err != nil {
-			writeErr(w, 400, err)
+			// Ошибку дублируем в журнал: тост исчезает через несколько секунд, а причину
+			// надо иметь возможность прочитать и приложить к заявке.
+			logHub.Emit("error", "Управление службой Kerio ("+body.Action+"): "+err.Error())
+			writeJSON(w, 400, map[string]any{
+				"ok":            false,
+				"error":         err.Error(),
+				"action":        body.Action,
+				"serviceName":   PlatformKerioServiceName(),
+				"serviceStatus": PlatformKerioServiceStatus(),
+			})
 			return
 		}
+		name := PlatformKerioServiceName()
+		status := PlatformKerioServiceStatus()
+		logHub.Emit("success", "Служба Kerio «"+name+"»: действие «"+body.Action+"» выполнено, состояние — "+status+".")
 		writeJSON(w, 200, map[string]any{
 			"ok":            true,
-			"serviceStatus": PlatformKerioServiceStatus(),
+			"serviceName":   name,
+			"serviceStatus": status,
 		})
 	})
 

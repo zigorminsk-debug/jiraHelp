@@ -267,11 +267,13 @@ func installViaKerioAdminAPI(rec *IssuedCertRecord, cfg KerioInstallConfig, log 
 	}
 
 	beforeIDs := map[string]bool{}
-	if before, _, berr := cli.ListCertificates(); berr == nil {
+	listIface := ""
+	if before, iface, berr := cli.ListCertificates(); berr == nil {
 		for _, c := range before {
 			beforeIDs[c.ID] = true
 		}
-		log("info", fmt.Sprintf("На сервере Kerio уже установлено сертификатов: %d", len(before)))
+		listIface = iface
+		log("info", fmt.Sprintf("На сервере Kerio уже установлено сертификатов: %d (интерфейс %s)", len(before), iface))
 	} else {
 		log("warning", "Не удалось заранее прочитать список сертификатов Kerio: "+berr.Error())
 	}
@@ -287,34 +289,149 @@ func installViaKerioAdminAPI(rec *IssuedCertRecord, cfg KerioInstallConfig, log 
 	}
 	log("success", fmt.Sprintf("Файлы загружены в Kerio (cert fileId: %s, key fileId: %s)", crtUploadID, keyUploadID))
 
+	// --- Импорт: у Kerio два разных интерфейса сертификатов -----------------
+	// Kerio Connect 8.5–9.1: ConnectCertificate.* — без имени и типа.
+	// Kerio Connect 9.2+ и 10.x: Certificates.* — с именем и типом, именно его
+	// использует веб-админка новых сборок (там же появилось «сменить
+	// сертификат без перезапуска»). Если один интерфейс ответил ошибкой
+	// «метод не найден» или «неверные параметры» — это разница версий, а не
+	// отказ в правах, поэтому пробуем второй, а не останавливаем установку.
+	ifaceOrder := []string{"Certificates", "ConnectCertificate"}
+	if strings.EqualFold(listIface, "ConnectCertificate") {
+		ifaceOrder = []string{"ConnectCertificate", "Certificates"}
+	}
+	var importErrs []string
+	for _, iface := range ifaceOrder {
+		var note string
+		var ierr error
+		if iface == "Certificates" {
+			note, ierr = importViaCertificatesStore(cli, rec, crtUploadID, keyUploadID, beforeIDs, log)
+		} else {
+			note, ierr = importViaConnectCertificate(cli, rec, crtUploadID, keyUploadID, beforeIDs, log)
+		}
+		if ierr == nil {
+			return note, nil
+		}
+		switch kerioErrKind(ierr) {
+		case "auth", "rights", "locked", "tcp", "tls", "dns", "http":
+			// Причина не в форме запроса — другой интерфейс её не исправит.
+			return "", kerioInstallHint(ierr)
+		}
+		importErrs = append(importErrs, iface+": "+ierr.Error())
+		log("warning", fmt.Sprintf("Интерфейс %s не сработал — пробуем другой способ импорта.", iface))
+	}
+	return "", kerioInstallHint(&KerioAPIError{
+		Kind: "method", Method: "Certificates.importCertificate",
+		Message: "не удалось импортировать сертификат ни через Certificates.*, ни через ConnectCertificate.*. " +
+			strings.Join(importErrs, " | "),
+		Fix: "1) Файлы уже загружены на сервер Kerio, но ни один из двух интерфейсов импорта не ответил успехом — " +
+			"обычно это значит, что сборка Kerio ждёт другую форму запроса.\n" +
+			"2) Нажмите «🧪 Проверить API сертификатов» в карточке входа: программа покажет сырые ответы Kerio на каждый " +
+			"вариант — их можно приложить к заявке.\n" +
+			"3) Установите сертификат вручную: https://<сервер>:4040/admin/ → Configuration → SSL Certificates → Import — " +
+			"укажите скачанные server.crt (или fullchain.crt) и server.key, затем «Set as Active».\n" +
+			"4) Либо файловый метод без API: скопируйте server.crt/server.key в папку sslcert на сервере Kerio (раздел 4.1 инструкции).",
+	})
+}
+
+// importViaCertificatesStore импортирует сертификат через современный
+// интерфейс Certificates (Kerio Connect 9.2+/10.x): сначала приватный ключ
+// (получаем keyId), затем PEM-сертификат с именем и типом InactiveCertificate,
+// затем активация.
+func importViaCertificatesStore(cli *KerioClient, rec *IssuedCertRecord, crtUploadID, keyUploadID string, beforeIDs map[string]bool, log LogFunc) (string, error) {
+	log("info", "Импорт приватного ключа (Certificates.importPrivateKey)...")
+	pkRaw, pkErr := cli.rpc("Certificates.importPrivateKey", map[string]any{"fileId": keyUploadID})
+	if pkErr != nil {
+		return "", pkErr
+	}
+	var pk struct {
+		KeyId        string `json:"keyId"`
+		Id           string `json:"id"`
+		NeedPassword bool   `json:"needPassword"`
+	}
+	_ = json.Unmarshal(pkRaw, &pk)
+	keyID := firstNonEmpty(pk.KeyId, pk.Id)
+	if keyID == "" {
+		return "", &KerioAPIError{Kind: "protocol", Method: "Certificates.importPrivateKey",
+			Message: "Kerio не вернул keyId приватного ключа: " + truncateText(string(pkRaw), 200),
+			Fix:     "Импорт остановлен до изменения сертификатов на сервере. Повторите попытку; если повторится — сообщите этот ответ разработчику."}
+	}
+	if pk.NeedPassword {
+		return "", &KerioAPIError{Kind: "protocol", Method: "Certificates.importPrivateKey",
+			Message: "Kerio считает приватный ключ зашифрованным паролем (needPassword=true).",
+			Fix:     "Программа всегда создаёт ключ без пароля, значит загрузился не тот файл. Выберите сертификат из списка выпущенных в программе и повторите установку."}
+	}
+	log("success", "Приватный ключ принят Kerio, keyId: "+keyID)
+
+	log("info", "Импорт SSL-сертификата (Certificates.importCertificate)...")
+	impRaw, impErr := cli.rpc("Certificates.importCertificate", map[string]any{
+		"keyId":  keyID,
+		"fileId": crtUploadID,
+		"name":   rec.PrimaryDomain,
+		"type":   "InactiveCertificate",
+	})
+	if impErr != nil && isKerioParamError(impErr) {
+		// Часть сборок не принимает цепочку в одном PEM — пробуем листовой файл.
+		if leafBytes, lerr := readLeafCert(rec); lerr == nil {
+			if leafID, uerr := cli.UploadFile("cert.crt", leafBytes); uerr == nil {
+				log("warning", "Повтор импорта листовым сертификатом без цепочки...")
+				impRaw, impErr = cli.rpc("Certificates.importCertificate", map[string]any{
+					"keyId":  keyID,
+					"fileId": leafID,
+					"name":   rec.PrimaryDomain,
+					"type":   "InactiveCertificate",
+				})
+			}
+		}
+	}
+	if impErr != nil {
+		return "", impErr
+	}
+	var imp struct {
+		Id string `json:"id"`
+	}
+	_ = json.Unmarshal(impRaw, &imp)
+	certID := imp.Id
+	if certID == "" {
+		if after, _, lerr := cli.ListCertificates(); lerr == nil {
+			certID = findNewKerioCertID(after, beforeIDs, rec.SHA256Fingerprint)
+		}
+	}
+	if certID == "" {
+		return "", &KerioAPIError{Kind: "protocol", Method: "Certificates.importCertificate",
+			Message: "сертификат импортирован, но Kerio не сообщил его ID",
+			Fix:     "Откройте https://<сервер>:4040/admin/ → Configuration → SSL Certificates, выберите новый сертификат и нажмите «Set as Active»."}
+	}
+	log("success", "Сертификат импортирован, ID: "+certID)
+	return activateKerioCertificate(cli, rec, certID, "Certificates.setActive", log), nil
+}
+
+// importViaConnectCertificate — путь для Kerio Connect 8.5–9.1
+// (ConnectCertificate.importPrivateKey → importCertificate → setActive).
+func importViaConnectCertificate(cli *KerioClient, rec *IssuedCertRecord, crtUploadID, keyUploadID string, beforeIDs map[string]bool, log LogFunc) (string, error) {
 	log("info", "Импорт приватного ключа (ConnectCertificate.importPrivateKey)...")
 	pkRaw, pkErr := cli.rpc("ConnectCertificate.importPrivateKey", map[string]any{"fileId": keyUploadID})
 	if pkErr != nil {
-		if kerioErrKind(pkErr) == "method" {
-			log("warning", "Интерфейс ConnectCertificate недоступен — используем Certificates.* (WebAdmin)")
-			return installViaKerioWebAdminCerts(cli, rec, crtUploadID, keyUploadID, beforeIDs, log)
-		}
-		return "", kerioInstallHint(pkErr)
+		return "", pkErr
 	}
-
 	var pk struct {
 		NeedPassword bool   `json:"needPassword"`
 		Id           string `json:"id"`
 	}
 	_ = json.Unmarshal(pkRaw, &pk)
 	if strings.TrimSpace(pk.Id) == "" {
-		return "", kerioInstallHint(&KerioAPIError{
+		return "", &KerioAPIError{
 			Kind: "protocol", Method: "ConnectCertificate.importPrivateKey",
 			Message: "Kerio не вернул временный ID ключа: " + truncateText(string(pkRaw), 200),
 			Fix:     "Сертификат не импортирован. Проверьте, что на порту 4040 работает Kerio Connect 8.5+ и что учётка — администратор.",
-		})
+		}
 	}
 	if pk.NeedPassword {
-		return "", kerioInstallHint(&KerioAPIError{
+		return "", &KerioAPIError{
 			Kind: "protocol", Method: "ConnectCertificate.importPrivateKey",
 			Message: "Kerio считает приватный ключ зашифрованным паролем (needPassword=true).",
 			Fix:     "Экспортируйте ключ без пароля (PEM, unencrypted) или выберите другой сертификат из списка.",
-		})
+		}
 	}
 	log("success", "Приватный ключ принят Kerio, временный ID: "+pk.Id)
 
@@ -324,23 +441,21 @@ func installViaKerioAdminAPI(rec *IssuedCertRecord, cfg KerioInstallConfig, log 
 		"fileId":   crtUploadID,
 		"password": "",
 	})
-	if icErr != nil {
+	if icErr != nil && isKerioParamError(icErr) {
 		// Старые сборки Kerio иногда принимают только листовой сертификат без цепочки.
-		if leafPath := strings.TrimSpace(rec.Files["certOnly"]); leafPath != "" {
-			if leafBytes, lerr := os.ReadFile(leafPath); lerr == nil {
-				if leafID, uerr := cli.UploadFile("cert.crt", leafBytes); uerr == nil {
-					log("warning", "Повтор импорта листовым сертификатом cert-only.crt...")
-					_, icErr = cli.rpc("ConnectCertificate.importCertificate", map[string]any{
-						"id":       pk.Id,
-						"fileId":   leafID,
-						"password": "",
-					})
-				}
+		if leafBytes, lerr := readLeafCert(rec); lerr == nil {
+			if leafID, uerr := cli.UploadFile("cert.crt", leafBytes); uerr == nil {
+				log("warning", "Повтор импорта листовым сертификатом cert-only.crt...")
+				_, icErr = cli.rpc("ConnectCertificate.importCertificate", map[string]any{
+					"id":       pk.Id,
+					"fileId":   leafID,
+					"password": "",
+				})
 			}
 		}
 	}
 	if icErr != nil {
-		return "", kerioInstallHint(icErr)
+		return "", icErr
 	}
 
 	certID := pk.Id
@@ -349,78 +464,72 @@ func installViaKerioAdminAPI(rec *IssuedCertRecord, cfg KerioInstallConfig, log 
 			certID = id
 		}
 	}
-
-	log("info", fmt.Sprintf("Активация нового сертификата (ConnectCertificate.setActive, ID: %s)...", certID))
-	if _, saErr := cli.rpc("ConnectCertificate.setActive", map[string]any{"id": certID}); saErr != nil {
-		return "", kerioInstallHint(saErr)
-	}
-
-	verifyNote := ""
-	if after, _, lerr := cli.ListCertificates(); lerr == nil {
-		if active := findActiveKerioCert(after); active != nil {
-			if kerioCertMatches(*active, rec, certID) {
-				verifyNote = fmt.Sprintf(" Kerio подтвердил активный сертификат «%s» (действует до %s).", active.Name, active.ValidTo)
-			} else {
-				verifyNote = fmt.Sprintf(" Внимание: Kerio показывает активным «%s» — откройте Configuration → SSL Certificates и проверьте.", active.Name)
-			}
-		}
-	}
-	return fmt.Sprintf("Сертификат установлен и активирован через Kerio Connect Admin API (%s) без остановки почты.%s", ep.RPCURL(), verifyNote), nil
+	return activateKerioCertificate(cli, rec, certID, "ConnectCertificate.setActive", log), nil
 }
 
-// installViaKerioWebAdminCerts — резервный путь для сборок Kerio Connect/Control,
-// где используется интерфейс Certificates.* (WebAdmin SSL Certificates).
-func installViaKerioWebAdminCerts(cli *KerioClient, rec *IssuedCertRecord, crtUploadID, keyUploadID string, beforeIDs map[string]bool, log LogFunc) (string, error) {
-	pkRaw, pkErr := cli.rpc("Certificates.importPrivateKey", map[string]any{"fileId": keyUploadID})
-	if pkErr != nil {
-		return "", kerioInstallHint(pkErr)
+// readLeafCert читает листовой сертификат без цепочки (cert-only.crt),
+// если он есть в записи о выпуске.
+func readLeafCert(rec *IssuedCertRecord) ([]byte, error) {
+	leafPath := strings.TrimSpace(rec.Files["certOnly"])
+	if leafPath == "" {
+		return nil, fmt.Errorf("листовой сертификат не сохранён")
 	}
-	var pk struct {
-		KeyId        string `json:"keyId"`
-		Id           string `json:"id"`
-		NeedPassword bool   `json:"needPassword"`
-	}
-	_ = json.Unmarshal(pkRaw, &pk)
-	keyID := pk.KeyId
-	if keyID == "" {
-		keyID = pk.Id
-	}
-	if keyID == "" {
-		return "", kerioInstallHint(&KerioAPIError{Kind: "protocol", Method: "Certificates.importPrivateKey",
-			Message: "Kerio не вернул keyId приватного ключа: " + truncateText(string(pkRaw), 200)})
-	}
-	impRaw, impErr := cli.rpc("Certificates.importCertificate", map[string]any{
-		"keyId":  keyID,
-		"fileId": crtUploadID,
-		"name":   rec.PrimaryDomain,
-		"type":   "InactiveCertificate",
-	})
-	if impErr != nil {
-		return "", kerioInstallHint(impErr)
-	}
-	var imp struct {
-		Id string `json:"id"`
-	}
-	_ = json.Unmarshal(impRaw, &imp)
-	certID := imp.Id
-	if after, _, lerr := cli.ListCertificates(); lerr == nil {
-		if id := findNewKerioCertID(after, beforeIDs, rec.SHA256Fingerprint); id != "" {
-			certID = id
-		}
-	}
-	if certID == "" {
-		return "", kerioInstallHint(&KerioAPIError{Kind: "protocol", Method: "Certificates.importCertificate",
-			Message: "сертификат импортирован, но Kerio не сообщил его ID",
-			Fix:     "Откройте https://<сервер>:4040/admin/ → Configuration → SSL Certificates и активируйте сертификат вручную кнопкой «Set as Active»."})
-	}
+	return os.ReadFile(leafPath)
+}
 
-	log("info", fmt.Sprintf("Активация сертификата в интерфейсе Certificates (ID: %s)...", certID))
-	for _, method := range []string{"ConnectCertificate.setActive", "Certificates.setActive"} {
-		if _, aerr := cli.rpc(method, map[string]any{"id": certID}); aerr == nil {
-			return fmt.Sprintf("Сертификат импортирован и активирован через Kerio Admin API (%s) методом %s.", cli.Endpoint.RPCURL(), method), nil
+// isKerioParamError — «сервер понял запрос, но не принял параметры/содержимое».
+// Только для таких ошибок есть смысл повторять импорт другим файлом.
+func isKerioParamError(err error) bool {
+	switch kerioErrKind(err) {
+	case "protocol", "rpc", "method":
+		return true
+	}
+	return false
+}
+
+// activateKerioCertificate делает новый сертификат активным и проверяет
+// результат по списку сертификатов Kerio. Неудача активации не считается
+// провалом установки: сертификат уже на сервере, его можно включить в
+// веб-админке одним нажатием.
+func activateKerioCertificate(cli *KerioClient, rec *IssuedCertRecord, certID, preferred string, log LogFunc) string {
+	log("info", fmt.Sprintf("Активация нового сертификата (ID: %s)...", certID))
+	methods := []string{preferred}
+	for _, m := range []string{"Certificates.setActive", "ConnectCertificate.setActive"} {
+		if m != preferred {
+			methods = append(methods, m)
 		}
 	}
-	return fmt.Sprintf("Сертификат импортирован в Kerio (ID: %s), но автоматическая активация недоступна. Откройте Configuration → SSL Certificates и нажмите «Set as Active».", certID), nil
+	var actErr error
+	for _, method := range methods {
+		if _, err := cli.rpc(method, map[string]any{"id": certID}); err == nil {
+			log("success", "Сертификат активирован методом "+method)
+			return verifyKerioActivation(cli, rec, certID,
+				fmt.Sprintf("Сертификат установлен и активирован через Kerio Connect Admin API (%s, %s) без остановки почты.", cli.Endpoint.RPCURL(), method))
+		} else {
+			actErr = err
+		}
+	}
+	log("warning", "Автоматическая активация недоступна: "+fmt.Sprint(actErr))
+	return fmt.Sprintf("Сертификат импортирован в Kerio (ID: %s), но автоматически активировать не удалось. "+
+		"Откройте https://%s/admin/ → Configuration → SSL Certificates → выберите сертификат «%s» → «Set as Active».",
+		certID, cli.Endpoint.HostPort(), rec.PrimaryDomain)
+}
+
+// verifyKerioActivation сверяет активный сертификат Kerio с только что
+// установленным и добавляет к отчёту подтверждение или предупреждение.
+func verifyKerioActivation(cli *KerioClient, rec *IssuedCertRecord, certID, base string) string {
+	after, _, lerr := cli.ListCertificates()
+	if lerr != nil {
+		return base
+	}
+	active := findActiveKerioCert(after)
+	if active == nil {
+		return base + " Проверить активный сертификат не удалось: Kerio не помечает активный сертификат в списке — откройте Configuration → SSL Certificates."
+	}
+	if kerioCertMatches(*active, rec, certID) {
+		return base + fmt.Sprintf(" Kerio подтвердил активный сертификат «%s» (действует до %s).", active.Name, active.ValidTo)
+	}
+	return base + fmt.Sprintf(" Внимание: Kerio показывает активным «%s» — откройте Configuration → SSL Certificates и проверьте.", active.Name)
 }
 
 // findNewKerioCertID ищет сертификат, которого не было до импорта (или совпадающий по отпечатку).

@@ -94,11 +94,13 @@ type KerioAuthResult struct {
 	SessionOK   bool   `json:"sessionOk"`
 	SessionNote string `json:"sessionNote,omitempty"`
 
-	CertsChecked   bool   `json:"certsChecked"`
-	CertsCount     int    `json:"certsCount"`
-	CertsInterface string `json:"certsInterface,omitempty"`
-	CertsError     string `json:"certsError,omitempty"`
-	CanManageCerts bool   `json:"canManageCerts"`
+	CertsChecked      bool   `json:"certsChecked"`
+	CertsCount        int    `json:"certsCount"`
+	CertsInterface    string `json:"certsInterface,omitempty"`
+	CertsError        string `json:"certsError,omitempty"`
+	CertsErrorKind    string `json:"certsErrorKind,omitempty"`
+	CertsAPIAvailable bool   `json:"certsApiAvailable"`
+	CanManageCerts    bool   `json:"canManageCerts"`
 
 	ElapsedMS int64              `json:"elapsedMs"`
 	Attempts  []KerioAuthAttempt `json:"attempts"`
@@ -449,9 +451,24 @@ func CheckKerioAdminLogin(req KerioLoginCheckRequest) KerioAuthResult {
 		if certs, iface, cerr := cli.ListCertificates(); cerr != nil {
 			res.CertsInterface = iface
 			res.CertsError = cerr.Error()
-			res.step("certs", "Доступ к SSL-сертификатам ("+iface+".get)", "fail", cerr.Error(), kerioErrFix(cerr))
-			res.cause(kerioAuthCause("certs"))
+			res.CertsErrorKind = kerioErrKind(cerr)
+			// Ошибка «метод не найден» / «неверные параметры» / «не JSON-RPC»
+			// означает разницу версий Kerio, а НЕ отсутствие прав. Раньше любая
+			// ошибка на этом шаге давала красный баннер «нет прав на SSL» —
+			// именно так ложно «отказывал» Kerio Connect 10 с учёткой Admin.
+			if certRightsDenied(cerr) {
+				res.step("certs", "Доступ к SSL-сертификатам ("+iface+".get)", "fail", cerr.Error(), kerioErrFix(cerr))
+				res.cause(kerioAuthCause("certs"))
+			} else {
+				res.CertsAPIAvailable = false
+				res.step("certs", "API сертификатов Kerio ("+iface+")", "warn",
+					"Вход и права в порядке, но прочитать список сертификатов через API не удалось ("+res.CertsErrorKind+"): "+cerr.Error(),
+					"Это не отказ в правах: Kerio ответил не той формой запроса, какую ожидает программа (обычно так бывает на новых сборках Kerio Connect). "+
+						"Установка сертификата всё равно выполняется — в карточке «Установка в Kerio» программа по очереди пробует оба интерфейса API. "+
+						"Если и там будет ошибка, нажмите «🧪 Проверить API сертификатов»: в отчёте останутся сырые ответы Kerio.")
+			}
 		} else {
+			res.CertsAPIAvailable = true
 			res.CanManageCerts = true
 			res.CertsInterface = iface
 			res.CertsCount = len(certs)
@@ -472,6 +489,19 @@ func CheckKerioAdminLogin(req KerioLoginCheckRequest) KerioAuthResult {
 	}
 	res.finalize(started)
 	return res
+}
+
+// certRightsDenied отвечает на вопрос «Kerio действительно сказал, что прав
+// нет?» Только три вида ответа означают отказ в доступе: неверная сессия,
+// блокировка и явное «недостаточно прав». Всё остальное (метод не найден,
+// неверные параметры, HTTP 404/405, странный JSON) — это несовпадение
+// версий/формы API, и писать «у вас нет прав» в этом случае нельзя.
+func certRightsDenied(err error) bool {
+	switch kerioErrKind(err) {
+	case "rights", "auth", "locked":
+		return true
+	}
+	return false
 }
 
 // finalize собирает итоговый вердикт и краткое резюме.
@@ -503,6 +533,8 @@ func (r *KerioAuthResult) finalize(started time.Time) {
 		}
 		if r.CertsChecked && r.CanManageCerts {
 			r.Verdict += fmt.Sprintf(" Права на сертификаты есть (видно %d).", r.CertsCount)
+		} else if r.CertsChecked && !r.CertsAPIAvailable && r.CertsErrorKind != "" {
+			r.Verdict += " Права подтверждены, но API сертификатов этой сборки Kerio отвечает непривычно — установка попробует оба интерфейса."
 		}
 	case loginOK && !r.OK:
 		r.Verdict = "⚠️ Логин и пароль верные, но прав администратора или доступа к сертификатам не хватает — см. причины ниже."

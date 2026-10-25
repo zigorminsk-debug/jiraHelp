@@ -637,12 +637,14 @@ type KerioRemoteCertInfo struct {
 
 type kerioCertListParsed struct {
 	Certificates []struct {
-		Id               string   `json:"id"`
-		Name             string   `json:"name"`
-		SubjectHostNames []string `json:"subjectHostNames"`
-		Fingerprint      string   `json:"fingerprint"`
-		KeyId            string   `json:"keyId"`
-		Issuer           []struct {
+		Id                string   `json:"id"`
+		Name              string   `json:"name"`
+		SubjectHostNames  []string `json:"subjectHostNames"`
+		Fingerprint       string   `json:"fingerprint"`
+		FingerprintSHA1   string   `json:"fingerprintSha1"`
+		FingerprintSHA256 string   `json:"fingerprintSha256"`
+		KeyId             string   `json:"keyId"`
+		Issuer            []struct {
 			Name  string `json:"name"`
 			Value string `json:"value"`
 		} `json:"issuer"`
@@ -660,31 +662,98 @@ type kerioCertListParsed struct {
 	} `json:"certificates"`
 }
 
-// ListCertificates возвращает сертификаты Kerio и имя использованного интерфейса
-// (ConnectCertificate для серверных сертификатов, Certificates для WebAdmin).
-func (c *KerioClient) ListCertificates() ([]KerioRemoteCertInfo, string, error) {
-	iface := "ConnectCertificate"
-	raw, err := c.rpc("ConnectCertificate.get", nil)
-	if err != nil {
-		if kerioErrKind(err) != "method" {
-			return nil, iface, err
-		}
-		iface = "Certificates"
-		raw, err = c.rpc("Certificates.get", nil)
+// kerioCertsQuery — тело параметров для Certificates.get.
+// Интерфейс Certificates (Kerio Connect 9.2 и 10.x) принимает SearchQuery,
+// а старый ConnectCertificate.get — вообще без параметров. Поэтому пробуем
+// несколько форм запроса: на разных сборках проходит только одна.
+func kerioCertsQuery() map[string]any {
+	return map[string]any{
+		"query": map[string]any{
+			"start":  0,
+			"limit":  -1,
+			"fields": []string{},
+		},
+	}
+}
+
+// kerioCertListCandidate — один вариант «как прочитать список сертификатов».
+// Порядок важен: сначала современный интерфейс Certificates (его использует
+// веб-админка Kerio Connect 9.2+/10.x), затем устаревший ConnectCertificate
+// (Kerio Connect 8.5–9.1). Если сервер ответил «метод не найден» или
+// «неверные параметры» — это НЕ отсутствие прав, а разница версий.
+type kerioCertListCandidate struct {
+	Iface  string
+	Method string
+	Params any
+	Note   string
+}
+
+func kerioCertListCandidates() []kerioCertListCandidate {
+	return []kerioCertListCandidate{
+		{"Certificates", "Certificates.get", kerioCertsQuery(), "Kerio Connect 9.2+/10 (так работает веб-админка)"},
+		{"Certificates", "Certificates.get", nil, "Kerio Connect 9.2+/10 без параметров"},
+		{"ConnectCertificate", "ConnectCertificate.get", nil, "Kerio Connect 8.5–9.1"},
+		{"ConnectCertificate", "ConnectCertificate.get", kerioCertsQuery(), "старый интерфейс с параметрами"},
+	}
+}
+
+// kerioCertAttempt — результат одной попытки чтения списка.
+type kerioCertAttempt struct {
+	Iface  string
+	Method string
+	Params any
+	OK     bool
+	Count  int
+	Err    error
+	Raw    string
+}
+
+// probeCertificateList перебирает варианты запроса списка сертификатов.
+// Возвращает сертификаты, имя сработавшего интерфейса и все попытки —
+// чтобы интерфейс мог показать сырые ответы Kerio.
+func (c *KerioClient) probeCertificateList() ([]KerioRemoteCertInfo, string, []kerioCertAttempt) {
+	attempts := make([]kerioCertAttempt, 0, 4)
+	for _, cand := range kerioCertListCandidates() {
+		raw, err := c.rpc(cand.Method, cand.Params)
+		att := kerioCertAttempt{Iface: cand.Iface, Method: cand.Method, Params: cand.Params, Err: err}
 		if err != nil {
-			if kerioErrKind(err) == "protocol" {
-				raw, err = c.rpc("Certificates.get", map[string]any{"query": map[string]any{"fields": []string{}}})
+			var ke *KerioAPIError
+			if errors.As(err, &ke) {
+				att.Raw = ke.Raw
 			}
-			if err != nil {
-				return nil, iface, err
-			}
+			attempts = append(attempts, att)
+			continue
 		}
+		certs, ok := parseKerioCertList(raw)
+		if !ok {
+			att.Err = &KerioAPIError{Kind: "protocol", Method: cand.Method,
+				Message: "ответ не содержит списка сертификатов",
+				Raw:     truncateText(string(raw), 300)}
+			attempts = append(attempts, att)
+			continue
+		}
+		att.OK = true
+		att.Count = len(certs)
+		att.Raw = truncateText(string(raw), 300)
+		attempts = append(attempts, att)
+		return certs, cand.Iface, attempts
+	}
+	return nil, "", attempts
+}
+
+// parseKerioCertList разбирает result JSON-RPC в список сертификатов.
+// Признак успеха — наличие ключа certificates (пустой список — тоже успех).
+func parseKerioCertList(raw json.RawMessage) ([]KerioRemoteCertInfo, bool) {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return nil, false
+	}
+	if _, ok := probe["certificates"]; !ok {
+		return nil, false
 	}
 	var parsed kerioCertListParsed
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, iface, &KerioAPIError{Kind: "protocol", Method: iface + ".get",
-			Message: "не удалось разобрать список сертификатов Kerio: " + err.Error(),
-			Raw:     truncateText(string(raw), 240)}
+		return nil, false
 	}
 	out := make([]KerioRemoteCertInfo, 0, len(parsed.Certificates))
 	for _, crt := range parsed.Certificates {
@@ -711,6 +780,9 @@ func (c *KerioClient) ListCertificates() ([]KerioRemoteCertInfo, string, error) 
 		if name == "" {
 			name = subjCN
 		}
+		// Kerio 10 отдаёт SHA-256 в отдельном поле — он точнее MD5 и нужен,
+		// чтобы найти только что импортированный сертификат.
+		fp := firstNonEmpty(crt.FingerprintSHA256, crt.FingerprintSHA1, crt.Fingerprint)
 		active := crt.Active || crt.IsActive || strings.EqualFold(crt.Type, "ActiveCertificate")
 		out = append(out, KerioRemoteCertInfo{
 			ID:          crt.Id,
@@ -721,12 +793,92 @@ func (c *KerioClient) ListCertificates() ([]KerioRemoteCertInfo, string, error) 
 			ValidTo:     crt.ValidPeriod.ValidToDate,
 			Active:      active,
 			Type:        crt.Type,
-			Fingerprint: crt.Fingerprint,
+			Fingerprint: fp,
 			KeyID:       crt.KeyId,
-			SourceIface: iface,
 		})
 	}
-	return out, iface, nil
+	return out, true
+}
+
+// combineCertAttemptsError собирает понятную ошибку из всех попыток.
+// Ключевая мысль: если ни один интерфейс не ответил, но при этом Kerio НЕ
+// сказал «нет прав» (1004/access denied/403), то виновата версия/форма API,
+// а не учётная запись — такой ответ нельзя выдавать за «нет прав».
+func combineCertAttemptsError(attempts []kerioCertAttempt) *KerioAPIError {
+	if len(attempts) == 0 {
+		return kerioErr("protocol", "", "не удалось запросить список сертификатов Kerio", "")
+	}
+	var parts []string
+	var raws []string
+	kind := ""
+	for _, a := range attempts {
+		if a.Err == nil {
+			continue
+		}
+		parts = append(parts, a.Method+" → "+a.Err.Error())
+		var ke *KerioAPIError
+		if errors.As(a.Err, &ke) {
+			if ke.Raw != "" && len(raws) < 2 {
+				raws = append(raws, truncateText(ke.Raw, 260))
+			}
+			switch ke.Kind {
+			case "auth", "locked", "rights":
+				if kind == "" {
+					kind = ke.Kind
+				}
+			case "tcp", "dns", "tls", "http":
+				if kind == "" {
+					kind = ke.Kind
+				}
+			}
+		}
+	}
+	msg := "Список SSL-сертификатов Kerio прочитать не удалось. Ответы сервера: " + strings.Join(parts, "; ")
+	switch kind {
+	case "auth", "locked", "rights":
+		return &KerioAPIError{Kind: kind, Method: "Certificates.get",
+			Message: msg,
+			Fix: "1) Проверьте, что учётная запись — администратор Kerio Connect с уровнем «весь сервер, чтение и запись» " +
+				"(Accounts → Users → Rights → Whole server read/write).\n" +
+				"2) Встроенная учётка Admin имеет полные права всегда — включите её в Configuration → Administration Settings.\n" +
+				"3) Если раздел Configuration → SSL Certificates у вас открывается, а API отвечает отказом — пришлите отчёт " +
+				"кнопкой «Скопировать отчёт»: причина может быть в ограничении API, а не в правах.",
+			Raw: strings.Join(raws, " | ")}
+	case "tcp", "dns", "tls", "http":
+		return &KerioAPIError{Kind: kind, Method: "Certificates.get", Message: msg, Raw: strings.Join(raws, " | ")}
+	default:
+		return &KerioAPIError{Kind: "method", Method: "Certificates.get",
+			Message: "Ни один из интерфейсов сертификатов Kerio не ответил как ожидалось (это НЕ отказ в правах): " + strings.Join(parts, "; "),
+			Fix: "1) Так бывает, когда версия Kerio Connect новее, чем ожидает программа, — интерфейс сертификатов " +
+				"отвечает другой формой запроса.\n" +
+				"2) Нажмите «🧪 Проверить API сертификатов» — программа покажет ответ Kerio на каждый вариант запроса, " +
+				"и его можно отправить разработчику.\n" +
+				"3) Установить сертификат можно и файловым методом: скопируйте server.crt/server.key в папку sslcert " +
+				"на сервере Kerio (Configuration → SSL Certificates → Import вручную).\n" +
+				"4) Раздел Configuration → SSL Certificates в веб-админке при этом открывается — с учётной записью всё в порядке.",
+			Raw: strings.Join(raws, " | ")}
+	}
+}
+
+// ListCertificates возвращает сертификаты Kerio и имя использованного интерфейса
+// (Certificates для Kerio Connect 9.2+/10.x, ConnectCertificate для 8.5–9.1).
+func (c *KerioClient) ListCertificates() ([]KerioRemoteCertInfo, string, error) {
+	certs, iface, attempts := c.probeCertificateList()
+	if iface != "" {
+		for i := range certs {
+			certs[i].SourceIface = iface
+		}
+		return certs, iface, nil
+	}
+	err := combineCertAttemptsError(attempts)
+	// Возвращаем интерфейс, который сервер хотя бы знает: по нему вызывающий
+	// код поймёт, какие методы предлагать для импорта.
+	for _, a := range attempts {
+		if kerioErrKind(a.Err) != "method" {
+			return nil, a.Iface, err
+		}
+	}
+	return nil, "Certificates", err
 }
 
 // UploadFile загружает файл в Kerio.

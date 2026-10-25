@@ -1152,7 +1152,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.9.0<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
+        <span class="brand-badge">Windows Native GUI v4.9.1<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -1727,11 +1727,13 @@
       <div class="actions-row">
         <button type="button" class="btn btn-primary" id="kerioAuthCheckBtn">🔓 Проверить вход</button>
         <button type="button" class="btn btn-outline" id="kerioAuthWebAdminBtn" title="Открыть веб-админку Kerio в браузере, чтобы проверить пароль вручную">🌐 Открыть WebAdmin</button>
+        <button type="button" class="btn btn-outline" id="kerioCertProbeBtn" title="Показать, какие методы SSL-сертификатов реально есть на этом Kerio и что он отвечает на каждый запрос. Ничего на сервере не меняет.">🧪 Проверить API сертификатов</button>
         <button type="button" class="btn btn-outline" id="kerioAuthReportBtn" title="Скопировать отчёт (без пароля) — удобно приложить к заявке">📋 Копировать отчёт</button>
         <a class="btn btn-outline" href="#" onclick="openHelpSection('46-вход-под-администратором-kerio-connect--проверка-и-разбор-ошибок');return false;">📖 Как это работает</a>
       </div>
 
       <div id="kerioAuthResult" style="display:none;margin-top:14px;"></div>
+      <div id="kerioCertProbeResult" style="display:none;margin-top:14px;"></div>
     </div>
 
     <div class="workspace-grid">
@@ -1829,7 +1831,8 @@
               <div class="card-subtitle">Обнаруженная служба Windows и текущие SSL-сертификаты в папке <code>sslcert</code></div>
             </div>
             <div style="display:flex;gap:6px;">
-              <button type="button" class="btn btn-outline btn-sm" onclick="controlKerioService('restart')">🔄 Перезапустить службу</button>
+              <button type="button" class="btn btn-outline btn-sm" id="kerioRestartServiceBtn"
+                      title="Остановить и снова запустить службу Kerio Connect (почта на несколько секунд станет недоступна)">🔄 Перезапустить службу</button>
             </div>
           </div>
           <div id="kerioDetectedBox"></div>
@@ -3032,7 +3035,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:min(1880px,96vw);margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.9.0</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.9.1</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -3108,7 +3111,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 <script>
   // Версия интерфейса. Должна совпадать с appVersion в version.go
   // (проверяется тестом TestVersionConsistency).
-  const APP_VERSION = '4.9.0';
+  const APP_VERSION = '4.9.1';
   let systemState = null;
   let currentCert = null;
   let allCerts = [];
@@ -3889,19 +3892,61 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
     }
   });
 
-  async function controlKerioService(action) {
-    const r = await fetch('/api/kerio/service', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action })
-    });
-    const d = await r.json();
-    if (!d.ok) {
-      showToast(d.error, true);
-      return;
+  // Кнопка «🔄 Перезапустить службу» в карточке состояния Kerio.
+  // Обработчик вешаем здесь же, рядом с остальными кнопками блока Kerio:
+  // раньше кнопка была в разметке, а клик ни к чему не приводил.
+  (function bindKerioServiceButton() {
+    const btn = document.getElementById('kerioRestartServiceBtn');
+    if (btn) btn.addEventListener('click', () => controlKerioService('restart'));
+  })();
+
+  // Названия состояний службы по-русски (коды приходят с сервера).
+  function kerioServiceStateText(status) {
+    switch (status) {
+      case 'RUNNING': return 'работает';
+      case 'STOPPED': return 'остановлена';
+      case 'NOT_INSTALLED': return 'не установлена';
+      default: return 'состояние неизвестно';
     }
-    showToast('Команда службе KerioMailServer выполнена (' + d.serviceStatus + ')');
-    document.getElementById('rescanKerioBtn').click();
+  }
+
+  async function controlKerioService(action) {
+    const btn = document.getElementById('kerioRestartServiceBtn');
+    const labels = { restart: 'Перезапускаю службу…', stop: 'Останавливаю службу…', start: 'Запускаю службу…' };
+    const old = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> ' + (labels[action] || 'Выполняю…');
+    }
+    try {
+      const r = await fetch('/api/kerio/service', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action })
+      });
+      const d = await r.json();
+      if (!d.ok) {
+        // Ошибка остаётся и в журнале (её же пишет сервер), и в тосте —
+        // с конкретной причиной вместо «exit status 2».
+        appendLogLine({ level: 'error', timestamp: new Date().toLocaleTimeString('ru-RU'), message: d.error || 'Не удалось выполнить команду службе Kerio' });
+        showToast(d.error || 'Не удалось выполнить команду службе Kerio', true);
+        return;
+      }
+      const name = d.serviceName || 'Kerio';
+      const state = kerioServiceStateText(d.serviceStatus);
+      const verb = action === 'restart' ? 'перезапущена' : (action === 'stop' ? 'остановлена' : 'запущена');
+      showToast('Служба «' + name + '» ' + verb + '. Сейчас ' + state + '.');
+      appendLogLine({ level: 'success', timestamp: new Date().toLocaleTimeString('ru-RU'), message: 'Служба «' + name + '» ' + verb + ' — ' + state + ' (' + (d.serviceStatus || '') + ').' });
+      const rescan = document.getElementById('rescanKerioBtn');
+      if (rescan) rescan.click();
+    } catch (e) {
+      showToast('Не удалось связаться с программой: ' + e.message, true);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = old;
+      }
+    }
   }
 
   // Vault & Auto-renewal
@@ -7144,7 +7189,12 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
         'border:1px solid rgba(16,185,129,0.45);font-size:12.4px;line-height:1.6;">✅ <strong>Вход подтверждён.</strong> ' +
         (res.canManageCerts
           ? 'Этот же логин и пароль подойдут в блоке «Через Kerio Connect Admin API» — перенесите их туда одной кнопкой и нажмите «📬 Установить выбранный ключ и сертификат в Kerio Connect».'
-          : 'Учётка администратора рабочая, но прав на SSL-сертификаты нет: установить сертификат через API не получится — используйте файловый метод (раздел 4.1).') +
+          : (res.certsErrorKind
+              ? 'Права администратора подтверждены (Kerio принял вход' + (res.role ? ', роль ' + res.role : '') +
+                '), но API сертификатов этой сборки Kerio ответил не той формой запроса, какую ожидала программа. Это <strong>не отказ в правах</strong>: ' +
+                'установка всё равно выполняется — программа по очереди пробует оба интерфейса (Certificates.* и ConnectCertificate.*). ' +
+                'Если установка не пройдёт, нажмите «🧪 Проверить API сертификатов» и приложите отчёт к заявке.'
+              : 'Учётка администратора рабочая, но прав на SSL-сертификаты нет: установить сертификат через API не получится — используйте файловый метод (раздел 4.1).')) +
         '<div style="margin-top:9px;"><button class="btn btn-secondary" id="kerioAuthApplyBtn" type="button" ' +
         'style="font-size:12px;padding:7px 12px;">↧ Подставить в блок установки</button></div></div>';
       setTimeout(() => {
@@ -7258,15 +7308,22 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
       lines.push('Шаги проверки:');
       res.checks.forEach(st => lines.push('  [' + (st.status || '') + '] ' + st.title + ': ' + (st.detail || '')));
     }
+    if (kerioCertProbeLast && kerioCertProbeLast.report) {
+      lines.push('');
+      lines.push('=== Проверка API сертификатов ===');
+      lines.push(kerioCertProbeLast.report);
+    }
     return lines.join('\n');
   }
 
-  async function copyKerioAuthReport() {
-    const text = kerioAuthReportText();
-    if (!text) { showToast('Сначала нажмите «🔓 Проверить вход»', true); return; }
+  // copyTextToClipboard — один способ копирования на все отчёты.
+  // navigator.clipboard доступен не всегда (встроенный WebView2 без разрешений),
+  // поэтому есть запасной путь через скрытый textarea + execCommand.
+  async function copyTextToClipboard(text, okMessage) {
+    if (!text) { showToast('Сначала выполните проверку — отчёт пока пуст', true); return; }
     try {
       await navigator.clipboard.writeText(text);
-      showToast('Отчёт скопирован в буфер обмена (пароль в него не попадает)');
+      showToast(okMessage || 'Скопировано в буфер обмена');
     } catch (e) {
       try {
         const ta = document.createElement('textarea');
@@ -7275,10 +7332,86 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
         ta.select();
         document.execCommand('copy');
         document.body.removeChild(ta);
-        showToast('Отчёт скопирован в буфер обмена');
+        showToast(okMessage || 'Скопировано в буфер обмена');
       } catch (e2) {
         showToast('Не удалось скопировать отчёт: ' + e2.message, true);
       }
+    }
+  }
+
+  async function copyKerioAuthReport() {
+    const text = kerioAuthReportText();
+    if (!text) { showToast('Сначала нажмите «🔓 Проверить вход»', true); return; }
+    await copyTextToClipboard(text, 'Отчёт скопирован в буфер обмена (пароль в него не попадает)');
+  }
+
+  // ── «🧪 Проверить API сертификатов» ─────────────────────────────────────
+  // Зачем: у Kerio Connect два набора методов сертификатов (Certificates.*
+  // в 9.2+/10.x и ConnectCertificate.* в 8.5–9.1). Когда установка падает,
+  // нужно видеть, какой метод сервер знает и что именно он ответил — иначе
+  // любая ошибка выглядит как «нет прав».
+  let kerioCertProbeLast = null;
+
+  function renderKerioCertProbe(res) {
+    const box = document.getElementById('kerioCertProbeResult');
+    if (!box) return;
+    box.style.display = 'block';
+    const rows = (res.rows || []).map(row => {
+      const color = row.ok ? '#10b981' : '#ef4444';
+      const mark = row.ok ? '✅' : '❌';
+      let line = '<div style="padding:9px 11px;border-radius:8px;background:var(--bg-elevated);border-left:3px solid ' + color + ';font-size:12.2px;margin-bottom:6px;">';
+      line += '<div style="font-weight:700;color:' + color + ';">' + mark + ' ' + escapeHtml(row.method || '') + '</div>';
+      if (row.params) line += '<div style="color:var(--text-secondary);margin-top:2px;">Параметры: ' + escapeHtml(row.params) + '</div>';
+      if (row.note) line += '<div style="color:var(--text-secondary);margin-top:2px;">' + escapeHtml(row.note) + '</div>';
+      if (row.ok && row.count) line += '<div style="color:#6ee7b7;margin-top:2px;">Сертификатов прочитано: ' + row.count + '</div>';
+      if (row.error) line += '<div style="color:#fca5a5;margin-top:3px;white-space:pre-wrap;">' + escapeHtml(row.error) + '</div>';
+      if (row.raw) line += '<div style="margin-top:4px;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--text-secondary);word-break:break-all;">Ответ Kerio: ' + escapeHtml(row.raw) + '</div>';
+      line += '</div>';
+      return line;
+    }).join('');
+
+    let html = '<div style="padding:11px 13px;border-radius:10px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.45);font-size:12.4px;line-height:1.55;">';
+    html += '🧪 <strong>Проверка API сертификатов</strong> — ничего на сервере не меняется, только чтение.<br>';
+    html += escapeHtml(res.summary || '') + '<br>';
+    if (res.interface) html += 'Рабочий интерфейс списка: <strong>' + escapeHtml(res.interface) + '</strong>. ';
+    if (res.role) html += 'Роль учётки: ' + escapeHtml(res.role) + '.';
+    html += '<div style="margin-top:9px;display:flex;gap:8px;flex-wrap:wrap;">';
+    html += '<button class="btn btn-outline btn-sm" id="kerioCertProbeCopyBtn" type="button" style="font-size:12px;padding:6px 11px;">📋 Скопировать отчёт по API</button>';
+    html += '<a class="btn btn-outline btn-sm" href="#" onclick="openHelpSection(\'462-раздел-ssl-открывается-права-выданы-а-добавление-сертификата-падает-kerio-connect-10\');return false;" style="font-size:12px;padding:6px 11px;">📖 Почему так бывает</a>';
+    html += '</div></div>';
+    html += '<div style="margin-top:10px;">' + rows + '</div>';
+    box.innerHTML = html;
+
+    const copyBtn = document.getElementById('kerioCertProbeCopyBtn');
+    if (copyBtn) copyBtn.addEventListener('click', () => copyTextToClipboard(kerioCertProbeLast && kerioCertProbeLast.report ? kerioCertProbeLast.report : '', 'Отчёт по API сертификатов скопирован'));
+  }
+
+  async function probeKerioCertificateAPI() {
+    const v = kerioAuthValues();
+    const btn = document.getElementById('kerioCertProbeBtn');
+    const box = document.getElementById('kerioCertProbeResult');
+    const old = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Проверяю API…'; }
+    if (box) {
+      box.style.display = 'block';
+      box.innerHTML = '<div style="font-size:12.5px;color:var(--text-secondary);">Спрашиваю Kerio, какие методы сертификатов есть на сервере: list → importPrivateKey → importCertificate → setActive…</div>';
+    }
+    try {
+      const r = await fetch('/api/kerio/cert-probe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(v)
+      });
+      const d = await r.json();
+      if (!d.probe) throw new Error(d.error || 'Сервер не вернул результат проверки API');
+      kerioCertProbeLast = d.probe;
+      renderKerioCertProbe(d.probe);
+      showToast(d.probe.ok ? 'Проверка API сертификатов выполнена' : 'Вход в Kerio не выполнен — см. отчёт', !d.probe.ok);
+    } catch (e) {
+      if (box) box.innerHTML = '<div style="padding:12px;border-radius:8px;background:rgba(239,68,68,0.12);border:1px solid #ef4444;color:#fca5a5;font-size:12.5px;white-space:pre-wrap;">❌ ' + escapeHtml(e.message) + '</div>';
+      showToast('Проверка API сертификатов не выполнена', true);
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = old; }
     }
   }
 
@@ -7288,6 +7421,7 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
     on('kerioAuthTakeFromInstallBtn', 'click', kerioAuthTakeFromInstall);
     on('kerioAuthWebAdminBtn', 'click', kerioAuthWebAdmin);
     on('kerioAuthReportBtn', 'click', copyKerioAuthReport);
+    on('kerioCertProbeBtn', 'click', probeKerioCertificateAPI);
     on('kerioAuthShowPassBtn', 'click', () => {
       const el = document.getElementById('kerioAuthPass');
       if (!el) return;
