@@ -225,13 +225,17 @@
     color: var(--text-main);
   }
 
-  /* Layout Container */
+  /* Layout Container
+     v4.9.0: на больших мониторах (2K/4K/ultrawide) страница больше не жмётся
+     в узкую колонку по центру: ширина растёт вместе с окном до 1880 px,
+     а отступы масштабируются. На 1366–1500 px остаётся прежняя плотность. */
   .container {
     width: 100%;
-    max-width: 1380px;
+    max-width: min(1880px, 96vw);
     margin: 0 auto;
-    padding: 20px 24px 40px;
+    padding: 20px clamp(16px, 1.9vw, 34px) 44px;
     flex: 1;
+    min-width: 0;
   }
 
   .tab-page { display: none; }
@@ -239,10 +243,13 @@
 
   .workspace-grid {
     display: grid;
-    grid-template-columns: minmax(430px, 1.05fr) minmax(420px, 1fr);
-    gap: 20px;
+    grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr);
+    gap: clamp(18px, 1.5vw, 30px);
     align-items: start;
   }
+  /* Правая колонка вкладки «Выпуск»: карточки идут стопкой, ничего не липнет
+     к краю и не «уезжает» во вторую строку сетки. */
+  .workspace-side { min-width: 0; display: flex; flex-direction: column; }
   @media (max-width: 980px) {
     .workspace-grid { grid-template-columns: 1fr; }
     .topbar, .nav-tabs, .container { padding-left: 14px; padding-right: 14px; }
@@ -1065,6 +1072,27 @@
     .ub-actions .btn { width: 100%; justify-content: center; }
   }
 
+  /* ===== v4.9.0: карточка «Быстрый старт» в правой колонке ===== */
+  .qs-steps { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 9px; }
+  .qs-steps li { display: flex; gap: 10px; align-items: flex-start; font-size: 12.8px; line-height: 1.6; }
+  .qs-steps .qs-n {
+    flex: 0 0 22px; width: 22px; height: 22px; border-radius: 7px;
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 11.5px; font-weight: 800; display: inline-flex;
+    align-items: center; justify-content: center; margin-top: 1px;
+  }
+  .qs-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px; padding: 11px 12px; border-radius: var(--radius-sm);
+    background: var(--bg-input); border: 1px solid var(--border);
+  }
+  .qs-item { min-width: 0; }
+  .qs-lbl { display: block; font-size: 10.8px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); }
+  .qs-val {
+    display: block; font-size: 12.6px; font-weight: 700; margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
   /* ===== v4.6.0: карточка «Kerio на Linux» ===== */
   .linux-grid {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -1093,6 +1121,23 @@
   }
   .kcm-pill.ok { color: #34d399; border-color: rgba(52,211,153,0.5); }
   .kcm-pill.bad { color: #f87171; border-color: rgba(248,113,113,0.5); }
+  /* --- Большие мониторы: 1600 px и шире --- */
+  @media (min-width: 1600px) {
+    .container { max-width: min(1880px, 95vw); padding-top: 24px; }
+    .workspace-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 26px; }
+    .card { padding: 22px; }
+    .field-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .mode-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  }
+  /* --- 2K/4K и ultrawide: контент занимает экран, поля не растягиваются в ленту --- */
+  @media (min-width: 2000px) {
+    .container { max-width: 1880px; padding-top: 28px; }
+    .workspace-grid { gap: 32px; }
+    .card { padding: 24px; }
+    .download-primary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cert-meta-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+
 </style>
 <link id="dynamicFaviconLink" rel="icon" type="image/png" href="/icons/emerald-shield.png">
 </head>
@@ -1107,7 +1152,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.8.0<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
+        <span class="brand-badge">Windows Native GUI v4.9.0<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -1203,7 +1248,7 @@
 </nav>
 
 <!-- Первый запуск: подсказка про встроенную инструкцию (показывается один раз) -->
-<div id="helpFirstRunBanner" style="display:none;max-width:1380px;margin:14px auto 0;padding:0 24px;">
+<div id="helpFirstRunBanner" style="display:none;max-width:min(1880px,96vw);margin:14px auto 0;padding:0 clamp(16px,1.9vw,34px);">
   <div style="background:rgba(59,130,246,0.14);border:1.5px solid #3b82f6;border-radius:10px;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <div style="font-size:13.5px;color:#bfdbfe;font-weight:600;">
       📖 <strong>Впервые здесь?</strong> В программу встроена полная инструкция на русском — 19 разделов простым языком, с поиском, оглавлением и печатью.
@@ -1216,7 +1261,7 @@
 </div>
 
 <!-- Global Expiring SSL Warning Banner (auto-shown if any certificate expires within 14 days) -->
-<div id="expiringCertAlertBanner" style="display:none;max-width:1380px;margin:14px auto 0;padding:0 24px;">
+<div id="expiringCertAlertBanner" style="display:none;max-width:min(1880px,96vw);margin:14px auto 0;padding:0 clamp(16px,1.9vw,34px);">
   <div style="background:rgba(239,68,68,0.14);border:1.5px solid #ef4444;border-radius:10px;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <div id="expiringCertAlertText" style="font-size:13.5px;color:#fecaca;font-weight:600;"></div>
     <button type="button" class="btn btn-primary btn-sm" onclick="switchTab('vault')">⏰ Открыть хранилище и продлить →</button>
@@ -1463,8 +1508,40 @@
         </div>
       </div>
 
-      <!-- RIGHT COLUMN: DIAGNOSTICS + ISSUED CERT + LOGS -->
-      <div>
+      <!-- RIGHT COLUMN: QUICK START + DIAGNOSTICS + ISSUED CERT + LOGS
+           ВАЖНО: это ОДИН grid-элемент. Раньше здесь стояли два соседних <div>,
+           из-за чего правая колонка уезжала во вторую строку сетки и половина
+           экрана оставалась пустой (видно на широких мониторах). -->
+      <div class="workspace-side">
+
+        <!-- Быстрый старт: заполняет правую колонку до первого результата -->
+        <div class="card" id="issueQuickCard">
+          <div class="card-header" style="margin-bottom:12px;">
+            <div>
+              <div class="card-title">🧭 Быстрый старт</div>
+              <div class="card-subtitle">Три шага до готового сертификата для Kerio Connect</div>
+            </div>
+            <span class="kcm-pill" id="qsReady">Заполните домен и IP</span>
+          </div>
+
+          <ol class="qs-steps">
+            <li><span class="qs-n">1</span><span>Заполните <strong>домен</strong> и <strong>публичный IP</strong> сервера Kerio — они попадут в сертификат.</span></li>
+            <li><span class="qs-n">2</span><span>Нажмите <strong>🩺 Проверить готовность</strong>: программа сверит DNS, порты 80/443 и доступность Let's Encrypt.</span></li>
+            <li><span class="qs-n">3</span><span>Нажмите <strong>🔐 Выпустить сертификат</strong> — файлы появятся в правой колонке, оттуда их можно сразу установить в Kerio.</span></li>
+          </ol>
+
+          <div class="qs-grid">
+            <div class="qs-item"><span class="qs-lbl">Домен</span><span class="qs-val" id="qsDomain">не задан</span></div>
+            <div class="qs-item"><span class="qs-lbl">IP</span><span class="qs-val" id="qsIp">не задан</span></div>
+            <div class="qs-item"><span class="qs-lbl">Режим</span><span class="qs-val" id="qsMode">—</span></div>
+            <div class="qs-item"><span class="qs-lbl">Проверка</span><span class="qs-val" id="qsChallenge">—</span></div>
+          </div>
+
+          <div class="actions-row" style="margin-top:14px;">
+            <button type="button" class="btn btn-outline" id="qsPreflightBtn">🩺 Проверить готовность</button>
+            <a class="btn btn-outline" href="#" onclick="openHelpSection('3-вкладка-1--выпуск-сертификата');return false;">📖 Раздел 3 инструкции</a>
+          </div>
+        </div>
 
         <!-- Smart Recovery Banner when Port 80 is routed to another VM/Kerio server -->
         <div class="card" id="portInterceptCard" style="display:none;border-color:#f59e0b;">
@@ -1483,11 +1560,6 @@
             🌐 Выпустить сертификат прямо с этого ПК через DNS-01 (без портов 80/443) →
           </button>
         </div>
-
-      </div>
-
-      <!-- RIGHT COLUMN: DIAGNOSTICS + ISSUED CERT + LOGS -->
-      <div>
 
         <!-- Interactive DNS-01 Pending Wizard -->
         <div class="card" id="dns01WizardCard" style="display:none;border-color:var(--kerio-orange);">
@@ -2957,10 +3029,10 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 
 <!-- Persistent Developer Attribution & Icon Chooser Footer -->
 <footer style="border-top:1px solid var(--border);background:var(--bg-surface);padding:13px 24px;">
-  <div style="max-width:1380px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
+  <div style="max-width:min(1880px,96vw);margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.8.0</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.9.0</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -3036,7 +3108,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 <script>
   // Версия интерфейса. Должна совпадать с appVersion в version.go
   // (проверяется тестом TestVersionConsistency).
-  const APP_VERSION = '4.8.0';
+  const APP_VERSION = '4.9.0';
   let systemState = null;
   let currentCert = null;
   let allCerts = [];
@@ -3576,6 +3648,10 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
     currentCert = cert;
     const card = document.getElementById('resultCard');
     card.style.display = 'block';
+    // Правая колонка теперь занята результатом — подсказка «Быстрый старт»
+    // больше не нужна и только отодвигает файлы вниз.
+    const quick = document.getElementById('issueQuickCard');
+    if (quick) quick.style.display = 'none';
 
     const dirParam = encodeURIComponent(document.getElementById('outputDirInput').value.trim());
     const dlUrl = (key) => `/api/certs/download?id=${encodeURIComponent(cert.id)}&file=${encodeURIComponent(key)}&dir=${dirParam}`;
@@ -6856,6 +6932,75 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
   }
 
   initStickyHeader();
+
+  // ==========================================================================
+  // v4.9.0: «Быстрый старт» в правой колонке вкладки «Выпуск сертификата».
+  // Правая половина на широких экранах не должна пустовать до первого
+  // результата: здесь короткий план из трёх шагов и живая сводка параметров.
+  // ==========================================================================
+  function initIssueQuickCard() {
+    const card = document.getElementById('issueQuickCard');
+    if (!card) return;
+
+    const modeNames = {
+      letsencrypt: "Let's Encrypt (боевой)",
+      staging: 'LE Staging (тест)',
+      selfsigned: 'Локальный (Kerio)'
+    };
+    const challNames = {
+      'http-01': 'HTTP-01 (порт 80)',
+      'tls-alpn-01': 'TLS-ALPN-01 (443)',
+      'http-01-webroot': 'HTTP-01 Webroot',
+      'dns-01': 'DNS-01 (TXT-запись)'
+    };
+
+    const setText = (id, value, fallback) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value || fallback;
+    };
+
+    const sync = () => {
+      const dom = (document.getElementById('domainInput') || {}).value || '';
+      const ip = (document.getElementById('ipInput') || {}).value || '';
+      const chall = (document.getElementById('challengeSelect') || {}).value || '';
+      setText('qsDomain', dom.trim(), 'не задан');
+      setText('qsIp', ip.trim(), 'не задан');
+      setText('qsMode', modeNames[selectedMode] || selectedMode, '—');
+      setText('qsChallenge', challNames[chall] || chall, '—');
+
+      const ready = document.getElementById('qsReady');
+      if (ready) {
+        const filled = !!(dom.trim() && ip.trim());
+        const selfSigned = selectedMode === 'selfsigned';
+        ready.textContent = filled ? (selfSigned ? 'Можно выпускать локально' : 'Готово к проверке') : 'Заполните домен и IP';
+        ready.className = 'kcm-pill' + (filled ? ' ok' : '');
+      }
+    };
+
+    ['domainInput', 'ipInput', 'challengeSelect', 'keyTypeSelect'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('input', sync);
+      el.addEventListener('change', sync);
+    });
+    // Режим выбирается кликом по карточкам. Обработчик самой карточки
+    // срабатывает раньше (событие всплывает уже после setMode), поэтому сводку
+    // обновляем сразу, а вторым проходом — на случай внешних навешиваний.
+    const modeCards = document.getElementById('modeCards');
+    if (modeCards) modeCards.addEventListener('click', () => { sync(); setTimeout(sync, 0); });
+
+    const preflightBtn = document.getElementById('qsPreflightBtn');
+    if (preflightBtn) {
+      preflightBtn.addEventListener('click', () => {
+        const real = document.getElementById('preflightBtn');
+        if (real) real.click();
+      });
+    }
+
+    sync();
+  }
+
+  initIssueQuickCard();
 
 
   // ==========================================================================
