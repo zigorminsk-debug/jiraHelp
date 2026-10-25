@@ -697,6 +697,46 @@
   .kerio-step-title { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
   .kerio-step-body { font-size: 12.6px; line-height: 1.6; color: var(--text-secondary); }
   .kerio-step-body code { font-size: 11.8px; }
+
+  /* v4.7.1: причины в карточке входа. Раньше блоки использовали .kerio-step
+     (display:flex), из-за чего объяснение, шаги и «где проверить» вставали
+     тремя колонками и текст расползался. Здесь всё идёт сверху вниз. */
+  .kerio-cause {
+    background: var(--bg-elevated); border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm); padding: 13px 15px; margin-bottom: 10px;
+  }
+  .kerio-cause-head { display: flex; gap: 10px; align-items: flex-start; }
+  .kerio-cause-title { font-size: 13.5px; font-weight: 800; line-height: 1.4; }
+  .kerio-cause-text {
+    font-size: 12.8px; line-height: 1.65; color: var(--text-secondary);
+    margin: 5px 0 0;
+  }
+  .kerio-cause-steps {
+    list-style: none; margin: 11px 0 0; padding: 0;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .kerio-cause-steps li { display: flex; gap: 9px; font-size: 12.8px; line-height: 1.6; }
+  .kerio-cause-steps .n {
+    flex: 0 0 21px; width: 21px; height: 21px; border-radius: 6px; margin-top: 1px;
+    background: rgba(148, 163, 184, 0.20); color: var(--text-primary);
+    font-size: 11.5px; font-weight: 800; display: inline-flex;
+    align-items: center; justify-content: center;
+  }
+  .kerio-cause-answer {
+    margin-top: 10px; padding: 8px 11px; border-radius: 7px;
+    background: rgba(239, 68, 68, 0.08); border: 1px dashed rgba(239, 68, 68, 0.40);
+    font-size: 12px; font-family: ui-monospace, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .kerio-cause-where {
+    margin-top: 10px; padding: 8px 11px; border-radius: 7px;
+    background: rgba(59, 130, 246, 0.10); border: 1px dashed rgba(59, 130, 246, 0.45);
+    font-size: 12.2px; line-height: 1.55;
+  }
+  @media (max-width: 720px) {
+    .kerio-cause { padding: 11px 12px; }
+    .kerio-cause-steps li { font-size: 12.4px; }
+  }
   .kerio-manage-grid {
     display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
   }
@@ -1040,7 +1080,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.7.0<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
+        <span class="brand-badge">Windows Native GUI v4.7.1<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -2888,7 +2928,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:1380px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.7.0</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.7.1</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -2964,7 +3004,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 <script>
   // Версия интерфейса. Должна совпадать с appVersion в version.go
   // (проверяется тестом TestVersionConsistency).
-  const APP_VERSION = '4.7.0';
+  const APP_VERSION = '4.7.1';
   let systemState = null;
   let currentCert = null;
   let allCerts = [];
@@ -6750,22 +6790,27 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
       const warns = res.causes.filter(c => c.severity !== 'block');
       const block = (list, title, color, bg) => {
         if (!list.length) return '';
-        let out = '<div style="margin-top:12px;">';
+        let out = '<div style="margin-top:14px;">';
         out += '<div style="font-weight:800;font-size:13px;margin-bottom:8px;color:' + color + ';">' + escapeHtml(title) + '</div>';
         list.forEach((c, i) => {
-          const num = '<span class="kerio-step-num" style="background:' + bg + ';color:' + color + ';">' + (i + 1) + '</span>';
-          out += '<div class="kerio-step" style="border-color:' + color + '33;">' +
-            '<div style="display:flex;gap:9px;align-items:flex-start;">' + num +
-            '<div><div class="kerio-step-title" style="color:' + color + ';">' + escapeHtml(c.title || '') + '</div>' +
-            '<div class="kerio-step-body" style="margin-top:3px;">' + escapeHtml(c.explanation || '') + '</div></div></div>';
+          const num = '<span class="kerio-step-num" style="background:' + bg + ';color:' + color + ';flex:0 0 24px;">' + (i + 1) + '</span>';
+          out += '<div class="kerio-cause" style="border-color:' + color + '33;">';
+          out += '<div class="kerio-cause-head">' + num +
+            '<div><div class="kerio-cause-title" style="color:' + color + ';">' + escapeHtml(c.title || '') + '</div>' +
+            '<div class="kerio-cause-text">' + escapeHtml(c.explanation || '') + '</div></div></div>';
           if ((c.steps || []).length) {
-            out += '<ol style="margin:9px 0 0;padding-left:20px;font-size:12.4px;line-height:1.65;">' +
-              c.steps.map(x => '<li>' + escapeHtml(x) + '</li>').join('') + '</ol>';
+            out += '<ol class="kerio-cause-steps">' + c.steps.map((x, j) =>
+              '<li><span class="n">' + (j + 1) + '</span><span>' + escapeHtml(x) + '</span></li>').join('') + '</ol>';
+          }
+          if (c.code === 'certs' && res.certsError) {
+            out += '<div class="kerio-cause-answer">Ответ Kerio: ' + escapeHtml(res.certsError) + '</div>';
           }
           if (c.checkWhere) {
-            out += '<div style="margin-top:8px;padding:7px 10px;border-radius:7px;background:rgba(59,130,246,0.10);' +
-              'border:1px dashed rgba(59,130,246,0.45);font-size:12px;">🔎 <strong>Где проверить:</strong> ' +
-              escapeHtml(c.checkWhere) + '</div>';
+            out += '<div class="kerio-cause-where">🔎 <strong>Где проверить:</strong> ' + escapeHtml(c.checkWhere) + '</div>';
+          }
+          if (c.anchor) {
+            out += '<div style="margin-top:10px;"><button type="button" class="btn btn-outline btn-sm" data-help-anchor="' +
+              escapeHtml(c.anchor) + '" style="font-size:12px;padding:6px 11px;">📖 Как исправить по шагам</button></div>';
           }
           out += '</div>';
         });
@@ -6820,6 +6865,11 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
     }
 
     box.innerHTML = html;
+
+    // Кнопки «Как исправить по шагам» открывают соответствующий раздел справки.
+    box.querySelectorAll('[data-help-anchor]').forEach(b => {
+      b.addEventListener('click', () => openHelpSection(b.getAttribute('data-help-anchor')));
+    });
   }
 
   async function checkKerioAdminLogin() {
@@ -6895,7 +6945,8 @@ X-Spam-Status: Yes, score=6.8 required=5.0`;
     if (res.product || res.version) lines.push('Продукт: ' + (res.product || '') + ' ' + (res.version || '') + ' (API v' + (res.apiVersion || 0) + ')');
     if (res.role) lines.push('Роль: ' + res.role + (res.isAdmin ? ' (администратор)' : ''));
     if (res.sessionOk) lines.push('Сессия: X-Token ' + (res.tokenMasked || '') + ', cookie: ' + (res.cookieOk ? 'да' : 'нет'));
-    if (res.certsChecked) lines.push('Сертификаты: ' + (res.canManageCerts ? 'доступ есть, найдено ' + res.certsCount : 'доступа нет: ' + (res.certsError || '')));
+    if (res.certsChecked) lines.push('Сертификаты: ' + (res.canManageCerts ? 'доступ есть, найдено ' + res.certsCount : 'доступа нет'));
+    if (!res.canManageCerts && res.certsError) lines.push('Ответ Kerio (сертификаты): ' + res.certsError);
     lines.push('');
     lines.push('ИТОГ: ' + (res.verdict || ''));
     if ((res.attempts || []).length) {

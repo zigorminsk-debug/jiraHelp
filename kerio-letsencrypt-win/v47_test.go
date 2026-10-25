@@ -19,15 +19,15 @@ const (
 )
 
 func TestV47VersionIsReleased(t *testing.T) {
-	if appVersion != "4.7.0" {
-		t.Fatalf("appVersion = %q, ожидалось 4.7.0", appVersion)
+	if cmp := compareVersions(appVersion, "4.7.0"); cmp < 0 {
+		t.Fatalf("appVersion = %q, ожидалось не ниже 4.7.0", appVersion)
 	}
-	if appVersion4 != "4.7.0.0" {
-		t.Fatalf("appVersion4 = %q, ожидалось 4.7.0.0", appVersion4)
+	if appVersion4 != appVersion+".0" {
+		t.Fatalf("appVersion4 = %q, ожидалось %q.0", appVersion4, appVersion)
 	}
 	readme := readRepoFile(t, "README.md")
-	if !strings.Contains(readme, "4.7.0") {
-		t.Error("README.md не упоминает версию 4.7.0 — история релизов отстала")
+	if !strings.Contains(readme, "4.7.") {
+		t.Error("README.md не упоминает линейку 4.7 — история релизов отстала")
 	}
 }
 

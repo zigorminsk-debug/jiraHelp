@@ -66,6 +66,9 @@ type KerioAuthCause struct {
 	Steps       []string `json:"steps"`
 	// Где проверить руками (подсказка «глазами администратора»).
 	CheckWhere string `json:"checkWhere,omitempty"`
+	// Anchor — якорь подробного раздела инструкции (кнопка «Как исправить
+	// по шагам» в интерфейсе). Пусто, если отдельного раздела нет.
+	Anchor string `json:"anchor,omitempty"`
 }
 
 // KerioAuthResult — ответ карточке.
@@ -621,26 +624,35 @@ func kerioAuthCause(code string) KerioAuthCause {
 	case "otp":
 		return KerioAuthCause{
 			Code: "otp", Title: "У администратора включена двухфакторная аутентификация (2FA)", Severity: "block",
-			Explanation: "JSON-RPC Admin API Kerio не умеет принимать одноразовый код, поэтому вход с 2FA из программы невозможен — даже с верным паролем.",
+			Explanation: "JSON-RPC Admin API Kerio не умеет принимать одноразовый код, поэтому вход с 2FA из программы " +
+				"невозможен — даже с верным паролем. Нужна учётка без 2FA.",
 			Steps: []string{
-				"Создайте отдельного администратора специально для программы: Configuration → Administration → Administrators → Add (например kerioapi).",
-				"При создании НЕ включайте для него двухфакторную аутентификацию.",
-				"Выдайте ему полные права администратора (для установки сертификатов нужны права на SSL).",
-				"Укажите логин и пароль этой учётки в карточке вместо личной.",
+				"Создайте отдельную учётку для программы: в веб-админке https://<сервер>:4040/admin/ откройте " +
+					"Accounts → Users → Add, задайте имя (например kerioapi) и пароль.",
+				"В её свойствах откройте вкладку Rights и в разделе «Server administration» выберите " +
+					"Whole server read/write → OK. Без этого установка сертификатов через API не сработает.",
+				"Не включайте для этой учётки двухфакторную аутентификацию: настройка 2FA находится в клиенте " +
+					"Kerio Connect (Settings → Two-factor authentication) — для служебной учётки оставьте её выключенной.",
+				"Укажите в карточке логин вида kerioapi@ваш.домен и пароль этой учётки вместо личной.",
 			},
-			CheckWhere: "Kerio WebAdmin → Configuration → Administration → Administrators → свойства учётки → 2FA",
+			CheckWhere: "Kerio WebAdmin → Accounts → Users → служебная учётка → Rights; 2FA — в клиенте Kerio Connect, Settings",
+			Anchor:     "461-вход-есть-а-ssl-сертификаты-не-читаются",
 		}
 	case "rights":
 		return KerioAuthCause{
 			Code: "rights", Title: "Учётка не является администратором Kerio Connect", Severity: "block",
-			Explanation: "Пароль подошёл, но у учётной записи нет административных прав — Kerio пустил её как обычного пользователя.",
+			Explanation: "Пароль подошёл, но Kerio считает эту учётную запись обычным пользователем: " +
+				"административных прав у неё нет вовсе, поэтому в админке ей доступен только собственный ящик.",
 			Steps: []string{
-				"Configuration → Administration → Administrators: добавьте учётку в список администраторов.",
-				"Проверьте, что у неё полные права, а не «делегированный администратор» с ограничениями: для SSL-сертификатов нужны права на конфигурацию.",
-				"Если учётка входит как пользователь домена — используйте мастер-администратора (admin) или создайте администратора из домена.",
-				"После изменения прав повторите проверку — перезапуск Kerio не требуется.",
+				"Откройте веб-админку https://<сервер>:4040/admin/ и войдите любой учёткой с полными правами.",
+				"Accounts → Users → двойной клик по нужной учётке → вкладка Rights → в разделе «Server administration» " +
+					"выберите Whole server read/write → OK. Права действуют сразу, перезапуск Kerio не нужен.",
+				"Если эта учётка — обычный почтовый ящик и админом быть не должна, заведите отдельную: " +
+					"Accounts → Users → Add → имя kerioapi и пароль → вкладка Rights → Whole server read/write → OK.",
+				"Повторите проверку в программе — в отчёте роль должна стать «administrator».",
 			},
-			CheckWhere: "Kerio WebAdmin → Configuration → Administration → Administrators",
+			CheckWhere: "Kerio WebAdmin → Accounts → Users → учётка → вкладка Rights → Server administration",
+			Anchor:     "461-вход-есть-а-ssl-сертификаты-не-читаются",
 		}
 	case "locked":
 		return KerioAuthCause{
@@ -696,14 +708,28 @@ func kerioAuthCause(code string) KerioAuthCause {
 		}
 	case "certs":
 		return KerioAuthCause{
-			Code: "certs", Title: "Нет доступа к SSL-сертификатам Kerio", Severity: "block",
-			Explanation: "Вход выполнен, но вызвать ConnectCertificate.get / Certificates.get не удалось — значит, устанавливать сертификаты эта учётка не сможет.",
+			Code: "certs", Title: "Учётка вошла, но у неё нет прав на SSL-сертификаты", Severity: "block",
+			Explanation: "Пароль верный — Kerio пустил вас в админку. Отказ пришёл позже, на чтении списка " +
+				"сертификатов: у этой учётной записи уровень доступа ниже «весь сервер, чтение и запись». " +
+				"Так бывает у администратора домена и у обычного почтового ящика — почтой управляют, а SSL нет.",
 			Steps: []string{
-				"Выдайте администратору права на конфигурацию: Configuration → Administration → Administrators → свойства → полный доступ.",
-				"Если Kerio старой версии (до 8.5) — используйте файловый метод установки (копирование в sslcert) на самом сервере.",
-				"Для Kerio Control (порт 4081) и Kerio Operator (4021) эта программа не подходит — API другой.",
-				"Проверьте, не включён ли в Kerio режим только-чтение для API (Administration → свойство «Read only»).",
+				"Самый быстрый способ — встроенная учётка Admin. Войдите в веб-админку https://<сервер>:4040/admin/, " +
+					"откройте Configuration → Administration Settings, поставьте галочку «Enable built-in administrator account», " +
+					"задайте пароль и нажмите Apply. В карточке укажите логин Admin и этот пароль: у встроенной учётки всегда " +
+					"права «весь сервер, чтение и запись», и она не занимает лицензию.",
+				"Или выдайте права своей учётке: Accounts → Users → двойной клик по учётке → вкладка Rights → " +
+					"в разделе «Server administration» выберите Whole server read/write (не «<домен> accounts» и не " +
+					"«Whole server read only») → OK. Перезапуск Kerio не нужен, права действуют сразу.",
+				"Проверьте глазами: в веб-админке должен открываться раздел Configuration → SSL Certificates. " +
+					"Если раздела нет или он пуст — прав на сервер у учётки всё ещё нет.",
+				"Вернитесь в программу и нажмите «🔓 Проверить вход» ещё раз. В блоке «Что проверено» появится " +
+					"«Сертификаты: доступ есть, найдено N», а в зелёной плашке — «права на сертификаты есть».",
+				"Если полные права давать не хотите — устанавливайте сертификат файловым методом: скопируйте файлы " +
+					"в папку sslcert прямо на сервере (раздел 4.1 инструкции), права администратора Kerio для этого не нужны. " +
+					"Для Kerio Control (4081) и Kerio Operator (4021) API другой — эта программа их не настраивает.",
 			},
+			CheckWhere: "Kerio WebAdmin → Accounts → Users → ваша учётка → вкладка Rights → «Server administration» = Whole server read/write",
+			Anchor:     "461-вход-есть-а-ssl-сертификаты-не-читаются",
 		}
 	case "wrong-product":
 		return KerioAuthCause{
