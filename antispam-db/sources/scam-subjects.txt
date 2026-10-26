@@ -1,0 +1,41 @@
+# Шаблоны тем спам/фишинг-писем (подстроки, регистр не важен)
+# Формат: одна подстрока на строку. Спецсимволы экранируются автоматически.
+выиграли
+выигрыш
+ваш приз
+получите приз
+поздравляем победителя
+одобрен кредит
+кредит одобрен
+деньги в долг
+срочно требуется
+ваш аккаунт будет заблокирован
+аккаунт заблокирован
+подтвердите аккаунт
+подтвердите данные карты
+ваша карта заблокирована
+истёк срок действия карты
+неоплаченный счёт
+задолженность
+возврат средств
+компенсация
+наследство
+unclaimed funds
+inheritance
+lottery winner
+you have won
+claim your prize
+verify your account
+account will be suspended
+suspicious sign-in
+unusual activity
+your password expires
+final notice
+ invoice overdue
+payment failed
+crypto giveaway
+bitcoin giveaway
+double your bitcoin
+investment opportunity
+work from home
+earn money fast

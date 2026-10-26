@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">KerioCertManager</string>
+    <string name="tab_remote">📱 Пульт</string>
+    <string name="tab_check">🔎 Проверка</string>
+</resources>

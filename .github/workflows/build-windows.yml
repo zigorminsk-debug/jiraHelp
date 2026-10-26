@@ -1,0 +1,260 @@
+name: Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - arena/f70f3591-jirahelp
+    # Тег vX.Y.Z собирает релиз из этого тега и прикладывает к нему EXE и ZIP.
+    # Для тегов paths-фильтр GitHub не применяет.
+    tags:
+      - 'v*'
+    paths:
+      - 'kerio-letsencrypt-win/**'
+      - 'FAQ.md'
+      - '.github/workflows/build-windows.yml'
+
+permissions:
+  contents: write
+
+# Один билд на ветку за раз: пересобранные бинарники не могут «откатиться»
+# из-за гонки двух параллельных запусков.
+concurrency:
+  group: win-exe-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+
+      - name: go vet (informational)
+        working-directory: kerio-letsencrypt-win
+        run: go vet ./... || true
+
+      - name: Unit tests
+        working-directory: kerio-letsencrypt-win
+        run: |
+          set +e
+          go test ./... -count=1 > /tmp/test.log 2>&1
+          rc=$?
+          cat /tmp/test.log
+          if [ $rc -ne 0 ]; then
+            grep -E "\.go:[0-9]+|FAIL|panic:|--- FAIL|Error" /tmp/test.log | head -25 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+          fi
+          exit $rc
+
+      - name: Build Windows x64 GUI executable
+        working-directory: kerio-letsencrypt-win
+        run: |
+          set +e
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -mod=vendor -trimpath -buildvcs=false -ldflags "-s -w -H windowsgui" -o ../KerioCertManager.exe . > /tmp/build.log 2>&1
+          rc=$?
+          cat /tmp/build.log
+          if [ $rc -ne 0 ]; then
+            head -25 /tmp/build.log | while IFS= read -r line; do echo "::error::$line"; done
+          fi
+          exit $rc
+
+      - name: Verify tag matches appVersion
+        if: github.ref_type == 'tag'
+        run: |
+          set -e
+          VER=$(awk -F'"' '/^const appVersion = "/{print $2; exit}' kerio-letsencrypt-win/version.go)
+          if [ "v$VER" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Тег ${GITHUB_REF_NAME} не совпадает с appVersion $VER — выпуск остановлен"
+            exit 1
+          fi
+          echo "Тег ${GITHUB_REF_NAME} совпадает с appVersion $VER"
+
+      - name: Verify built EXE version matches source
+        run: |
+          set -e
+          VER=$(awk -F'"' '/^const appVersion = "/{print $2; exit}' kerio-letsencrypt-win/version.go)
+          case "$VER" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::Не удалось прочитать appVersion из version.go"; exit 1 ;;
+          esac
+          echo "appVersion из исходников: $VER"
+          python3 - "$VER" <<'PY'
+          import sys
+          ver = sys.argv[1]
+          data = open('KerioCertManager.exe', 'rb').read()
+          pat = (ver + '.0').encode('utf-16-le')
+          n = data.count(pat)
+          print(f'UTF-16-строк "{ver}.0" в EXE: {n}')
+          if n != 4:
+              sys.exit(f'ERROR: версия EXE не совпадает с version.go ({n} != 4)')
+          PY
+
+      - name: Package ZIP
+        run: |
+          set -e
+          rm -rf dist
+          mkdir -p "dist/Значки на выбор"
+          cp KerioCertManager.exe dist/
+          cp kerio-letsencrypt-win/README.md "dist/README-Инструкция.md"
+          cp FAQ.md "dist/FAQ-Полная-инструкция.md"
+          cp kerio-letsencrypt-win/ui/icons/emerald-shield.ico "dist/Значки на выбор/1-Emerald-Shield-SSL.ico"
+          cp kerio-letsencrypt-win/ui/icons/emerald-shield.png "dist/Значки на выбор/1-Emerald-Shield-SSL.png"
+          cp kerio-letsencrypt-win/ui/icons/kerio-amber.ico "dist/Значки на выбор/2-Kerio-Amber-Key.ico"
+          cp kerio-letsencrypt-win/ui/icons/kerio-amber.png "dist/Значки на выбор/2-Kerio-Amber-Key.png"
+          cp kerio-letsencrypt-win/ui/icons/sapphire-globe.ico "dist/Значки на выбор/3-Sapphire-Globe-TLS.ico"
+          cp kerio-letsencrypt-win/ui/icons/sapphire-globe.png "dist/Значки на выбор/3-Sapphire-Globe-TLS.png"
+          cp kerio-letsencrypt-win/ui/icons/titanium-pro.ico "dist/Значки на выбор/4-Dark-Titanium-Pro.ico"
+          cp kerio-letsencrypt-win/ui/icons/titanium-pro.png "dist/Значки на выбор/4-Dark-Titanium-Pro.png"
+          # Фиксируем время файлов и порядок обхода: ZIP получается
+          # воспроизводимым (одинаковые байты при одинаковых исходниках).
+          find dist -exec touch -t 198001010000.00 {} +
+          rm -f KerioCertManager-Windows-x64.zip
+          ( cd dist && find . -type f | LC_ALL=C sort | zip -X -q -@ ../KerioCertManager-Windows-x64.zip )
+
+      - name: Commit rebuilt binaries to the branch
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        run: |
+          set -e
+          git config user.name "kerio-ci"
+          git config user.email "ci@csl.by"
+          # Артефакты всегда переживают пересинхронизацию с origin.
+          mkdir -p /tmp/kcm-artifacts
+          cp KerioCertManager.exe KerioCertManager-Windows-x64.zip /tmp/kcm-artifacts/
+          for attempt in 1 2 3 4 5; do
+            echo "== попытка зафиксировать бинарники: $attempt =="
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
+            cp /tmp/kcm-artifacts/KerioCertManager.exe .
+            cp /tmp/kcm-artifacts/KerioCertManager-Windows-x64.zip .
+            git add -f KerioCertManager.exe KerioCertManager-Windows-x64.zip
+            if git diff --cached --quiet; then
+              echo "Бинарники уже актуальны — коммит не нужен"
+              exit 0
+            fi
+            git commit -m "CI: rebuild KerioCertManager.exe from ${GITHUB_SHA::7}"
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              echo "Готово: пересобранные бинарники запушены"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Не удалось зафиксировать пересобранные бинарники после 5 попыток"
+          exit 1
+
+      - name: Attach assets to the tagged release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1 ||             gh release create "${GITHUB_REF_NAME}" --title "KerioCertManager ${GITHUB_REF_NAME}"               --notes "Автоматическая сборка ${GITHUB_REF_NAME} из исходников этого тега."
+          gh release upload "${GITHUB_REF_NAME}" KerioCertManager.exe KerioCertManager-Windows-x64.zip --clobber
+          echo "Ассеты приложены к релизу ${GITHUB_REF_NAME}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: KerioCertManager-build
+          path: |
+            KerioCertManager.exe
+            KerioCertManager-Windows-x64.zip
+          retention-days: 14
+
+      - name: Publish rolling release (best effort)
+        if: github.ref_type == 'branch'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view kerio-latest > /dev/null 2>&1 || gh release create kerio-latest --title "KerioCertManager latest build" --notes "Automated build of the current branch" || true
+          gh release upload kerio-latest KerioCertManager.exe KerioCertManager-Windows-x64.zip --clobber || true
+
+  # ---------------------------------------------------------------------------
+  # Установщик (.exe) собирается отдельным job на Windows-раннере: Inno Setup
+  # требует Windows. Получаем уже собранную программу из артефакта build и
+  # упаковываем её в настоящий Setup с ярлыками, деинсталлятором и /S.
+  # ---------------------------------------------------------------------------
+  installer:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Download built EXE
+        uses: actions/download-artifact@v4
+        with:
+          name: KerioCertManager-build
+          path: .
+
+      - name: Sanity check of downloaded files
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "KerioCertManager.exe")) { throw "Нет KerioCertManager.exe в артефакте" }
+          $size = (Get-Item "KerioCertManager.exe").Length
+          Write-Host "KerioCertManager.exe: $size байт"
+          $ver = (Get-Content "kerio-letsencrypt-win/version.go" | Select-String 'const appVersion = "(.+)"').Matches[0].Groups[1].Value
+          Write-Host "appVersion: $ver"
+          $iss = Get-Content "installer/KerioCertManager-Setup.iss" -Raw
+          if ($iss -notmatch "MyAppVersion `"$ver`"") { throw "Версия в .iss не совпадает с version.go ($ver)" }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe не найден после установки Inno Setup" }
+          Write-Host "ISCC: $iscc"
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "installer\KerioCertManager-Setup.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC завершился с кодом $LASTEXITCODE" }
+          Get-ChildItem "installer\output" | Format-Table Name, Length
+
+      - name: Verify installer
+        shell: pwsh
+        run: |
+          $ver = (Get-Content "kerio-letsencrypt-win/version.go" | Select-String 'const appVersion = "(.+)"').Matches[0].Groups[1].Value
+          $setup = "installer\output\KerioCertManager-Setup-$ver.exe"
+          if (-not (Test-Path $setup)) { throw "Установщик не создан: $setup" }
+          $size = (Get-Item $setup).Length
+          if ($size -lt 2000000) { throw "Установщик подозрительно мал: $size байт" }
+          $sha = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
+          Write-Host "Setup: $setup ($size байт), SHA-256: $sha"
+          "SETUP_PATH=$setup" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SETUP_SHA=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Attach installer to the release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$env:GITHUB_REF_NAME" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create "$env:GITHUB_REF_NAME" --title "KerioCertManager $env:GITHUB_REF_NAME" --notes "Автоматическая сборка $env:GITHUB_REF_NAME"
+          }
+          gh release upload "$env:GITHUB_REF_NAME" "$env:SETUP_PATH" --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Не удалось приложить установщик к релизу" }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KerioCertManager-setup
+          path: installer/output/*.exe
+          retention-days: 14

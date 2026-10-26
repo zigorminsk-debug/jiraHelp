@@ -1,0 +1,216 @@
+name: AntiSpam DB
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Ежедневная сборка базы в 03:17 UTC
+    - cron: "17 3 * * *"
+  push:
+    branches:
+      - main
+      - arena/f70f3591-jirahelp
+    paths:
+      - 'antispam-db/**'
+      - '.github/workflows/antispam-db.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: antispam-db
+  cancel-in-progress: true
+
+jobs:
+  build-db:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Build anti-spam database
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUNBUFFERED: "1"
+          # Необязательный бесплатный ключ abuse.ch: включает фид URLhaus.
+          # Добавьте секрет ABUSECH_AUTH_KEY в Settings → Secrets → Actions.
+          ABUSECH_AUTH_KEY: ${{ secrets.ABUSECH_AUTH_KEY }}
+        run: |
+          set +e
+          python3 antispam-db/tools/build_db.py --out antispam-db/dist > /tmp/db-build.log 2>&1
+          rc=$?
+          cat /tmp/db-build.log
+          if [ $rc -ne 0 ]; then
+            echo "::error::build_db.py exited with $rc"
+            tail -25 /tmp/db-build.log | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+            exit $rc
+          fi
+          python3 - <<'PY'
+          import json
+          m = json.load(open("antispam-db/dist/manifest.json", encoding="utf-8"))
+          print("version:", m["version"])
+          print("counts:", json.dumps(m["counts"], ensure_ascii=False))
+          for src in m.get("sources", []):
+              print(("  OK " if src.get("ok") else "  -- "), src["name"], src.get("count", 0), src.get("error", ""))
+          PY
+
+      - name: Validate database (SHA-256, manifest, SpamAssassin syntax)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, re, sys
+
+          dist = "antispam-db/dist"
+          m = json.load(open(os.path.join(dist, "manifest.json"), encoding="utf-8"))
+          errors = []
+
+          if not re.fullmatch(r"\d{4}\.\d{2}\.\d{2}-\d{4}", m.get("version", "")):
+              errors.append("manifest.version has unexpected format")
+
+          for name in m["files"]:
+              path = os.path.join(dist, name)
+              if not os.path.exists(path):
+                  errors.append(f"missing file {name}")
+                  continue
+              data = open(path, "rb").read()
+              got = hashlib.sha256(data).hexdigest()
+              if got != m["sha256"].get(name):
+                  errors.append(f"sha256 mismatch for {name}")
+              if len(data) != m["sizes"].get(name):
+                  errors.append(f"size mismatch for {name}")
+
+          cf = open(os.path.join(dist, "kerio-antispam.cf"), encoding="utf-8").read()
+          rules = 0
+          for i, line in enumerate(cf.splitlines(), 1):
+              line = line.strip()
+              if not line or line.startswith("#"):
+                  continue
+              parts = line.split(None, 2)
+              if parts[0] in ("header", "body", "uri"):
+                  mt = re.search(r"/(.*)/([a-z]*)$", line)
+                  if not mt:
+                      errors.append(f"cf line {i}: regex is not closed")
+                      continue
+                  try:
+                      re.compile(mt.group(1))
+                  except re.error as exc:
+                      errors.append(f"cf line {i}: bad regex: {exc}")
+                  rules += 1
+              elif parts[0] not in ("describe", "score", "tflags"):
+                  errors.append(f"cf line {i}: unknown directive {parts[0]}")
+
+          if rules == 0:
+              errors.append("no SpamAssassin rules generated")
+          total = sum(m["counts"].values())
+          if total == 0:
+              errors.append("database is empty")
+
+          # Санитарная проверка: домены из белого списка не должны попасть в чёрный
+          allow = {l.strip().lower() for l in open(os.path.join(dist, "allowlist.txt"), encoding="utf-8") if l.strip() and not l.startswith("#")}
+          for fname in ("spam-domains.txt", "phishing-links.txt", "spam-emails.txt"):
+              for line in open(os.path.join(dist, fname), encoding="utf-8"):
+                  item = line.strip().lower()
+                  if not item or item.startswith("#"):
+                      continue
+                  host = item.split("@")[-1]
+                  for a in allow:
+                      if host == a or host.endswith("." + a):
+                          errors.append(f"allowlisted host {host} found in {fname}")
+                          break
+
+          print(f"rules: {rules}, entries: {total}")
+          if errors:
+              for e in errors[:40]:
+                  print("::error::" + e)
+              sys.exit(1)
+          print("OK: manifest, SHA-256 and .cf syntax are valid")
+          PY
+
+      - name: Upload database artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kcm-antispam-db
+          path: antispam-db/dist/
+          retention-days: 30
+
+      - name: Publish GitHub Release (antispam-db-latest)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION=$(python3 -c "import json;print(json.load(open('antispam-db/dist/manifest.json'))['version'])")
+          gh release delete antispam-db-latest --yes --cleanup-tag || true
+          gh release create antispam-db-latest \
+            antispam-db/dist/kerio-antispam.cf \
+            antispam-db/dist/manifest.json \
+            antispam-db/dist/spam-domains.txt \
+            antispam-db/dist/phishing-links.txt \
+            antispam-db/dist/spam-emails.txt \
+            antispam-db/dist/scam-subjects.txt \
+            antispam-db/dist/scam-phrases-ru.txt \
+            antispam-db/dist/threat-ips.txt \
+            antispam-db/dist/allowlist.txt \
+            antispam-db/dist/stats.json \
+            --title "KCM AntiSpam DB ${VERSION}" \
+            --notes-file antispam-db/dist/RELEASE_NOTES.md
+
+      - name: Publish database branch (antispam-db)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION=$(python3 -c "import json;print(json.load(open('antispam-db/dist/manifest.json'))['version'])")
+          rm -rf /tmp/dbpub && mkdir -p /tmp/dbpub
+          cp -r antispam-db/dist/. /tmp/dbpub/
+          cd /tmp/dbpub
+          git init -q
+          git checkout -q -b antispam-db
+          git config user.name "antispam-db-bot"
+          git config user.email "ci@csl.by"
+          git add -A
+          git commit -qm "AntiSpam DB ${VERSION}"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:antispam-db
+
+      - name: Summary
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          m = json.load(open("antispam-db/dist/manifest.json", encoding="utf-8"))
+          print(f"## KCM AntiSpam DB {m['version']}")
+          print()
+          print("| Группа | Записей |")
+          print("|---|---:|")
+          labels = {
+              "domains": "Домены отправителей (From)",
+              "emails": "Адреса отправителей",
+              "subjects": "Мотивы в теме",
+              "phrases": "Фразы в теле",
+              "urls": "Домены фишинговых ссылок (uri)",
+              "ips": "IP/CIDR источников",
+              "allowlist": "Белый список",
+          }
+          for k, label in labels.items():
+              print(f"| {label} | {m['counts'].get(k, 0)} |")
+          print()
+          print("### Источники")
+          print()
+          print("| Источник | Статус | Записей |")
+          print("|---|---|---:|")
+          for src in m.get("sources", []):
+              if src.get("ok"):
+                  status = "✅ ok"
+              elif not src.get("enabled"):
+                  status = "⏸ отключён"
+              elif src.get("skipped"):
+                  status = "🔑 нужен ключ"
+              else:
+                  status = "⚠️ " + str(src.get("error", "недоступен"))[:60]
+              print(f"| {src.get('name')} | {status} | {src.get('count', 0)} |")
+          print()
+          print(f"Активных источников: **{m.get('sourcesOk', 0)}**, недоступных: **{m.get('sourcesFailed', 0)}**.")
+          print()
+          print("База обновляется каждый день в 03:17 UTC.")
+          PY

@@ -1,2 +1,12 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+*.exe binary
+*.ico binary
+*.syso binary
+*.pfx binary
+*.zip binary
+*.apk binary
+*.idsig binary
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
