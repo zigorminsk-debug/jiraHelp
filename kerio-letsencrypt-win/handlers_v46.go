@@ -23,6 +23,7 @@ import (
 func registerV46Routes(mux *http.ServeMux) {
 	registerUpdateRoutes(mux)
 	registerLinuxRoutes(mux)
+	registerAndroidApkRoutes(mux)
 }
 
 // ---------------------------------------------------------------------------

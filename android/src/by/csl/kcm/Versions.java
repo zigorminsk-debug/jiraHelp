@@ -11,8 +11,8 @@ package by.csl.kcm;
  * расти с каждым выпуском, иначе телефон откажется ставить APK «поверх».
  */
 final class Versions {
-    static final String APP_VERSION = "4.9.4";
-    static final int VERSION_CODE = 40904;
+    static final String APP_VERSION = "4.9.5";
+    static final int VERSION_CODE = 40905;
 
     /** Репозиторий, из которого берутся обновления. */
     static final String REPO = "zigorminsk-debug/jiraHelp";

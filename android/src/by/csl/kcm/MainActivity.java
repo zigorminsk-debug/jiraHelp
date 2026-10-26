@@ -76,7 +76,7 @@ public class MainActivity extends Activity {
     private View buildHeader() {
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
-        header.setPadding(Ui.dp(this, 16), Ui.dp(this, 14), Ui.dp(this, 16), Ui.dp(this, 10));
+        header.setPadding(Ui.dp(this, 16), Ui.dp(this, 14), Ui.dp(this, 16), Ui.dp(this, 6));
 
         TextView title = Ui.title(this, "KerioCertManager", 19f);
         header.addView(title);
@@ -86,32 +86,25 @@ public class MainActivity extends Activity {
         sub.setPadding(0, Ui.dp(this, 2), 0, 0);
         header.addView(sub);
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        rp.topMargin = Ui.dp(this, 8);
-        row.setLayoutParams(rp);
-
-        updateButton = Ui.smallButton(this, "⬇ Проверить обновления");
+        // Кнопка обновления — во всю ширину: её должно быть видно сразу,
+        // без прокрутки и без догадок, что это ссылка.
+        updateButton = Ui.button(this, "🔄 Проверить обновления", false);
+        updateButton.setTextSize(14f);
         updateButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 onUpdateButton();
             }
         });
-        row.addView(updateButton, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        bp.topMargin = Ui.dp(this, 8);
+        updateButton.setLayoutParams(bp);
+        header.addView(updateButton);
 
         updateStatus = Ui.text(this, "", Ui.MUTED, 12f);
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        sp.leftMargin = Ui.dp(this, 10);
-        updateStatus.setLayoutParams(sp);
-        row.addView(updateStatus);
-
-        header.addView(row);
+        updateStatus.setPadding(Ui.dp(this, 2), Ui.dp(this, 5), 0, 0);
+        header.addView(updateStatus);
         return header;
     }
 
@@ -187,23 +180,29 @@ public class MainActivity extends Activity {
             return;
         }
         checking = true;
-        startCheckingUi();
+        updateButton.setEnabled(false);
+        updateButton.setText("⏳ Проверяем…");
+        updateStatus.setText("");
+
         Updates.check(this, new Updates.Callback() {
             @Override
             public void onResult(Updates.Release release, String error) {
                 checking = false;
+                // Кнопку включаем ВСЕГДА: иначе после одной неудачной проверки
+                // она остаётся серой и больше не нажимается.
+                updateButton.setEnabled(true);
+
                 if (error != null) {
-                    updateButton.setText("⬇ Проверить обновления");
-                    updateStatus.setText("не удалось проверить");
-                    Toast.makeText(MainActivity.this, error, Toast.LENGTH_LONG).show();
+                    updateButton.setText("🔄 Проверить обновления");
+                    updateStatus.setTextColor(Ui.BAD);
+                    updateStatus.setText("Не удалось проверить: " + error);
                     return;
                 }
                 if (release == null) {
-                    updateButton.setText("⬇ Проверить обновления");
-                    updateStatus.setText("у вас последняя версия");
-                    Toast.makeText(MainActivity.this,
-                            "Установлена последняя версия " + Versions.APP_VERSION,
-                            Toast.LENGTH_SHORT).show();
+                    updateButton.setText("🔄 Проверить обновления");
+                    updateStatus.setTextColor(Ui.OK);
+                    updateStatus.setText("У вас последняя версия " + Versions.APP_VERSION
+                            + " (проверено в " + timeNow() + ")");
                     return;
                 }
                 showFound(release, true);
@@ -211,18 +210,17 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void startCheckingUi() {
-        updateButton.setText("⏳ Проверяем…");
-        updateButton.setEnabled(false);
-        updateStatus.setText("");
+    private static String timeNow() {
+        return new java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                .format(new java.util.Date());
     }
 
-    private void showFound(Updates.Release release, boolean announce) {
+    private void showFound(final Updates.Release release, boolean announce) {
         foundRelease = release;
-        updateButton.setText("⬇ Обновить до " + release.version);
         updateButton.setEnabled(true);
-        updateStatus.setText("доступна новая версия");
+        updateButton.setText("🔄 Обновить до " + release.version);
         updateStatus.setTextColor(Ui.WARN);
+        updateStatus.setText("Доступна новая версия " + release.version + " · " + release.humanSize());
         if (announce) {
             askToInstall(release);
         }
@@ -257,32 +255,30 @@ public class MainActivity extends Activity {
 
     private void startDownload(final Updates.Release release) {
         updateButton.setEnabled(false);
-        updateButton.setText("⬇ 0%");
-        updateStatus.setText("скачиваем " + release.version);
+        updateButton.setText("Скачиваю…");
         updateStatus.setTextColor(Ui.MUTED);
+        updateStatus.setText("Скачиваю " + release.version + "…");
 
         Updates.downloadAndInstall(this, release, new Updates.Progress() {
             @Override
             public void onProgress(int percent) {
-                updateButton.setText("⬇ " + percent + "%");
+                updateButton.setText("Скачиваю " + percent + "%");
             }
 
             @Override
             public void onDone(File file, String error) {
                 updateButton.setEnabled(true);
                 if (file == null) {
-                    updateButton.setText("⬇ Обновить до " + release.version);
-                    updateStatus.setText("скачать не удалось");
+                    updateButton.setText("🔄 Обновить до " + release.version);
                     updateStatus.setTextColor(Ui.BAD);
-                    Toast.makeText(MainActivity.this,
-                            error == null ? "Не удалось скачать обновление" : error,
-                            Toast.LENGTH_LONG).show();
+                    updateStatus.setText("Скачать не удалось: "
+                            + (error == null ? "неизвестная ошибка" : error));
                     return;
                 }
                 downloadedFile = file;
-                updateButton.setText("⬇ Установить " + release.version);
-                updateStatus.setText("файл скачан");
+                updateButton.setText("Установить " + release.version);
                 updateStatus.setTextColor(Ui.OK);
+                updateStatus.setText("Файл скачан — нажмите «Установить»");
             }
         });
     }

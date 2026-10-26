@@ -68,7 +68,6 @@ final class Checks {
     }
 
     private static final int CONNECT_TIMEOUT_MS = 5000;
-    private static final String DOH = "https://cloudflare-dns.com/dns-query";
 
     private Checks() {
     }
@@ -312,29 +311,44 @@ final class Checks {
         return null;
     }
 
-    /** Запрос к DNS-over-HTTPS (Cloudflare). Возвращает массив answer или null. */
+    /**
+     * DNS-запрос MX/TXT через DNS-over-HTTPS.
+     *
+     * Провайдеров два: Cloudflare и Google. У операторов бывает, что один из
+     * них недоступен, и тогда весь блок DNS показывал «нет данных» —
+     * хотя сеть работает.
+     */
     private static JSONArray doh(String name, String type) {
-        HttpURLConnection conn = null;
-        try {
-            String url = DOH + "?name=" + URLEncoder.encode(name, "UTF-8") + "&type=" + type;
-            conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            conn.setReadTimeout(CONNECT_TIMEOUT_MS);
-            conn.setRequestProperty("Accept", "application/dns-json");
-            int code = conn.getResponseCode();
-            if (code != 200) {
-                return null;
-            }
-            String body = readAll(conn.getInputStream());
-            JSONObject json = new JSONObject(body);
-            return json.optJSONArray("Answer");
-        } catch (Exception e) {
-            return null;
-        } finally {
-            if (conn != null) {
-                conn.disconnect();
+        for (String base : DOH_BASES) {
+            HttpURLConnection conn = null;
+            try {
+                String url = base + "?name=" + URLEncoder.encode(name, "UTF-8") + "&type=" + type;
+                conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                conn.setReadTimeout(CONNECT_TIMEOUT_MS);
+                conn.setRequestProperty("Accept", "application/dns-json");
+                if (conn.getResponseCode() != 200) {
+                    continue;
+                }
+                JSONObject json = new JSONObject(readAll(conn.getInputStream()));
+                JSONArray answers = json.optJSONArray("Answer");
+                if (answers != null) {
+                    return answers;
+                }
+                // NOERROR без ответа — это «записи нет», второй провайдер
+                // то же самое и скажет.
+                if (json.optInt("Status", -1) == 3 || json.optInt("Status", -1) == 0) {
+                    return null;
+                }
+            } catch (Exception ignored) {
+                // пробуем следующего провайдера
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
             }
         }
+        return null;
     }
 
     private static String readAll(InputStream in) throws Exception {
@@ -408,39 +422,73 @@ final class Checks {
     // Спам-базы (RBL/DBL)
     // ------------------------------------------------------------------
 
-    // SORBS закрылся в 2024 году, поэтому вместо него — UCEPROTECT и PSBL:
-    // они отвечают и сейчас.
-    private static final String[] IP_ZONES = {
-            "zen.spamhaus.org", "bl.spamcop.net", "b.barracudacentral.org",
-            "cbl.abuseat.org", "dnsbl-1.uceprotect.net", "psbl.surriel.com",
+    /**
+     * Одна спам-база.
+     *
+     * site — куда отправить человека, если база не отвечает: у крупных зон
+     * есть веб-проверка, и это честнее, чем показывать «нет ответа».
+     */
+    private static final class Zone {
+        final String host;
+        final String site;
+        final boolean domain;
+
+        Zone(String host, String site, boolean domain) {
+            this.host = host;
+            this.site = site;
+            this.domain = domain;
+        }
+    }
+
+    // Список сверен с реальными ответами: SORBS и CBL закрылись (2024),
+    // поэтому их здесь нет. Суффикс «.ns» у UCEPROTECT2 не нужен — берём level 1.
+    private static final Zone[] IP_ZONES = {
+            new Zone("zen.spamhaus.org", "https://check.spamhaus.org", false),
+            new Zone("bl.spamcop.net", "https://www.spamcop.net/w3m?action=checkblock&ip=", false),
+            new Zone("b.barracudacentral.org", "https://www.barracudacentral.org/rbl/removal-request", false),
+            new Zone("dnsbl-1.uceprotect.net", "https://www.uceprotect.net/en/rblcheck.php?ipr=", false),
+            new Zone("psbl.surriel.com", "https://psbl.org/listing?ip=", false),
+            new Zone("bl.mailspike.net", "https://mailspike.org/iplookup.html", false),
+            new Zone("bl.blocklist.de", "https://www.blocklist.de/en/search.html?ip=", false),
+            new Zone("dnsbl.dronebl.org", "https://dronebl.org/lookup?ip=", false),
     };
 
-    private static final String[] DOMAIN_ZONES = {"dbl.spamhaus.org"};
+    private static final Zone[] DOMAIN_ZONES = {
+            new Zone("dbl.spamhaus.org", "https://check.spamhaus.org", true),
+    };
 
     /**
-     * Публичные резолверы для RBL-запросов.
-     *
-     * Почему не {@link InetAddress#getByName}: он не различает «записи нет»
-     * (это как раз чистая репутация) и «сеть не ответила» — в обоих случаях
-     * бросается UnknownHostException. На экране получалось «нет ответа» даже
-     * для чистых адресов. Поэтому здесь свой маленький DNS-клиент: он видит
-     * код ответа NXDOMAIN и честно говорит «чисто».
+     * Контрольная точка RBL: адрес 127.0.0.2 должен числиться в любой живой
+     * базе. Спрашиваем её первым делом — так отличается «IP чистый»
+     * (база ответила, записи нет) от «база не отвечает» и от блокировки
+     * публичных резолверов.
      */
-    private static final String[] RBL_RESOLVERS = {"1.1.1.1", "8.8.8.8", "9.9.9.9"};
+    private static final String CONTROL_IP = "2.0.0.127";
 
-    private static final int ST_CLEAN = 0;
+    // DNS-over-HTTPS: работает через обычный HTTPS, поэтому проходит там, где
+    // мобильный оператор не пускает UDP на 53-й порт.
+    private static final String[] DOH_BASES = {
+            "https://cloudflare-dns.com/dns-query",
+            "https://dns.google/resolve",
+    };
+
+    private static final String[] UDP_RESOLVERS = {"1.1.1.1", "8.8.8.8", "9.9.9.9"};
+
     private static final int ST_LISTED = 1;
-    private static final int ST_BLOCKED = 2;
-    private static final int ST_ERROR = 3;
+    private static final int ST_CLEAN = 0;
+    private static final int ST_NOT_CHECKED = 2;
+    private static final int ST_NO_NETWORK = 3;
 
-    /** Ответ RBL: состояние и адрес-причина (127.0.0.x). */
+    /** Результат запроса к одной зоне. */
     private static final class RblAnswer {
         final int state;
         final String address;
+        final String channel;
 
-        RblAnswer(int state, String address) {
+        RblAnswer(int state, String address, String channel) {
             this.state = state;
             this.address = address;
+            this.channel = channel;
         }
     }
 
@@ -451,52 +499,72 @@ final class Checks {
         if (reversed == null) {
             s.add("warn", "IP-адрес", "не удалось получить публичный IPv4 для проверки");
         } else {
-            int listed = 0;
-            int blocked = 0;
-            int errors = 0;
-            for (String zone : IP_ZONES) {
-                RblAnswer a = lookup(reversed + "." + zone);
-                if (a.state == ST_LISTED) {
-                    listed++;
-                    s.add("fail", "IP в базе " + zone,
-                            "адрес " + ip + " там числится (" + a.address + ") — подайте заявку на удаление");
-                } else if (a.state == ST_BLOCKED) {
-                    blocked++;
-                    s.add("info", zone, "база не отвечает публичным резолверам — "
-                            + "посмотрите адрес вручную на сайте " + zone);
-                } else if (a.state == ST_ERROR) {
-                    errors++;
-                    s.add("warn", zone, "нет ответа (сеть не пропускает DNS-запросы)");
-                } else {
-                    s.add("ok", zone, "IP чистый");
+            // Базы опрашиваются параллельно: последовательно это 8 баз × 2
+            // запроса, и на медленной сети проверка занимала бы полминуты.
+            java.util.concurrent.ExecutorService pool =
+                    java.util.concurrent.Executors.newFixedThreadPool(Math.min(6, IP_ZONES.length));
+            java.util.List<java.util.concurrent.Future<RblAnswer>> futures =
+                    new ArrayList<java.util.concurrent.Future<RblAnswer>>();
+            try {
+                for (Zone zone : IP_ZONES) {
+                    final String q = reversed + "." + zone.host;
+                    final String zoneHost = zone.host;
+                    futures.add(pool.submit(new java.util.concurrent.Callable<RblAnswer>() {
+                        @Override
+                        public RblAnswer call() {
+                            return probeZone(q, zoneHost);
+                        }
+                    }));
                 }
-            }
-            if (listed > 0) {
-                s.add("fail", "Итог по IP",
-                        ip + " найден в " + listed + " из " + IP_ZONES.length + " баз");
-            } else if (errors == IP_ZONES.length) {
-                s.add("warn", "Итог по IP",
-                        "ни одна база не ответила — похоже, сеть блокирует DNS-запросы. "
-                                + "Проверьте с Wi-Fi, а не с мобильного интернета");
-            } else if (blocked > 0) {
-                s.add("warn", "Итог по IP",
-                        "в " + blocked + " базах проверить не удалось, в остальных " + ip + " не найден");
-            } else {
-                s.add("ok", "Итог по IP", ip + " не найден в опрошенных спам-базах");
+                int listedCount = 0;
+                int noNetwork = 0;
+                int notChecked = 0;
+                for (int i = 0; i < IP_ZONES.length; i++) {
+                    Zone zone = IP_ZONES[i];
+                    RblAnswer a = await(futures.get(i));
+                    if (a.state == ST_LISTED) {
+                        listedCount++;
+                        s.add("fail", "IP в базе " + zone.host, "адрес " + ip + " там числится ("
+                                + a.address + ") — подайте заявку на удаление: " + zone.site);
+                    } else if (a.state == ST_NO_NETWORK) {
+                        noNetwork++;
+                        s.add("warn", zone.host, "нет ответа (сеть не пропускает DNS-запросы)");
+                    } else if (a.state == ST_NOT_CHECKED) {
+                        notChecked++;
+                        s.add("info", zone.host, blockedHint(zone));
+                    } else {
+                        s.add("ok", zone.host, "IP чистый" + channelSuffix(a.channel));
+                    }
+                }
+
+                if (listedCount > 0) {
+                    s.add("fail", "Итог по IP", ip + " найден в " + listedCount + " из "
+                            + IP_ZONES.length + " баз");
+                } else if (noNetwork == IP_ZONES.length) {
+                    s.add("warn", "Итог по IP", "ни одна база не ответила — похоже, сеть блокирует "
+                            + "DNS-запросы. Попробуйте через Wi-Fi");
+                } else if (notChecked > 0) {
+                    s.add("warn", "Итог по IP", "в " + notChecked + " базах проверить не удалось, "
+                            + "в остальных " + ip + " не найден");
+                } else {
+                    s.add("ok", "Итог по IP", ip + " не найден в опрошенных спам-базах");
+                }
+            } finally {
+                pool.shutdownNow();
             }
         }
 
-        for (String zone : DOMAIN_ZONES) {
-            RblAnswer a = lookup(domain + "." + zone);
+        for (Zone zone : DOMAIN_ZONES) {
+            RblAnswer a = probeZone(domain + "." + zone.host, zone.host);
             if (a.state == ST_LISTED) {
-                s.add("fail", "Домен в базе " + zone,
-                        domain + " числится в списке доменов-спамеров");
-            } else if (a.state == ST_BLOCKED) {
-                s.add("info", zone, "база не отвечает публичным резолверам");
-            } else if (a.state == ST_ERROR) {
-                s.add("warn", zone, "нет ответа (сеть не пропускает DNS-запросы)");
+                s.add("fail", "Домен в базе " + zone.host,
+                        domain + " числится в списке доменов-спамеров: " + zone.site);
+            } else if (a.state == ST_NO_NETWORK) {
+                s.add("warn", zone.host, "нет ответа (сеть не пропускает DNS-запросы)");
+            } else if (a.state == ST_NOT_CHECKED) {
+                s.add("info", zone.host, blockedHint(zone));
             } else {
-                s.add("ok", zone, "домен чистый");
+                s.add("ok", zone.host, "домен чистый" + channelSuffix(a.channel));
             }
         }
 
@@ -506,36 +574,217 @@ final class Checks {
         return s;
     }
 
+    private static String blockedHint(Zone zone) {
+        if (zone.host.endsWith("spamhaus.org")) {
+            return "Spamhaus не отвечает публичным DNS-серверам (это его правило, а не сбой). "
+                    + "Проверьте адрес на " + zone.site;
+        }
+        return "база не ответила на контрольный запрос — посмотрите вручную: " + zone.site;
+    }
+
+    private static String channelSuffix(String channel) {
+        return channel == null || channel.isEmpty() ? "" : " · " + channel;
+    }
+
+    private static RblAnswer await(java.util.concurrent.Future<RblAnswer> f) {
+        try {
+            return f.get(20, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) {
+            return new RblAnswer(ST_NO_NETWORK, null, "");
+        }
+    }
+
     /**
-     * Пробует резолверы по очереди. Spamhaus отвечает блокирующим адресом
-     * 127.255.255.x, когда запрос пришёл от публичного DNS, — это не запись
-     * в базе, а отказ в обслуживании такого резолвера.
+     * Опрашивает одну зону: сначала контрольную точку 127.0.0.2, потом сам адрес.
+     *
+     * Без контрольного запроса нельзя отличить «записи нет» от «база молчит»:
+     * и то, и другое выглядит как отсутствие ответа.
      */
-    private static RblAnswer lookup(String name) {
-        for (String server : RBL_RESOLVERS) {
-            try {
-                DnsReply r = dnsQuery(name, server, 4000);
-                if (r == null) {
-                    continue;
-                }
-                if (r.rcode == 3) {
-                    return new RblAnswer(ST_CLEAN, null);          // NXDOMAIN — записи нет
-                }
-                if (r.rcode != 0) {
-                    return new RblAnswer(ST_ERROR, null);
-                }
-                if (r.address == null) {
-                    return new RblAnswer(ST_CLEAN, null);          // NODATA — тоже чисто
-                }
-                if (r.address.startsWith("127.255.255.")) {
-                    return new RblAnswer(ST_BLOCKED, r.address);
-                }
-                return new RblAnswer(ST_LISTED, r.address);
-            } catch (Exception ignored) {
-                // пробуем следующий резолвер
+    private static RblAnswer probeZone(String question, String zone) {
+        Boolean alive = zoneAlive(zone);
+
+        Probe value = resolve(question);
+        if (value.listed) {
+            if (value.policyBlock) {
+                // 127.255.255.x — не «числится в базе», а отказ в обслуживании
+                // публичного резолвера. Показывать это как спам нельзя.
+                return new RblAnswer(ST_NOT_CHECKED, null, value.channel);
+            }
+            return new RblAnswer(ST_LISTED, value.address, value.channel);
+        }
+        if (alive == null) {
+            return new RblAnswer(ST_NO_NETWORK, null, "");
+        }
+        if (alive) {
+            // Зона отвечает, контрольная точка в ней числится, а наш адрес —
+            // нет. Значит адреса в базе нет.
+            return new RblAnswer(ST_CLEAN, null, value.channel);
+        }
+        return new RblAnswer(ST_NOT_CHECKED, null, value.channel);
+    }
+
+    /** Жива ли база: null — проверить не удалось, true/false — ответ контрольной точки. */
+    private static Boolean zoneAlive(String zone) {
+        Probe control = resolve(CONTROL_IP + "." + zone);
+        if (control.listed) {
+            return Boolean.TRUE;
+        }
+        if (control.answered) {
+            // Ответ пришёл, но контрольная запись не числится: зона либо
+            // закрылась, либо не пускает нас. Для пользователя это одно и то же.
+            return Boolean.FALSE;
+        }
+        return null;
+    }
+
+    // ------------------------------------------------------------------
+    // Каналы разрешения имён
+    // ------------------------------------------------------------------
+
+    /** Ответ одного DNS-запроса. */
+    private static final class Probe {
+        final boolean answered;
+        final boolean listed;
+        final boolean policyBlock;
+        final String address;
+        final String channel;
+
+        Probe(boolean answered, boolean listed, boolean policyBlock, String address, String channel) {
+            this.answered = answered;
+            this.listed = listed;
+            this.policyBlock = policyBlock;
+            this.address = address;
+            this.channel = channel;
+        }
+    }
+
+    private static Probe probeListed(String ip, String channel) {
+        boolean policy = ip.startsWith("127.255.255.");
+        return new Probe(true, true, policy, ip, channel);
+    }
+
+    private static Probe probeClean(String channel) {
+        return new Probe(true, false, false, null, channel);
+    }
+
+    private static Probe probeUnknown(String channel) {
+        return new Probe(false, false, false, null, channel);
+    }
+
+    /**
+     * Разрешает имя всеми доступными способами по очереди.
+     *
+     * Системный резолвер — первым: он самый быстрый и работает через DNS
+     * оператора даже там, где внешний DNS заблокирован. Но он не различает
+     * NXDOMAIN и сбой, поэтому при отсутствии ответа уточняем через DoH.
+     */
+    static Probe resolve(String name) {
+        Probe sys = probeSystem(name);
+        if (sys.answered) {
+            return sys;
+        }
+        for (String base : DOH_BASES) {
+            Probe p = probeDoh(name, base);
+            if (p.answered) {
+                return p;
             }
         }
-        return new RblAnswer(ST_ERROR, null);
+        for (String server : UDP_RESOLVERS) {
+            Probe p = probeUdp(name, server);
+            if (p.answered) {
+                return p;
+            }
+        }
+        return probeUnknown("нет ответа");
+    }
+
+    /** Системный резолвер Android: быстрый, но NXDOMAIN и сбой неразличимы. */
+    private static Probe probeSystem(String name) {
+        try {
+            InetAddress[] all = InetAddress.getAllByName(name);
+            if (all != null) {
+                for (InetAddress a : all) {
+                    String ip = a.getHostAddress();
+                    if (ip != null && ip.startsWith("127.")) {
+                        return probeListed(ip, "системный DNS");
+                    }
+                }
+            }
+            return probeClean("системный DNS");
+        } catch (Exception e) {
+            return probeUnknown("системный DNS");
+        }
+    }
+
+    /** DNS-over-HTTPS: единственный канал, который отдаёт точный код ответа. */
+    private static Probe probeDoh(String name, String base) {
+        String channel = base.contains("google") ? "Google DoH" : "Cloudflare DoH";
+        JSONObject json = dohJson(base, name);
+        if (json == null) {
+            return probeUnknown(channel);
+        }
+        int status = json.optInt("Status", -1);
+        if (status == 3) {
+            return probeClean(channel);           // NXDOMAIN — записи нет
+        }
+        if (status != 0) {
+            return probeUnknown(channel);         // SERVFAIL / REFUSED
+        }
+        JSONArray answers = json.optJSONArray("Answer");
+        if (answers != null) {
+            for (int i = 0; i < answers.length(); i++) {
+                JSONObject rec = answers.optJSONObject(i);
+                String data = rec == null ? "" : rec.optString("data", "");
+                if (data.startsWith("127.")) {
+                    return probeListed(data, channel);
+                }
+            }
+        }
+        return probeClean(channel);               // NOERROR без A-записи
+    }
+
+    /** Обычный DNS по UDP — последний вариант, когда HTTPS недоступен. */
+    private static Probe probeUdp(String name, String server) {
+        try {
+            DnsReply r = dnsQuery(name, server, 4000);
+            if (r == null) {
+                return probeUnknown("UDP " + server);
+            }
+            if (r.rcode == 3) {
+                return probeClean("UDP " + server);
+            }
+            if (r.rcode != 0) {
+                return probeUnknown("UDP " + server);
+            }
+            if (r.address == null) {
+                return probeClean("UDP " + server);
+            }
+            return probeListed(r.address, "UDP " + server);
+        } catch (Exception e) {
+            return probeUnknown("UDP " + server);
+        }
+    }
+
+    /** JSON-ответ DoH или null. */
+    private static JSONObject dohJson(String base, String name) {
+        HttpURLConnection conn = null;
+        try {
+            String url = base + "?name=" + URLEncoder.encode(name, "UTF-8") + "&type=A";
+            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setConnectTimeout(6000);
+            conn.setReadTimeout(6000);
+            conn.setRequestProperty("Accept", "application/dns-json");
+            if (conn.getResponseCode() != 200) {
+                return null;
+            }
+            return new JSONObject(readAll(conn.getInputStream()));
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
     }
 
     /** Минимальный ответ DNS: код и первый A-адрес. */
@@ -569,6 +818,7 @@ final class Checks {
         out.write(0x00);
         out.write(0x00);            // QDCOUNT = 1
         out.write(0x01);
+        out.write(0x00);
         out.write(0x00);            // ANCOUNT
         out.write(0x00);
         out.write(0x00);            // NSCOUNT

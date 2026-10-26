@@ -1157,7 +1157,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.9.4<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
+        <span class="brand-badge">Windows Native GUI v4.9.5<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -1848,6 +1848,27 @@
               Пока пульт выключен, программа доступна только на этом компьютере — снаружи подключиться нельзя.
               После включения появится адрес и одноразовый код из 6 цифр: их нужно ввести в приложении
               <strong>KerioCertManager Mobile</strong> на телефоне. Выключите пульт, когда закончите.
+            </div>
+          </div>
+        </div>
+
+        <!-- v4.9.5: скачивание APK прямо из программы. Приложение для
+             Android лежит в релизах GitHub; кнопка избавляет от поиска
+             нужного файла в браузере. -->
+        <div class="card" id="androidApkCard">
+          <div class="card-header">
+            <div>
+              <div class="card-title">📥 Приложение для Android — скачать APK</div>
+              <div class="card-subtitle">Скачает файл последней версии с GitHub Releases и сохранит рядом с программой. Дальше перекиньте его на телефон и откройте — Android предложит установку</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button type="button" class="btn btn-primary btn-sm" id="androidApkDownloadBtn">⬇ Скачать APK</button>
+              <button type="button" class="btn btn-outline btn-sm" id="androidApkOpenBtn" style="display:none;">📂 Открыть папку</button>
+            </div>
+          </div>
+          <div id="androidApkBox">
+            <div class="hint-text" style="font-size:12.5px;line-height:1.6;">
+              Проверяю, какая версия приложения сейчас в релизах…
             </div>
           </div>
         </div>
@@ -3063,7 +3084,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:min(1880px,96vw);margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.9.4</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.9.5</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -3139,7 +3160,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 <script>
   // Версия интерфейса. Должна совпадать с appVersion в version.go
   // (проверяется тестом TestVersionConsistency).
-  const APP_VERSION = '4.9.4';
+  const APP_VERSION = '4.9.5';
   let systemState = null;
   let currentCert = null;
   let allCerts = [];
@@ -4034,6 +4055,132 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
       showToast('Не удалось сменить код: ' + e.message, true);
     }
   }
+
+  // ── «📥 Скачать APK» (v4.9.5) ──────────────────────────────────────────
+  // Приложение для телефона лежит в релизах GitHub. Здесь одна кнопка:
+  // программа сама находит последнюю версию, скачивает файл и показывает,
+  // где он лежит и какой у него SHA-256.
+  let androidApkState = null;
+
+  function renderAndroidApk(apk, error) {
+    androidApkState = apk || null;
+    const box = document.getElementById('androidApkBox');
+    const dlBtn = document.getElementById('androidApkDownloadBtn');
+    const openBtn = document.getElementById('androidApkOpenBtn');
+    if (!box || !dlBtn || !openBtn) return;
+
+    if (error) {
+      dlBtn.style.display = '';
+      dlBtn.disabled = false;
+      dlBtn.innerHTML = '⬇ Скачать APK';
+      box.innerHTML = '<div style="padding:10px 12px;border-radius:10px;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.45);font-size:12.5px;line-height:1.55;color:#fecaca;">' +
+        '❌ ' + escapeHtml(error) + '</div>';
+      return;
+    }
+    if (!apk) {
+      box.innerHTML = '<div class="hint-text">Нет данных о релизе.</div>';
+      return;
+    }
+
+    let html = '';
+    if (apk.mobileVersion) {
+      html += '<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;">' +
+        '<div><div style="font-size:11.5px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em;">Версия для Android</div>' +
+        '<div style="font-size:20px;font-weight:800;color:#93c5fd;">' + escapeHtml(apk.mobileVersion) + '</div></div>' +
+        '<div><div style="font-size:11.5px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em;">Размер</div>' +
+        '<div style="font-size:15px;font-weight:700;">' + escapeHtml(formatBytes(apk.size)) + '</div></div>' +
+        '</div>';
+    }
+
+    if (apk.downloaded && apk.filePath) {
+      html += '<div style="margin-top:12px;padding:12px 14px;border-radius:10px;background:rgba(16,185,129,0.10);border:1px solid rgba(16,185,129,0.45);font-size:12.5px;line-height:1.65;">' +
+        '<div style="font-weight:700;color:#6ee7b7;margin-bottom:4px;">✅ Файл скачан</div>' +
+        '<div><strong>' + escapeHtml(apk.fileName) + '</strong> · ' + escapeHtml(formatBytes(apk.fileSize)) +
+        (apk.savedAt ? ' · ' + escapeHtml(apk.savedAt) : '') + '</div>' +
+        '<div style="margin-top:4px;word-break:break-all;color:var(--text-secondary);">' + escapeHtml(apk.filePath) + '</div>' +
+        (apk.fileSha256 ? '<div style="margin-top:4px;word-break:break-all;color:var(--text-secondary);">SHA-256: <code>' + escapeHtml(apk.fileSha256) + '</code></div>' : '') +
+        '</div>';
+      openBtn.style.display = '';
+    } else {
+      openBtn.style.display = apk.folder ? '' : 'none';
+    }
+
+    if (apk.phoneUrl) {
+      html += '<div style="margin-top:10px;font-size:12.5px;line-height:1.6;">' +
+        '📲 Телефон в той же сети Wi-Fi может скачать файл прямо с этого компьютера: ' +
+        '<a href="' + escapeHtml(apk.phoneUrl) + '" target="_blank" style="color:#93c5fd;word-break:break-all;">' +
+        escapeHtml(apk.phoneUrl) + '</a></div>';
+    }
+
+    html += '<div class="hint-text" style="margin-top:10px;font-size:12px;line-height:1.6;">' +
+      'На телефоне откройте файл и разрешите установку из этого источника. Обновления потом приходят сами — ' +
+      'кнопкой «Проверить обновления» в приложении.</div>';
+
+    box.innerHTML = html;
+    dlBtn.style.display = '';
+    dlBtn.disabled = false;
+    dlBtn.innerHTML = apk.downloaded ? '⬇ Скачать заново' : '⬇ Скачать APK';
+  }
+
+  async function loadAndroidApk(force) {
+    const box = document.getElementById('androidApkBox');
+    try {
+      const r = await fetch('/api/android/apk' + (force ? '?force=1' : ''));
+      const d = await r.json();
+      renderAndroidApk(d.apk, d.ok ? null : (d.apk && d.apk.error) || 'Не удалось узнать версию приложения');
+    } catch (e) {
+      if (box) box.innerHTML = '<div class="hint-text">Не удалось проверить релиз: ' + escapeHtml(e.message) + '</div>';
+    }
+  }
+
+  async function downloadAndroidApk() {
+    const btn = document.getElementById('androidApkDownloadBtn');
+    if (!btn || btn.disabled) return;
+    const old = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Скачиваю…';
+    try {
+      const r = await fetch('/api/android/apk/download', { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) {
+        renderAndroidApk(d.apk, null);
+        showToast(d.message || 'APK скачан');
+      } else {
+        btn.disabled = false;
+        btn.innerHTML = old;
+        showToast(d.error || 'Не удалось скачать APK', true);
+      }
+    } catch (e) {
+      btn.disabled = false;
+      btn.innerHTML = old;
+      showToast('Не удалось скачать APK: ' + e.message, true);
+    }
+  }
+
+  async function openAndroidApkFolder() {
+    try {
+      const r = await fetch('/api/android/apk/open', { method: 'POST' });
+      const d = await r.json();
+      if (!d.ok) showToast(d.error || 'Не удалось открыть папку', true);
+    } catch (e) {
+      showToast('Не удалось открыть папку: ' + e.message, true);
+    }
+  }
+
+  function formatBytes(n) {
+    if (!n || n < 0) return '—';
+    if (n >= 1048576) return (n / 1048576).toFixed(1) + ' МБ';
+    if (n >= 1024) return (n / 1024).toFixed(1) + ' КБ';
+    return n + ' Б';
+  }
+
+  (function initAndroidApk() {
+    const dlBtn = document.getElementById('androidApkDownloadBtn');
+    const openBtn = document.getElementById('androidApkOpenBtn');
+    if (dlBtn) dlBtn.addEventListener('click', downloadAndroidApk);
+    if (openBtn) openBtn.addEventListener('click', openAndroidApkFolder);
+    if (dlBtn) loadAndroidApk(false);
+  })();
 
   (function initAndroidRemote() {
     const startBtn = document.getElementById('androidRemoteStartBtn');
