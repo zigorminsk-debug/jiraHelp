@@ -1,4 +1,4 @@
-# Kerio SSL, Mail Audit, Delist, Sanctions & AntiSpam DB Suite v4.9.1 (Windows Desktop GUI)
+# Kerio SSL, Mail Audit, Delist, Sanctions & AntiSpam DB Suite v4.9.2 (Windows Desktop GUI)
 
 **Разработчик:** **Zakharevich Igor** • ✉ [`ziv@csl.by`](mailto:ziv@csl.by) • ☎ `+375293371412`
 
@@ -14,7 +14,7 @@
 
 ---
 
-## 🆕 Что нового в v4.9.1: установка SSL в Kerio Connect 10 и читаемые сообщения службы
+## 🆕 Что нового в v4.9.2: Android-приложение и пульт с телефона: установка SSL в Kerio Connect 10 и читаемые сообщения службы
 
 | Что изменилось | Как теперь выглядит |
 |---|---|

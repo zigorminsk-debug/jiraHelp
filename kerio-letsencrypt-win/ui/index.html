@@ -1072,6 +1072,11 @@
     .ub-actions .btn { width: 100%; justify-content: center; }
   }
 
+  /* ===== v4.10.0: строки адресов в карточке Android-пункта ===== */
+  .kcm-copy-line { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .kcm-copy-line code { font-size:12.5px; padding:3px 7px; border-radius:6px;
+    background:var(--bg-elevated); border:1px solid var(--border-color, rgba(255,255,255,0.08)); }
+
   /* ===== v4.9.0: карточка «Быстрый старт» в правой колонке ===== */
   .qs-steps { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 9px; }
   .qs-steps li { display: flex; gap: 10px; align-items: flex-start; font-size: 12.8px; line-height: 1.6; }
@@ -1152,7 +1157,7 @@
     <div>
       <div class="brand-title">
         Kerio SSL &amp; Let's Encrypt Manager
-        <span class="brand-badge">Windows Native GUI v4.9.1<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
+        <span class="brand-badge">Windows Native GUI v4.9.2<span class="badge-extra"> • SSL • Аудит Почты • Delist • Санкции • Антиспам-база</span></span>
       </div>
       <div class="brand-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>Генерация ключа (.key), SSL (.crt / .pfx), диагностика Kerio MailServer &amp; антиспам</span>
@@ -1824,6 +1829,29 @@
       </div>
 
       <div>
+        <!-- v4.10.0: «Пульт» для телефона. Программа по кнопке открывает
+             второй слушатель в локальной сети с кодом доступа из 6 цифр,
+             чтобы приложение KerioCertManager Mobile могло подключиться. -->
+        <div class="card" id="androidRemoteCard">
+          <div class="card-header">
+            <div>
+              <div class="card-title">📱 Android-пульт — управление с телефона</div>
+              <div class="card-subtitle">Телефон в той же сети Wi-Fi откроет эту программу и сможет делать всё: выпускать сертификат, устанавливать его в Kerio, смотреть инструкцию</div>
+            </div>
+            <div style="display:flex;gap:6px;">
+              <button type="button" class="btn btn-primary btn-sm" id="androidRemoteStartBtn">Включить пульт</button>
+              <button type="button" class="btn btn-outline btn-sm" id="androidRemoteStopBtn" style="display:none;">Выключить</button>
+            </div>
+          </div>
+          <div id="androidRemoteBox">
+            <div class="hint-text" style="font-size:12.5px;line-height:1.6;">
+              Пока пульт выключен, программа доступна только на этом компьютере — снаружи подключиться нельзя.
+              После включения появится адрес и одноразовый код из 6 цифр: их нужно ввести в приложении
+              <strong>KerioCertManager Mobile</strong> на телефоне. Выключите пульт, когда закончите.
+            </div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-header">
             <div>
@@ -3035,7 +3063,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
   <div style="max-width:min(1880px,96vw);margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.8px;color:var(--text-secondary);">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <img id="footerAppIconImg" src="/icons/emerald-shield.png" alt="App Icon" width="24" height="24" style="width:24px;height:24px;border-radius:6px;">
-      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.9.1</strong></span>
+      <span><strong>Kerio SSL, Mail Audit, Delist, Sanctions &amp; AntiSpam DB Suite v4.9.2</strong></span>
       <span>•</span>
       <span>Разработчик: <strong style="color:var(--text-main);">Zakharevich Igor</strong></span>
       <span>•</span>
@@ -3111,7 +3139,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
 <script>
   // Версия интерфейса. Должна совпадать с appVersion в version.go
   // (проверяется тестом TestVersionConsistency).
-  const APP_VERSION = '4.9.1';
+  const APP_VERSION = '4.9.2';
   let systemState = null;
   let currentCert = null;
   let allCerts = [];
@@ -3891,6 +3919,129 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
       btn.innerHTML = orig;
     }
   });
+
+  // ── «📱 Android-пульт» (v4.10.0) ────────────────────────────────────────
+  // Пульт — это второй слушатель на 0.0.0.0 с кодом доступа. Включается
+  // только по кнопке и забывает код при выключении программы.
+  let androidRemoteInfo = null;
+
+  function renderAndroidRemote(remote) {
+    androidRemoteInfo = remote;
+    const box = document.getElementById('androidRemoteBox');
+    const startBtn = document.getElementById('androidRemoteStartBtn');
+    const stopBtn = document.getElementById('androidRemoteStopBtn');
+    if (!box || !startBtn || !stopBtn) return;
+
+    if (!remote || !remote.enabled) {
+      startBtn.style.display = '';
+      stopBtn.style.display = 'none';
+      box.innerHTML = '<div class="hint-text" style="font-size:12.5px;line-height:1.6;">' +
+        'Пока пульт выключен, программа доступна только на этом компьютере — снаружи подключиться нельзя. ' +
+        'После включения появится адрес и одноразовый код из 6 цифр: их нужно ввести в приложении ' +
+        '<strong>KerioCertManager Mobile</strong> на телефоне. Выключите пульт, когда закончите.</div>' +
+        (remote && remote.error ? '<div style="margin-top:8px;color:#fca5a5;font-size:12.5px;">' + escapeHtml(remote.error) + '</div>' : '');
+      return;
+    }
+
+    startBtn.style.display = 'none';
+    stopBtn.style.display = '';
+
+    const urls = remote.urls || [];
+    const urlLines = urls.length
+      ? urls.map(u => '<div class="kcm-copy-line"><code>' + escapeHtml(u.replace(/^http:\/\//, '').replace(/\/$/, '')) +
+          '</code><button type="button" class="btn btn-outline btn-sm" data-copy="' + escapeHtml(u) + '">Копировать</button></div>').join('')
+      : '<div style="color:#fca5a5;">Не найден сетевой адрес: подключите компьютер к Wi-Fi или кабелю.</div>';
+
+    box.innerHTML =
+      '<div style="padding:12px 14px;border-radius:10px;background:rgba(16,185,129,0.10);border:1px solid rgba(16,185,129,0.45);">' +
+        '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;">' +
+          '<div><div style="font-size:11.5px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em;">Код доступа</div>' +
+            '<div style="font-size:30px;font-weight:800;letter-spacing:0.22em;color:#6ee7b7;">' + escapeHtml(remote.code || '') + '</div></div>' +
+          '<div style="flex:1;min-width:220px;"><div style="font-size:11.5px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em;">Адрес в приложении</div>' +
+            '<div style="margin-top:4px;display:flex;flex-direction:column;gap:5px;">' + urlLines + '</div></div>' +
+        '</div>' +
+        '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' +
+          '<button type="button" class="btn btn-outline btn-sm" id="androidRemoteCodeBtn">🔄 Сменить код</button>' +
+          '<a class="btn btn-outline btn-sm" href="#" onclick="openHelpSection(\'22-android-приложение-пульт-и-проверки-с-телефона\');return false;">📖 Как подключить телефон</a>' +
+        '</div>' +
+      '</div>' +
+      '<div class="hint-text" style="margin-top:10px;font-size:12px;line-height:1.6;">' +
+        'Включено в ' + escapeHtml(remote.startedAt || '') + ', порт ' + (remote.port || '') + '. ' +
+        escapeHtml(remote.hint || '') +
+      '</div>' +
+      '<div style="margin-top:8px;font-size:12px;color:#fbbf24;">⚠️ Пока пульт включён, любой в этой сети, кто знает код, ' +
+        'может управлять программой. Не оставляйте пульт включённым без присмотра.</div>';
+
+    box.querySelectorAll('[data-copy]').forEach(b => {
+      b.addEventListener('click', async () => {
+        await copyTextToClipboard(b.getAttribute('data-copy'), 'Адрес скопирован — вставьте его в приложении на телефоне');
+      });
+    });
+    const codeBtn = document.getElementById('androidRemoteCodeBtn');
+    if (codeBtn) codeBtn.addEventListener('click', refreshAndroidRemoteCode);
+  }
+
+  async function loadAndroidRemote() {
+    try {
+      const r = await fetch('/api/mobile/remote');
+      const d = await r.json();
+      if (d && d.remote) renderAndroidRemote(d.remote);
+    } catch (_) {
+      // карточка просто останется в исходном виде
+    }
+  }
+
+  async function startAndroidRemote() {
+    const btn = document.getElementById('androidRemoteStartBtn');
+    const old = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Включаю…';
+    try {
+      const r = await fetch('/api/mobile/remote/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await r.json();
+      if (d && d.remote) renderAndroidRemote(d.remote);
+      if (!d.ok) {
+        showToast(d.error || 'Не удалось включить пульт', true);
+      } else {
+        showToast('Пульт включён. Введите код на телефоне.');
+      }
+    } catch (e) {
+      showToast('Не удалось включить пульт: ' + e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = old;
+    }
+  }
+
+  async function stopAndroidRemote() {
+    try {
+      const r = await fetch('/api/mobile/remote/stop', { method: 'POST' });
+      const d = await r.json();
+      if (d && d.remote) renderAndroidRemote(d.remote);
+      showToast('Пульт выключен — телефон больше не подключится');
+    } catch (e) {
+      showToast('Не удалось выключить пульт: ' + e.message, true);
+    }
+  }
+
+  async function refreshAndroidRemoteCode() {
+    try {
+      const r = await fetch('/api/mobile/remote/code', { method: 'POST' });
+      const d = await r.json();
+      if (d && d.remote) renderAndroidRemote(d.remote);
+      showToast('Код изменён — старый больше не действует');
+    } catch (e) {
+      showToast('Не удалось сменить код: ' + e.message, true);
+    }
+  }
+
+  (function initAndroidRemote() {
+    const startBtn = document.getElementById('androidRemoteStartBtn');
+    const stopBtn = document.getElementById('androidRemoteStopBtn');
+    if (startBtn) startBtn.addEventListener('click', startAndroidRemote);
+    if (stopBtn) stopBtn.addEventListener('click', stopAndroidRemote);
+    loadAndroidRemote();
+  })();
 
   // Кнопка «🔄 Перезапустить службу» в карточке состояния Kerio.
   // Обработчик вешаем здесь же, рядом с остальными кнопками блока Kerio:

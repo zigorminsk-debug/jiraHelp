@@ -14,7 +14,7 @@ package main
 //   - kerio-letsencrypt-win/rsrc_windows_amd64.syso (FileVersion/ProductVersion)
 //     — иначе `go test ./...` и CI-сборка завершатся ошибкой;
 //   - kerio-letsencrypt-win/README.md, FAQ.md и тело PR.
-const appVersion = "4.9.1"
+const appVersion = "4.9.2"
 
 // appVersion4 — четырёхкомпонентная версия для полей FileVersion/ProductVersion
 // в PE-ресурсе Windows (например, 4.5.2.0). Последний компонент всегда 0.

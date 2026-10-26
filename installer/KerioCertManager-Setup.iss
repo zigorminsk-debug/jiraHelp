@@ -15,7 +15,7 @@
 #define MyAppName "KerioCertManager"
 ; ВАЖНО: версия должна совпадать с appVersion в kerio-letsencrypt-win/version.go.
 ; Это проверяет unit-тест TestInstallerVersionMatchesApp (go test ./...).
-#define MyAppVersion "4.9.1"
+#define MyAppVersion "4.9.2"
 #define MyAppPublisher "Zakharevich Igor"
 #define MyAppURL "https://github.com/zigorminsk-debug/jiraHelp"
 #define MyAppExeName "KerioCertManager.exe"

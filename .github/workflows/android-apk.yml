@@ -1,0 +1,93 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - arena/f70f3591-jirahelp
+    tags:
+      - 'v*'
+    paths:
+      - 'android/**'
+      - 'kerio-letsencrypt-win/version.go'
+      - '.github/workflows/android-apk.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install platform and build-tools
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager --install "platforms;android-34" "build-tools;35.0.0" "platform-tools"
+
+      - name: Build signed APK
+        env:
+          ANDROID_PLATFORM: android-34
+          ANDROID_BUILD_TOOLS: 35.0.0
+          KCM_KEYSTORE_BASE64: ${{ secrets.KCM_KEYSTORE_BASE64 }}
+          KCM_KEYSTORE_PASS: ${{ secrets.KCM_KEYSTORE_PASS }}
+          KCM_KEY_ALIAS: ${{ secrets.KCM_KEY_ALIAS }}
+        run: bash android/build-apk.sh
+
+      - name: Sanity check APK
+        run: |
+          set -euo pipefail
+          APK=$(ls build/android/KerioCertManager-Mobile-*.apk)
+          echo "APK: $APK"
+          ls -l "$APK"
+          # Пакет и версия должны совпадать с манифестом — иначе получим
+          # «обновление не устанавливается» на телефоне.
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" | grep -E '^package:|^application-label:' 
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose "$APK" | grep -i 'verified'
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KerioCertManager-Mobile
+          path: |
+            build/android/KerioCertManager-Mobile-*.apk
+            build/android/KerioCertManager-Mobile-*.sha256
+            build/android/signature.txt
+          if-no-files-found: error
+
+      - name: Attach APK to release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          APK=$(ls build/android/KerioCertManager-Mobile-*.apk)
+          SHA=$(ls build/android/KerioCertManager-Mobile-*.sha256)
+          # Релиз к тегу создаёт сборка Windows; здесь только догружаем APK.
+          # Если сборка Windows ещё не дошла до создания релиза — создаём сами.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "KerioCertManager $TAG" \
+              --notes "Автоматическая сборка $TAG" --verify-tag
+          fi
+          gh release upload "$TAG" "$APK" "$SHA" --clobber
+          gh release view "$TAG" --json assets --jq '.assets[].name'
