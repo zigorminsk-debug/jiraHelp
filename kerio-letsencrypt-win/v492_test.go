@@ -271,4 +271,62 @@ func TestAndroidProjectConsistent(t *testing.T) {
 			t.Errorf("Checks.java: нет проверки %q", want)
 		}
 	}
+
+	// versionCode обязан соответствовать версии: от него зависит, примет ли
+	// Android APK «поверх» установленного.
+	parts := strings.Split(appVersion, ".")
+	if len(parts) != 3 {
+		t.Fatalf("appVersion %q не в формате X.Y.Z", appVersion)
+	}
+	var nums [3]int
+	for i, part := range parts {
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			t.Fatalf("appVersion %q: %v", appVersion, err)
+		}
+		nums[i] = n
+	}
+	wantCode := nums[0]*10000 + nums[1]*100 + nums[2]
+	if !strings.Contains(manifest, `android:versionCode="`+strconv.Itoa(wantCode)+`"`) {
+		t.Errorf("AndroidManifest.xml: versionCode должен быть %d", wantCode)
+	}
+	if !strings.Contains(java, "VERSION_CODE = "+strconv.Itoa(wantCode)+";") {
+		t.Errorf("Versions.java: VERSION_CODE должен быть %d", wantCode)
+	}
+	if !strings.Contains(java, `REPO = "zigorminsk-debug/jiraHelp"`) {
+		t.Error("Versions.java: не указан репозиторий обновлений")
+	}
+
+	// Обновление с GitHub: класс загрузки, провайдер файла и разрешение
+	// на установку APK — без любого из них кнопка обновления не работает.
+	updates := readRepoFile(t, "../android/src/by/csl/kcm/Updates.java")
+	for _, want := range []string{"api.github.com", "isNewer", "downloadAndInstall",
+		"canRequestPackageInstalls", "ACTION_MANAGE_UNKNOWN_APP_SOURCES"} {
+		if !strings.Contains(updates, want) {
+			t.Errorf("Updates.java: нет %q", want)
+		}
+	}
+	if !strings.Contains(manifest, "android.permission.REQUEST_INSTALL_PACKAGES") {
+		t.Error("AndroidManifest.xml: нет разрешения REQUEST_INSTALL_PACKAGES")
+	}
+	if !strings.Contains(manifest, `android:name=".UpdateProvider"`) {
+		t.Error("AndroidManifest.xml: не объявлен UpdateProvider")
+	}
+	if !strings.Contains(main, "Проверить обновления") {
+		t.Error("MainActivity.java: нет кнопки проверки обновлений")
+	}
+
+	// Постоянный ключ подписи: без него обновления не устанавливаются поверх.
+	ks := readRepoFile(t, "../android/keystore/keystore.properties")
+	for _, want := range []string{"storePassword=", "keyAlias=", "sha256="} {
+		if !strings.Contains(ks, want) {
+			t.Errorf("keystore.properties: нет %q", want)
+		}
+	}
+	build := readRepoFile(t, "../android/build-apk.sh")
+	for _, want := range []string{"kcm-release.p12", "Ожидался", "apksigner"} {
+		if !strings.Contains(build, want) {
+			t.Errorf("build-apk.sh: нет %q", want)
+		}
+	}
 }

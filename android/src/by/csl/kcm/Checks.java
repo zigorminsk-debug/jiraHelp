@@ -408,12 +408,41 @@ final class Checks {
     // Спам-базы (RBL/DBL)
     // ------------------------------------------------------------------
 
+    // SORBS закрылся в 2024 году, поэтому вместо него — UCEPROTECT и PSBL:
+    // они отвечают и сейчас.
     private static final String[] IP_ZONES = {
             "zen.spamhaus.org", "bl.spamcop.net", "b.barracudacentral.org",
-            "dnsbl.sorbs.net", "spam.dnsbl.sorbs.net", "cbl.abuseat.org",
+            "cbl.abuseat.org", "dnsbl-1.uceprotect.net", "psbl.surriel.com",
     };
 
     private static final String[] DOMAIN_ZONES = {"dbl.spamhaus.org"};
+
+    /**
+     * Публичные резолверы для RBL-запросов.
+     *
+     * Почему не {@link InetAddress#getByName}: он не различает «записи нет»
+     * (это как раз чистая репутация) и «сеть не ответила» — в обоих случаях
+     * бросается UnknownHostException. На экране получалось «нет ответа» даже
+     * для чистых адресов. Поэтому здесь свой маленький DNS-клиент: он видит
+     * код ответа NXDOMAIN и честно говорит «чисто».
+     */
+    private static final String[] RBL_RESOLVERS = {"1.1.1.1", "8.8.8.8", "9.9.9.9"};
+
+    private static final int ST_CLEAN = 0;
+    private static final int ST_LISTED = 1;
+    private static final int ST_BLOCKED = 2;
+    private static final int ST_ERROR = 3;
+
+    /** Ответ RBL: состояние и адрес-причина (127.0.0.x). */
+    private static final class RblAnswer {
+        final int state;
+        final String address;
+
+        RblAnswer(int state, String address) {
+            this.state = state;
+            this.address = address;
+        }
+    }
 
     static Section checkRbl(String domain, String ip) {
         Section s = new Section("Спам-базы (RBL)");
@@ -422,29 +451,50 @@ final class Checks {
         if (reversed == null) {
             s.add("warn", "IP-адрес", "не удалось получить публичный IPv4 для проверки");
         } else {
-            boolean listed = false;
+            int listed = 0;
+            int blocked = 0;
+            int errors = 0;
             for (String zone : IP_ZONES) {
-                String answer = resolveA(reversed + "." + zone);
-                if (answer != null && answer.startsWith("127.0.0.")) {
-                    listed = true;
-                    s.add("fail", "IP в базе " + zone, "адрес " + ip + " там числится — подайте заявку на удаление");
-                } else if (answer == null) {
-                    s.add("info", zone, "нет ответа (база недоступна или запрос заблокирован)");
+                RblAnswer a = lookup(reversed + "." + zone);
+                if (a.state == ST_LISTED) {
+                    listed++;
+                    s.add("fail", "IP в базе " + zone,
+                            "адрес " + ip + " там числится (" + a.address + ") — подайте заявку на удаление");
+                } else if (a.state == ST_BLOCKED) {
+                    blocked++;
+                    s.add("info", zone, "база не отвечает публичным резолверам — "
+                            + "посмотрите адрес вручную на сайте " + zone);
+                } else if (a.state == ST_ERROR) {
+                    errors++;
+                    s.add("warn", zone, "нет ответа (сеть не пропускает DNS-запросы)");
                 } else {
                     s.add("ok", zone, "IP чистый");
                 }
             }
-            if (!listed) {
+            if (listed > 0) {
+                s.add("fail", "Итог по IP",
+                        ip + " найден в " + listed + " из " + IP_ZONES.length + " баз");
+            } else if (errors == IP_ZONES.length) {
+                s.add("warn", "Итог по IP",
+                        "ни одна база не ответила — похоже, сеть блокирует DNS-запросы. "
+                                + "Проверьте с Wi-Fi, а не с мобильного интернета");
+            } else if (blocked > 0) {
+                s.add("warn", "Итог по IP",
+                        "в " + blocked + " базах проверить не удалось, в остальных " + ip + " не найден");
+            } else {
                 s.add("ok", "Итог по IP", ip + " не найден в опрошенных спам-базах");
             }
         }
 
         for (String zone : DOMAIN_ZONES) {
-            String answer = resolveA(domain + "." + zone);
-            if (answer != null && answer.startsWith("127.0.0.")) {
-                s.add("fail", "Домен в базе " + zone, domain + " числится в списке доменов-спамеров");
-            } else if (answer == null) {
-                s.add("info", zone, "нет ответа (база недоступна)");
+            RblAnswer a = lookup(domain + "." + zone);
+            if (a.state == ST_LISTED) {
+                s.add("fail", "Домен в базе " + zone,
+                        domain + " числится в списке доменов-спамеров");
+            } else if (a.state == ST_BLOCKED) {
+                s.add("info", zone, "база не отвечает публичным резолверам");
+            } else if (a.state == ST_ERROR) {
+                s.add("warn", zone, "нет ответа (сеть не пропускает DNS-запросы)");
             } else {
                 s.add("ok", zone, "домен чистый");
             }
@@ -456,13 +506,137 @@ final class Checks {
         return s;
     }
 
-    /** DNS-запрос A-записи (RBL отвечают адресом 127.0.0.x, если запись есть). */
-    private static String resolveA(String name) {
+    /**
+     * Пробует резолверы по очереди. Spamhaus отвечает блокирующим адресом
+     * 127.255.255.x, когда запрос пришёл от публичного DNS, — это не запись
+     * в базе, а отказ в обслуживании такого резолвера.
+     */
+    private static RblAnswer lookup(String name) {
+        for (String server : RBL_RESOLVERS) {
+            try {
+                DnsReply r = dnsQuery(name, server, 4000);
+                if (r == null) {
+                    continue;
+                }
+                if (r.rcode == 3) {
+                    return new RblAnswer(ST_CLEAN, null);          // NXDOMAIN — записи нет
+                }
+                if (r.rcode != 0) {
+                    return new RblAnswer(ST_ERROR, null);
+                }
+                if (r.address == null) {
+                    return new RblAnswer(ST_CLEAN, null);          // NODATA — тоже чисто
+                }
+                if (r.address.startsWith("127.255.255.")) {
+                    return new RblAnswer(ST_BLOCKED, r.address);
+                }
+                return new RblAnswer(ST_LISTED, r.address);
+            } catch (Exception ignored) {
+                // пробуем следующий резолвер
+            }
+        }
+        return new RblAnswer(ST_ERROR, null);
+    }
+
+    /** Минимальный ответ DNS: код и первый A-адрес. */
+    private static final class DnsReply {
+        int rcode;
+        String address;
+    }
+
+    private static DnsReply dnsQuery(String name, String server, int timeoutMs) throws Exception {
+        int id = (int) (Math.random() * 65535) & 0xFFFF;
+        byte[] query = buildQuery(name, id);
+        java.net.DatagramSocket socket = new java.net.DatagramSocket();
         try {
-            return InetAddress.getByName(name).getHostAddress();
-        } catch (Exception e) {
+            socket.setSoTimeout(timeoutMs);
+            InetAddress target = InetAddress.getByName(server);
+            socket.send(new java.net.DatagramPacket(query, query.length, target, 53));
+            byte[] buf = new byte[1500];
+            java.net.DatagramPacket packet = new java.net.DatagramPacket(buf, buf.length);
+            socket.receive(packet);
+            return parseReply(buf, packet.getLength(), id);
+        } finally {
+            closeQuietly(socket);
+        }
+    }
+
+    private static byte[] buildQuery(String name, int id) throws Exception {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        out.write((id >> 8) & 0xFF);
+        out.write(id & 0xFF);
+        out.write(0x01);            // RD — просим рекурсию
+        out.write(0x00);
+        out.write(0x00);            // QDCOUNT = 1
+        out.write(0x01);
+        out.write(0x00);            // ANCOUNT
+        out.write(0x00);
+        out.write(0x00);            // NSCOUNT
+        out.write(0x00);
+        out.write(0x00);            // ARCOUNT
+        for (String label : name.split("\\.")) {
+            byte[] bytes = label.getBytes("US-ASCII");
+            if (bytes.length == 0 || bytes.length > 63) {
+                continue;
+            }
+            out.write(bytes.length);
+            out.write(bytes, 0, bytes.length);
+        }
+        out.write(0x00);            // конец имени
+        out.write(0x00);            // QTYPE = A
+        out.write(0x01);
+        out.write(0x00);            // QCLASS = IN
+        out.write(0x01);
+        return out.toByteArray();
+    }
+
+    private static int skipName(byte[] b, int off) {
+        while (off < b.length) {
+            int len = b[off] & 0xFF;
+            if (len == 0) {
+                return off + 1;
+            }
+            if ((len & 0xC0) == 0xC0) {
+                return off + 2;     // указатель на сжатое имя
+            }
+            off += 1 + len;
+        }
+        return off;
+    }
+
+    private static DnsReply parseReply(byte[] b, int len, int id) {
+        if (len < 12) {
             return null;
         }
+        int rid = ((b[0] & 0xFF) << 8) | (b[1] & 0xFF);
+        if (rid != id) {
+            return null;
+        }
+        DnsReply reply = new DnsReply();
+        reply.rcode = b[3] & 0x0F;
+        int questions = ((b[4] & 0xFF) << 8) | (b[5] & 0xFF);
+        int answers = ((b[6] & 0xFF) << 8) | (b[7] & 0xFF);
+
+        int off = 12;
+        for (int i = 0; i < questions && off < len; i++) {
+            off = skipName(b, off) + 4;
+        }
+        for (int i = 0; i < answers && off + 10 <= len; i++) {
+            off = skipName(b, off);
+            if (off + 10 > len) {
+                break;
+            }
+            int type = ((b[off] & 0xFF) << 8) | (b[off + 1] & 0xFF);
+            int rdlen = ((b[off + 8] & 0xFF) << 8) | (b[off + 9] & 0xFF);
+            off += 10;
+            if (type == 1 && rdlen == 4 && off + 4 <= len) {
+                reply.address = (b[off] & 0xFF) + "." + (b[off + 1] & 0xFF) + "."
+                        + (b[off + 2] & 0xFF) + "." + (b[off + 3] & 0xFF);
+                break;
+            }
+            off += rdlen;
+        }
+        return reply;
     }
 
     private static String reverseIp(String ip) {

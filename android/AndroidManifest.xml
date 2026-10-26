@@ -1,13 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="by.csl.kcm"
-    android:versionCode="4100"
-    android:versionName="4.9.2">
+    android:versionCode="40903"
+    android:versionName="4.9.3">
 
     <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="34" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Нужно, чтобы приложение могло передать скачанный APK системному
+         установщику (Android 8 и новее спрашивает разрешение у пользователя). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="true"
@@ -27,5 +30,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Отдаёт установщику скачанный APK: без этого на Android 7+ файл
+             по file:// передать нельзя. -->
+        <provider
+            android:name=".UpdateProvider"
+            android:authorities="by.csl.kcm.updates"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

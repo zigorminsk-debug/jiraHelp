@@ -96,6 +96,18 @@ final class Ui {
         return b;
     }
 
+    /** Компактная кнопка для шапки: мельче основные и с меньшими полями. */
+    static Button smallButton(Context c, String text) {
+        Button b = button(c, text, false);
+        b.setTextSize(13f);
+        b.setPadding(dp(c, 12), dp(c, 7), dp(c, 12), dp(c, 7));
+        b.setMinHeight(0);
+        b.setMinimumHeight(0);
+        b.setMinWidth(0);
+        b.setMinimumWidth(0);
+        return b;
+    }
+
     static EditText input(Context c, String hint, int inputType) {
         EditText e = new EditText(c);
         e.setHint(hint);

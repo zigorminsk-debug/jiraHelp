@@ -74,10 +74,28 @@ jobs:
           APK=$(ls build/android/KerioCertManager-Mobile-*.apk)
           echo "APK: $APK"
           ls -l "$APK"
+
           # Пакет и версия должны совпадать с манифестом — иначе получим
           # «обновление не устанавливается» на телефоне.
-          "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" | grep -E '^package:|^application-label:' 
-          "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose "$APK" | grep -i 'verified'
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" | grep -E '^package:|^application-label:'
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" \
+            | grep -E "versionCode='[0-9]+'" || true
+
+          VERIFIED=$("$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose "$APK")
+          echo "$VERIFIED" | grep -i 'verified'
+          echo "$VERIFIED" | grep -qi 'Verified using v2 scheme.*true' \
+            || echo "::warning::APK без подписи v2 — старые Android могут не принять обновление"
+
+          # Постоянная подпись: сравниваем отпечаток с keystore.properties.
+          # Если ключ подменили, релиз не должен уехать.
+          EXPECTED=$(sed -n 's/^sha256=//p' android/keystore/keystore.properties | tr -d ':' | tr 'A-Z' 'a-z')
+          ACTUAL=$(echo "$VERIFIED" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)
+          echo "Отпечаток подписи: ${ACTUAL:-не определён}"
+          if [[ -n "$EXPECTED" && "$ACTUAL" != "$EXPECTED" ]]; then
+            echo "::error::APK подписан не постоянным ключом ($ACTUAL вместо $EXPECTED)"
+            exit 1
+          fi
+          echo "Обновления будут устанавливаться поверх — подпись постоянная."
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

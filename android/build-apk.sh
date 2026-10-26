@@ -86,31 +86,66 @@ cp "$OUT/resources.apk" "$OUT/unsigned.apk"
 "$BT/zipalign" -f 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
 
 # --- 4. Подпись ------------------------------------------------------------
+# Ключ постоянный: без него Android не поставит обновление «поверх».
+#   1) секреты репозитория (если заданы) — приоритет;
+#   2) файл android/keystore/kcm-release.p12 + keystore.properties;
+#   3) одноразовый ключ — только если ничего не нашлось (сборка не для релиза).
 APK_NAME="KerioCertManager-Mobile-${APP_VER}.apk"
+KS_DIR="android/keystore"
+EXPECTED_SHA=""
+
 if [[ -n "${KCM_KEYSTORE_BASE64:-}" ]]; then
   echo "Подпись: ключ из секретов репозитория"
   echo "$KCM_KEYSTORE_BASE64" | base64 -d > "$OUT/release.keystore"
-  "$BT/apksigner" sign \
-    --ks "$OUT/release.keystore" \
-    --ks-pass "pass:${KCM_KEYSTORE_PASS:?}" \
-    --key-pass "pass:${KCM_KEYSTORE_PASS:?}" \
-    --ks-key-alias "${KCM_KEY_ALIAS:-keriocertmanager}" \
-    --out "$OUT/$APK_NAME" "$OUT/aligned.apk"
-  rm -f "$OUT/release.keystore"
+  KS_PATH="$OUT/release.keystore"
+  KS_PASS="${KCM_KEYSTORE_PASS:?Нужен KCM_KEYSTORE_PASS}"
+  KS_ALIAS="${KCM_KEY_ALIAS:-keriocertmanager}"
+  [[ -f "$KS_DIR/keystore.properties" ]] && EXPECTED_SHA="$(sed -n 's/^sha256=//p' "$KS_DIR/keystore.properties")"
+elif [[ -f "$KS_DIR/kcm-release.p12" && -f "$KS_DIR/keystore.properties" ]]; then
+  echo "Подпись: постоянный ключ из $KS_DIR"
+  KS_PATH="$KS_DIR/kcm-release.p12"
+  KS_PASS="${KCM_KEYSTORE_PASS:-$(sed -n 's/^storePassword=//p' "$KS_DIR/keystore.properties")}"
+  KS_ALIAS="${KCM_KEY_ALIAS:-$(sed -n 's/^keyAlias=//p' "$KS_DIR/keystore.properties")}"
+  EXPECTED_SHA="$(sed -n 's/^sha256=//p' "$KS_DIR/keystore.properties")"
+  [[ -n "$KS_PASS" ]] || { echo "В keystore.properties нет storePassword" >&2; exit 1; }
 else
-  # Одноразовый ключ: подходит для тестов и ручной установки, но обновление
-  # поверх другой подписи Android не примет — нужно переустановить приложение.
-  echo "Подпись: одноразовый отладочный ключ (секреты не заданы)"
-  keytool -genkeypair -noprompt -keystore "$OUT/debug.keystore" \
-    -storepass android -keypass android -alias keriocertmanager \
+  # Временный ключ: подходит для ручной проверки, но обновление поверх другой
+  # подписи Android не примет — приложение придётся удалить и поставить заново.
+  echo "::warning::Подпись: одноразовый ключ — постоянный ключ не найден"
+  KS_PATH="$OUT/debug.keystore"
+  KS_PASS="android"
+  KS_ALIAS="keriocertmanager"
+  keytool -genkeypair -noprompt -keystore "$KS_PATH" \
+    -storepass "$KS_PASS" -keypass "$KS_PASS" -alias "$KS_ALIAS" \
     -dname 'CN=KerioCertManager Mobile,O=Zakharevich I.,C=BY' \
     -keyalg RSA -keysize 2048 -validity 3650
-  "$BT/apksigner" sign --ks "$OUT/debug.keystore" \
-    --ks-pass pass:android --key-pass pass:android \
-    --ks-key-alias keriocertmanager --out "$OUT/$APK_NAME" "$OUT/aligned.apk"
 fi
+
+run_step "$OUT/sign.log" "$BT/apksigner" sign \
+  --ks "$KS_PATH" \
+  --ks-pass "pass:$KS_PASS" \
+  --key-pass "pass:$KS_PASS" \
+  --ks-key-alias "$KS_ALIAS" \
+  --out "$OUT/$APK_NAME" "$OUT/aligned.apk" || exit 1
+
+[[ -f "$OUT/release.keystore" ]] && rm -f "$OUT/release.keystore"
 
 "$BT/apksigner" verify --verbose --print-certs "$OUT/$APK_NAME" > "$OUT/signature.txt"
 "$BT/aapt" dump badging "$OUT/$APK_NAME" | sed -n '1,6p'
+
+# --- 5. Проверка подписи ---------------------------------------------------
+# apksigner печатает отпечаток без двоеточий и в нижнем регистре,
+# а в keystore.properties он записан в привычном виде — сравниваем нормализованно.
+ACTUAL_SHA="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$OUT/signature.txt" | head -1 | tr -d ':' | tr 'A-Z' 'a-z')"
+EXPECTED_NORM="$(printf '%s' "$EXPECTED_SHA" | tr -d ':' | tr 'A-Z' 'a-z')"
+echo "Отпечаток подписи SHA-256: ${ACTUAL_SHA:-не определён}"
+if [[ -n "$EXPECTED_NORM" && -n "$ACTUAL_SHA" && "$ACTUAL_SHA" != "$EXPECTED_NORM" ]]; then
+  echo "::error::APK подписан не тем ключом. Ожидался $EXPECTED_SHA, получен $ACTUAL_SHA"
+  echo "Подпись не совпадает с ожидаемой — обновление не установится поверх." >&2
+  exit 1
+fi
+grep -q 'Verified using v2 scheme.*true\|Verified using v1 scheme.*true\|Verified using v3 scheme.*true' \
+  "$OUT/signature.txt" || echo "::warning::apksigner не подтвердил ни одну схему подписи"
+
 (cd "$OUT" && sha256sum "$APK_NAME" | tee "$APK_NAME.sha256")
 echo "APK: $OUT/$APK_NAME"
