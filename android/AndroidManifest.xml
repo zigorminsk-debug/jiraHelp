@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="by.csl.kcm"
-    android:versionCode="40903"
-    android:versionName="4.9.3">
+    android:versionCode="40904"
+    android:versionName="4.9.4">
 
     <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="34" />
 

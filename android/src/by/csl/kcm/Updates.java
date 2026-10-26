@@ -36,7 +36,10 @@ import java.net.URL;
  */
 final class Updates {
 
-    private static final String API = "https://api.github.com/repos/" + Versions.REPO + "/releases/latest";
+    // Именно список, а не /releases/latest: в репозитории есть служебные
+    // релизы kerio-latest и antispam-db-latest, и «последним» GitHub может
+    // назвать любой из них. Нам нужен только тег вида vX.Y.Z.
+    private static final String API = "https://api.github.com/repos/" + Versions.REPO + "/releases?per_page=30";
     private static final String PAGE = "https://github.com/" + Versions.REPO + "/releases/latest";
 
     private static final String PREFS = "kcm_updates";
@@ -159,28 +162,34 @@ final class Updates {
                 throw new IllegalStateException("GitHub ответил кодом " + code);
             }
             String body = readAll(conn.getInputStream());
-            JSONObject json = new JSONObject(body);
-            String version = json.optString("tag_name", "").trim();
-            if (version.startsWith("v") || version.startsWith("V")) {
-                version = version.substring(1);
-            }
-            if (version.isEmpty() || !isNewer(version, Versions.APP_VERSION)) {
-                return null;
-            }
-            JSONArray assets = json.optJSONArray("assets");
-            if (assets == null) {
-                return null;
-            }
-            for (int i = 0; i < assets.length(); i++) {
-                JSONObject asset = assets.optJSONObject(i);
-                if (asset == null) {
+            JSONArray releases = new JSONArray(body);
+            for (int i = 0; i < releases.length(); i++) {
+                JSONObject rel = releases.optJSONObject(i);
+                if (rel == null || rel.optBoolean("draft", false) || rel.optBoolean("prerelease", false)) {
                     continue;
                 }
-                String name = asset.optString("name", "");
-                String url = asset.optString("browser_download_url", "");
-                if (name.endsWith(".apk") && !url.isEmpty()) {
-                    return new Release(version, url, asset.optLong("size", 0L),
-                            json.optString("html_url", PAGE));
+                String version = normalize(rel.optString("tag_name", ""));
+                if (!isVersionTag(version)) {
+                    continue;                       // «kerio-latest», «antispam-db-latest»
+                }
+                if (!isNewer(version, Versions.APP_VERSION)) {
+                    continue;                       // уже установлено или старее
+                }
+                JSONArray assets = rel.optJSONArray("assets");
+                if (assets == null) {
+                    continue;
+                }
+                for (int j = 0; j < assets.length(); j++) {
+                    JSONObject asset = assets.optJSONObject(j);
+                    if (asset == null) {
+                        continue;
+                    }
+                    String name = asset.optString("name", "");
+                    String url = asset.optString("browser_download_url", "");
+                    if (name.endsWith(".apk") && !url.isEmpty()) {
+                        return new Release(version, url, asset.optLong("size", 0L),
+                                rel.optString("html_url", PAGE));
+                    }
                 }
             }
             return null;
@@ -189,6 +198,37 @@ final class Updates {
                 conn.disconnect();
             }
         }
+    }
+
+    /** «v4.9.4» → «4.9.4». */
+    private static String normalize(String tag) {
+        String v = tag == null ? "" : tag.trim();
+        if (v.startsWith("v") || v.startsWith("V")) {
+            v = v.substring(1);
+        }
+        return v;
+    }
+
+    /** Тег должен быть именно версией: 4.9.4, а не kerio-latest. */
+    static boolean isVersionTag(String version) {
+        if (version == null || version.isEmpty()) {
+            return false;
+        }
+        String[] parts = version.split("\\.");
+        if (parts.length != 3) {
+            return false;
+        }
+        for (String part : parts) {
+            if (part.isEmpty() || part.length() > 4) {
+                return false;
+            }
+            for (int i = 0; i < part.length(); i++) {
+                if (!Character.isDigit(part.charAt(i))) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     /** true, если версия remote новее локальной. */
