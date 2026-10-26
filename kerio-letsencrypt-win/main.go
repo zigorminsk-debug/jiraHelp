@@ -1374,7 +1374,7 @@ func buildRouter() http.Handler {
 	// v4.6.0: автообновление программы и управление Kerio на Linux по SSH.
 	registerV46Routes(mux)
 
-	// v4.10.0: «Пульт» для Android — второй, отдельный слушатель по Wi-Fi
+	// v4.9.2: «Пульт» для Android — второй, отдельный слушатель по Wi-Fi
 	// с кодом доступа. По умолчанию выключен.
 	registerLanRoutes(mux)
 

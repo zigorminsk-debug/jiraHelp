@@ -1072,7 +1072,7 @@
     .ub-actions .btn { width: 100%; justify-content: center; }
   }
 
-  /* ===== v4.10.0: строки адресов в карточке Android-пункта ===== */
+  /* ===== v4.9.2: строки адресов в карточке Android-пульта ===== */
   .kcm-copy-line { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .kcm-copy-line code { font-size:12.5px; padding:3px 7px; border-radius:6px;
     background:var(--bg-elevated); border:1px solid var(--border-color, rgba(255,255,255,0.08)); }
@@ -1829,7 +1829,7 @@
       </div>
 
       <div>
-        <!-- v4.10.0: «Пульт» для телефона. Программа по кнопке открывает
+        <!-- v4.9.2: «Пульт» для телефона. Программа по кнопке открывает
              второй слушатель в локальной сети с кодом доступа из 6 цифр,
              чтобы приложение KerioCertManager Mobile могло подключиться. -->
         <div class="card" id="androidRemoteCard">
@@ -3920,7 +3920,7 @@ add chain=forward protocol=tcp dst-port=25 in-interface-list=LAN action=drop log
     }
   });
 
-  // ── «📱 Android-пульт» (v4.10.0) ────────────────────────────────────────
+  // ── «📱 Android-пульт» (v4.9.2) ────────────────────────────────────────
   // Пульт — это второй слушатель на 0.0.0.0 с кодом доступа. Включается
   // только по кнопке и забывает код при выключении программы.
   let androidRemoteInfo = null;
