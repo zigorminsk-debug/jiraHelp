@@ -81,7 +81,7 @@ jobs:
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" \
             | grep -E "versionCode='[0-9]+'" || true
 
-          VERIFIED=$("$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose "$APK")
+          VERIFIED=$("$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK")
           echo "$VERIFIED" | grep -i 'verified'
           echo "$VERIFIED" | grep -qi 'Verified using v2 scheme.*true' \
             || echo "::warning::APK без подписи v2 — старые Android могут не принять обновление"

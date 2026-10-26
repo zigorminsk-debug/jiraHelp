@@ -139,10 +139,17 @@ run_step "$OUT/sign.log" "$BT/apksigner" sign \
 ACTUAL_SHA="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$OUT/signature.txt" | head -1 | tr -d ':' | tr 'A-Z' 'a-z')"
 EXPECTED_NORM="$(printf '%s' "$EXPECTED_SHA" | tr -d ':' | tr 'A-Z' 'a-z')"
 echo "Отпечаток подписи SHA-256: ${ACTUAL_SHA:-не определён}"
-if [[ -n "$EXPECTED_NORM" && -n "$ACTUAL_SHA" && "$ACTUAL_SHA" != "$EXPECTED_NORM" ]]; then
-  echo "::error::APK подписан не тем ключом. Ожидался $EXPECTED_SHA, получен $ACTUAL_SHA"
-  echo "Подпись не совпадает с ожидаемой — обновление не установится поверх." >&2
-  exit 1
+if [[ -n "$EXPECTED_NORM" ]]; then
+  if [[ -z "$ACTUAL_SHA" ]]; then
+    echo "::error::apksigner не сообщил отпечаток подписи — проверить ключ не удалось"
+    exit 1
+  fi
+  if [[ "$ACTUAL_SHA" != "$EXPECTED_NORM" ]]; then
+    echo "::error::APK подписан не тем ключом. Ожидался $EXPECTED_SHA, получен $ACTUAL_SHA"
+    echo "Подпись не совпадает с ожидаемой — обновление не установится поверх." >&2
+    exit 1
+  fi
+  echo "Подпись совпадает с постоянным ключом."
 fi
 grep -q 'Verified using v2 scheme.*true\|Verified using v1 scheme.*true\|Verified using v3 scheme.*true' \
   "$OUT/signature.txt" || echo "::warning::apksigner не подтвердил ни одну схему подписи"
