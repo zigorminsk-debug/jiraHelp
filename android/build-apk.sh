@@ -59,12 +59,27 @@ mkdir -p "$OUT/gen" "$OUT/classes" "$OUT/dex"
 
 # --- 3. Компиляция ---------------------------------------------------------
 find android/src "$OUT/gen" -name '*.java' -print | sort > "$OUT/sources.txt"
-javac -encoding UTF-8 -source 8 -target 8 -nowarn \
+# Ошибки компиляции печатаем ещё и аннотациями GitHub Actions: так их видно
+# в интерфейсе проверки даже когда полный лог недоступен.
+run_step() {
+  local log="$1"; shift
+  if "$@" > "$log" 2>&1; then
+    cat "$log"
+    return 0
+  fi
+  cat "$log"
+  grep -E 'error:|Error:|FAILED|Exception' "$log" | head -25 | while IFS= read -r line; do
+    echo "::error::${line}"
+  done
+  return 1
+}
+
+run_step "$OUT/javac.log" javac -encoding UTF-8 -source 8 -target 8 -nowarn \
   -bootclasspath "$JAR:$BT/core-lambda-stubs.jar" \
-  -d "$OUT/classes" @"$OUT/sources.txt"
+  -d "$OUT/classes" @"$OUT/sources.txt" || exit 1
 
 find "$OUT/classes" -name '*.class' -print | sort > "$OUT/classes.txt"
-"$BT/d8" --lib "$JAR" --min-api 21 --output "$OUT/dex" @"$OUT/classes.txt"
+run_step "$OUT/d8.log" "$BT/d8" --lib "$JAR" --min-api 21 --output "$OUT/dex" @"$OUT/classes.txt" || exit 1
 
 cp "$OUT/resources.apk" "$OUT/unsigned.apk"
 (cd "$OUT/dex" && "$BT/aapt" add "$OUT/unsigned.apk" classes.dex)
