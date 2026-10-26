@@ -77,6 +77,12 @@ var (
 // androidApkDir — куда складывать APK. «Загрузки» понятнее для человека,
 // а если их нет — папка программы.
 func androidApkDir() string {
+	// Переопределение нужно тестам и тем, кто ставит программу на сервер без
+	// «Загрузок» у пользователя.
+	if custom := strings.TrimSpace(os.Getenv("KCM_ANDROID_APK_DIR")); custom != "" {
+		_ = os.MkdirAll(custom, 0o755)
+		return custom
+	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		downloads := filepath.Join(home, "Downloads")
 		if st, serr := os.Stat(downloads); serr == nil && st.IsDir() {

@@ -6,6 +6,10 @@ package main
 //   • проверка спам-баз на телефоне (контрольная точка + несколько каналов DNS).
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,5 +195,69 @@ func TestAndroidUpdateButtonAlwaysRecovers(t *testing.T) {
 	}
 	if !strings.Contains(src, "🔄 Проверить обновления") {
 		t.Error("MainActivity.java: нет понятной подписи кнопки проверки обновлений")
+	}
+}
+
+// TestDownloadAndroidApk — полный путь кнопки без сети: фальшивый GitHub
+// отдаёт релиз, фальшивый сервер — APK. Проверяем, что файл сохранился,
+// SHA-256 посчитан, а «не-APK» (без PK) отвергается.
+func TestDownloadAndroidApk(t *testing.T) {
+	payload := append([]byte("PK\x03\x04"), make([]byte, 2048)...)
+	assetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(payload)
+	}))
+	defer assetSrv.Close()
+
+	releaseSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := fmt.Sprintf(`[{"tag_name":"v9.9.9","assets":[{"name":"KerioCertManager-Mobile-9.9.9.apk","size":%d,"browser_download_url":%q}]}]`,
+			len(payload), assetSrv.URL+"/apk")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer releaseSrv.Close()
+
+	t.Setenv("KCM_UPDATE_API", releaseSrv.URL)
+	dir := t.TempDir()
+	t.Setenv("KCM_ANDROID_APK_DIR", dir)
+
+	state, err := DownloadAndroidApk(context.Background())
+	if err != nil {
+		t.Fatalf("скачивание не удалось: %v", err)
+	}
+	if state.MobileVersion != "9.9.9" {
+		t.Errorf("версия %q, ожидалась 9.9.9", state.MobileVersion)
+	}
+	if state.FileSize != int64(len(payload)) {
+		t.Errorf("размер %d, ожидался %d", state.FileSize, len(payload))
+	}
+	if len(state.FileSHA256) != 64 {
+		t.Errorf("SHA-256 не посчитан: %q", state.FileSHA256)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "KerioCertManager-Mobile-9.9.9.apk")); statErr != nil {
+		t.Errorf("файл не сохранён в папку: %v", statErr)
+	}
+}
+
+func TestDownloadAndroidApkRejectsNonApk(t *testing.T) {
+	assetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("<html>это не APK</html>"))
+	}))
+	defer assetSrv.Close()
+
+	releaseSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := fmt.Sprintf(`[{"tag_name":"v9.9.9","assets":[{"name":"KerioCertManager-Mobile-9.9.9.apk","size":26,"browser_download_url":%q}]}]`,
+			assetSrv.URL+"/apk")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer releaseSrv.Close()
+
+	t.Setenv("KCM_UPDATE_API", releaseSrv.URL)
+	dir := t.TempDir()
+	t.Setenv("KCM_ANDROID_APK_DIR", dir)
+
+	if _, err := DownloadAndroidApk(context.Background()); err == nil {
+		t.Fatal("файл без признака ZIP принят как APK")
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "KerioCertManager-Mobile-9.9.9.apk")); statErr == nil {
+		t.Error("испорченный файл остался на диске")
 	}
 }
