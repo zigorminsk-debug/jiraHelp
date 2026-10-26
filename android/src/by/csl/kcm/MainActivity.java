@@ -46,6 +46,10 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // Системному резолверу нужен контекст: через него проверяются
+        // спам-базы с точным кодом ответа (см. DnsSystem).
+        Checks.init(getApplicationContext());
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Ui.BG);

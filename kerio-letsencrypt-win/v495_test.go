@@ -165,6 +165,9 @@ func TestAndroidRblUsesControlPoint(t *testing.T) {
 		"probeUdp(",
 		"cloudflare-dns.com",
 		"dns.google",
+		"DnsSystem.query(",
+		"dohUsable(",
+		"resetDohBreaker()",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("Checks.java: нет %q", want)
@@ -259,5 +262,39 @@ func TestDownloadAndroidApkRejectsNonApk(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, "KerioCertManager-Mobile-9.9.9.apk")); statErr == nil {
 		t.Error("испорченный файл остался на диске")
+	}
+}
+
+// TestAndroidRblUsesSystemResolver — главный канал проверки спам-баз на
+// телефоне: системный резолвер Android. Именно его отсутствие в 4.9.5 давало
+// «нет ответа» на всех базах, кроме первой (DNS-over-HTTPS ограничивал частоту).
+func TestAndroidRblUsesSystemResolver(t *testing.T) {
+	dns := readRepoFile(t, "../android/src/by/csl/kcm/DnsSystem.java")
+	for _, want := range []string{
+		"android.net.DnsResolver",
+		"rawQuery(",
+		"RCODE_NXDOMAIN",
+		"Build.VERSION_CODES.Q",
+	} {
+		if !strings.Contains(dns, want) {
+			t.Errorf("DnsSystem.java: нет %q", want)
+		}
+	}
+	// Обратный вызов обязан соответствовать API: onAnswer(answer, rcode).
+	if !strings.Contains(dns, "public void onAnswer(byte[] answer, int rcode)") {
+		t.Error("DnsSystem.java: подпись onAnswer не совпадает с DnsResolver.Callback")
+	}
+	if !strings.Contains(dns, "public void onError(DnsResolver.DnsException error)") {
+		t.Error("DnsSystem.java: подпись onError не совпадает с DnsResolver.Callback")
+	}
+
+	// Контекст приложения передаётся из Activity — иначе резолвер недоступен.
+	main := readRepoFile(t, "../android/src/by/csl/kcm/MainActivity.java")
+	if !strings.Contains(main, "Checks.init(getApplicationContext())") {
+		t.Error("MainActivity.java: Checks.init не вызывается")
+	}
+	checks := readRepoFile(t, "../android/src/by/csl/kcm/Checks.java")
+	if !strings.Contains(checks, "static void init(Context context)") {
+		t.Error("Checks.java: нет init(Context)")
 	}
 }

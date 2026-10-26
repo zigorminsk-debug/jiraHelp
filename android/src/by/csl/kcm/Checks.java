@@ -1,5 +1,7 @@
 package by.csl.kcm;
 
+import android.content.Context;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -67,10 +69,25 @@ final class Checks {
         }
     }
 
-    private static final int CONNECT_TIMEOUT_MS = 5000;
+    /**
+     * Контекст приложения — нужен только системному резолверу Android
+     * (DnsSystem). Ставится один раз из MainActivity, дальше проверки
+     * работают в фоновых потоках без Activity.
+     */
+    private static volatile Context appContext;
 
     private Checks() {
     }
+
+    static void init(Context context) {
+        if (context == null) {
+            return;
+        }
+        Context app = context.getApplicationContext();
+        appContext = app != null ? app : context;
+    }
+
+    private static final int CONNECT_TIMEOUT_MS = 5000;
 
     // ------------------------------------------------------------------
     // Общий прогон
@@ -472,7 +489,10 @@ final class Checks {
             "https://dns.google/resolve",
     };
 
-    private static final String[] UDP_RESOLVERS = {"1.1.1.1", "8.8.8.8", "9.9.9.9"};
+    private static final String[] UDP_RESOLVERS = {"1.1.1.1", "8.8.8.8"};
+
+    private static final int DOH_CONNECT_TIMEOUT_MS = 4000;
+    private static final int DOH_READ_TIMEOUT_MS = 5000;
 
     private static final int ST_LISTED = 1;
     private static final int ST_CLEAN = 0;
@@ -493,6 +513,7 @@ final class Checks {
     }
 
     static Section checkRbl(String domain, String ip) {
+        resetDohBreaker();
         Section s = new Section("Спам-базы (RBL)");
 
         String reversed = reverseIp(ip);
@@ -502,7 +523,7 @@ final class Checks {
             // Базы опрашиваются параллельно: последовательно это 8 баз × 2
             // запроса, и на медленной сети проверка занимала бы полминуты.
             java.util.concurrent.ExecutorService pool =
-                    java.util.concurrent.Executors.newFixedThreadPool(Math.min(6, IP_ZONES.length));
+                    java.util.concurrent.Executors.newFixedThreadPool(Math.min(4, IP_ZONES.length));
             java.util.List<java.util.concurrent.Future<RblAnswer>> futures =
                     new ArrayList<java.util.concurrent.Future<RblAnswer>>();
             try {
@@ -528,7 +549,7 @@ final class Checks {
                                 + a.address + ") — подайте заявку на удаление: " + zone.site);
                     } else if (a.state == ST_NO_NETWORK) {
                         noNetwork++;
-                        s.add("warn", zone.host, "нет ответа (сеть не пропускает DNS-запросы)");
+                        s.add("warn", zone.host, "проверить не удалось: база не ответила ни по одному каналу");
                     } else if (a.state == ST_NOT_CHECKED) {
                         notChecked++;
                         s.add("info", zone.host, blockedHint(zone));
@@ -542,7 +563,7 @@ final class Checks {
                             + IP_ZONES.length + " баз");
                 } else if (noNetwork == IP_ZONES.length) {
                     s.add("warn", "Итог по IP", "ни одна база не ответила — похоже, сеть блокирует "
-                            + "DNS-запросы. Попробуйте через Wi-Fi");
+                            + "DNS-запросы. Попробуйте через Wi-Fi или другую сеть");
                 } else if (notChecked > 0) {
                     s.add("warn", "Итог по IP", "в " + notChecked + " базах проверить не удалось, "
                             + "в остальных " + ip + " не найден");
@@ -560,7 +581,7 @@ final class Checks {
                 s.add("fail", "Домен в базе " + zone.host,
                         domain + " числится в списке доменов-спамеров: " + zone.site);
             } else if (a.state == ST_NO_NETWORK) {
-                s.add("warn", zone.host, "нет ответа (сеть не пропускает DNS-запросы)");
+                s.add("warn", zone.host, "проверить не удалось: база не ответила ни по одному каналу");
             } else if (a.state == ST_NOT_CHECKED) {
                 s.add("info", zone.host, blockedHint(zone));
             } else {
@@ -588,7 +609,7 @@ final class Checks {
 
     private static RblAnswer await(java.util.concurrent.Future<RblAnswer> f) {
         try {
-            return f.get(20, java.util.concurrent.TimeUnit.SECONDS);
+            return f.get(40, java.util.concurrent.TimeUnit.SECONDS);
         } catch (Exception e) {
             return new RblAnswer(ST_NO_NETWORK, null, "");
         }
@@ -613,7 +634,7 @@ final class Checks {
             return new RblAnswer(ST_LISTED, value.address, value.channel);
         }
         if (alive == null) {
-            return new RblAnswer(ST_NO_NETWORK, null, "");
+            return new RblAnswer(ST_NO_NETWORK, null, value.channel);
         }
         if (alive) {
             // Зона отвечает, контрольная точка в ней числится, а наш адрес —
@@ -623,18 +644,20 @@ final class Checks {
         return new RblAnswer(ST_NOT_CHECKED, null, value.channel);
     }
 
-    /** Жива ли база: null — проверить не удалось, true/false — ответ контрольной точки. */
+    /**
+     * Жива ли база: null — проверить не удалось, true/false — что ответила
+     * контрольная точка.
+     *
+     * Важно: NXDOMAIN на контрольную точку означает, что зона не отвечает нам
+     * вообще (так ведёт себя Spamhaus с публичными резолверами). Это не «спам»
+     * и не «чисто» — это «проверьте на сайте».
+     */
     private static Boolean zoneAlive(String zone) {
         Probe control = resolve(CONTROL_IP + "." + zone);
-        if (control.listed) {
-            return Boolean.TRUE;
+        if (!control.answered) {
+            return null;
         }
-        if (control.answered) {
-            // Ответ пришёл, но контрольная запись не числится: зона либо
-            // закрылась, либо не пускает нас. Для пользователя это одно и то же.
-            return Boolean.FALSE;
-        }
-        return null;
+        return Boolean.valueOf(control.listed);
     }
 
     // ------------------------------------------------------------------
@@ -672,27 +695,69 @@ final class Checks {
     }
 
     /**
+     * Предохранитель для DNS-over-HTTPS.
+     *
+     * Если он не работает (оператор режет или сервис ограничил частоту),
+     * не нужно повторять попытку для каждой из восьми баз: это десятки
+     * лишних запросов и секунды ожидания. После двух подряд отказов
+     * канал отключается до конца проверки.
+     */
+    private static final java.util.concurrent.atomic.AtomicInteger dohFailures =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    private static void resetDohBreaker() {
+        dohFailures.set(0);
+    }
+
+    private static boolean dohUsable() {
+        return dohFailures.get() < 2;
+    }
+
+    /**
      * Разрешает имя всеми доступными способами по очереди.
      *
-     * Системный резолвер — первым: он самый быстрый и работает через DNS
-     * оператора даже там, где внешний DNS заблокирован. Но он не различает
-     * NXDOMAIN и сбой, поэтому при отсутствии ответа уточняем через DoH.
+     * Сначала — системный резолвер Android (API 29+): он единственный отдаёт
+     * точный код ответа и при этом ходит через DNS оператора, то есть работает
+     * в мобильной сети. DNS-over-HTTPS и UDP остаются запасными каналами:
+     * на телефоне они часто закрыты, а раньше именно они были единственными,
+     * из-за чего все базы показывали «нет ответа».
      */
     static Probe resolve(String name) {
-        Probe sys = probeSystem(name);
-        if (sys.answered) {
-            return sys;
-        }
-        for (String base : DOH_BASES) {
-            Probe p = probeDoh(name, base);
-            if (p.answered) {
-                return p;
+        if (DnsSystem.supported()) {
+            DnsSystem.Reply r = DnsSystem.query(appContext, name);
+            if (r.answered) {
+                if (r.nxdomain) {
+                    return probeClean("DNS телефона");
+                }
+                DnsReply parsed = parseAnswer(r.raw);
+                if (parsed != null && parsed.address != null) {
+                    return probeListed(parsed.address, "DNS телефона");
+                }
+                // Ответ без A-записи — имени сопоставлен только другой тип.
+                return probeClean("DNS телефона");
             }
+        }
+        if (dohUsable()) {
+            for (String base : DOH_BASES) {
+                Probe p = probeDoh(name, base);
+                if (p.answered) {
+                    dohFailures.set(0);
+                    return p;
+                }
+            }
+            dohFailures.incrementAndGet();
         }
         for (String server : UDP_RESOLVERS) {
             Probe p = probeUdp(name, server);
             if (p.answered) {
                 return p;
+            }
+        }
+        if (!DnsSystem.supported()) {
+            // Android 5–9: лучшего источника нет, но NXDOMAIN он не различает.
+            Probe sys = probeSystem(name);
+            if (sys.answered) {
+                return sys;
             }
         }
         return probeUnknown("нет ответа");
@@ -771,8 +836,8 @@ final class Checks {
         try {
             String url = base + "?name=" + URLEncoder.encode(name, "UTF-8") + "&type=A";
             conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setConnectTimeout(6000);
-            conn.setReadTimeout(6000);
+            conn.setConnectTimeout(DOH_CONNECT_TIMEOUT_MS);
+            conn.setReadTimeout(DOH_READ_TIMEOUT_MS);
             conn.setRequestProperty("Accept", "application/dns-json");
             if (conn.getResponseCode() != 200) {
                 return null;
@@ -788,7 +853,7 @@ final class Checks {
     }
 
     /** Минимальный ответ DNS: код и первый A-адрес. */
-    private static final class DnsReply {
+    static final class DnsReply {
         int rcode;
         String address;
     }
@@ -854,13 +919,23 @@ final class Checks {
         return off;
     }
 
+    /** Разбор DNS-ответа, пришедшего от системного резолвера (ID не сверяем). */
+    static DnsReply parseAnswer(byte[] b) {
+        if (b == null || b.length < 12) {
+            return null;
+        }
+        return parseReply(b, b.length, -1);
+    }
+
     private static DnsReply parseReply(byte[] b, int len, int id) {
         if (len < 12) {
             return null;
         }
-        int rid = ((b[0] & 0xFF) << 8) | (b[1] & 0xFF);
-        if (rid != id) {
-            return null;
+        if (id >= 0) {
+            int rid = ((b[0] & 0xFF) << 8) | (b[1] & 0xFF);
+            if (rid != id) {
+                return null;
+            }
         }
         DnsReply reply = new DnsReply();
         reply.rcode = b[3] & 0x0F;
